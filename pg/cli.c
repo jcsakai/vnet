@@ -229,11 +229,14 @@ new_stream (vlib_main_t * vm,
     }
 
   {
-    vlib_node_t * n;
+    pg_node_t * n;
 
-    n = vlib_get_node (vm, s.node_index);
+    if (s.node_index < vec_len (pg->nodes))
+      n = pg->nodes + s.node_index;
+    else
+      n = 0;
 
-    if (n->unformat_pg_edit
+    if (n && n->unformat_pg_edit
 	&& unformat_user (&sub_input, n->unformat_pg_edit, &s))
       ;
 

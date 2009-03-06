@@ -187,6 +187,12 @@ typedef struct {
   u32 hw_if_index, sw_if_index;
 } pg_interface_t;
 
+/* Per VLIB node data. */
+typedef struct {
+  /* Parser function indexed by node index. */
+  unformat_function_t * unformat_pg_edit;
+} pg_node_t;
+
 typedef struct pg_main_t {
   /* Back pointer to main structure. */
   vlib_main_t * vlib_main;
@@ -202,6 +208,9 @@ typedef struct pg_main_t {
 
   /* Vector of interfaces. */
   pg_interface_t * interfaces;
+
+  /* Per VLIB node information. */
+  pg_node_t * nodes;
 
   u32 * free_interfaces;
 } pg_main_t;
@@ -224,5 +233,13 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int is_enable);
 
 /* Find/create free packet-generator interface index. */
 u32 pg_interface_find_free (pg_main_t * pg);
+
+static always_inline pg_node_t *
+pg_get_node (uword node_index)
+{
+  pg_main_t * pg = &pg_main;
+  vec_validate (pg->nodes, node_index);
+  return pg->nodes + node_index;
+}
 
 #endif /* included_vlib_pg_h */
