@@ -140,7 +140,7 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
     if (ether_type_edit->type == PG_EDIT_FIXED)
       {
 	u16 t = *(u16 *) ether_type_edit->values[PG_EDIT_LO];
-	ti = ethernet_get_type_info (em, clib_net_to_host_16 (t));
+	ti = ethernet_get_type_info (em, clib_net_to_host_u16 (t));
 	if (ti)
 	  u = ti->unformat_pg_edit;
       }

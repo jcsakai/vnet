@@ -24,6 +24,7 @@
  */
 
 #include <vlib/vlib.h>
+#include <pg/pg.h>
 #include <ethernet/ethernet.h>
 
 static clib_error_t *
@@ -63,10 +64,11 @@ uword unformat_ethernet_interface (unformat_input_t * input, va_list * args)
 static void ethernet_setup_node (vlib_main_t * vm, u32 node_index)
 {
   vlib_node_t * n = vlib_get_node (vm, node_index);
+  pg_node_t * pn = pg_get_node (node_index);
 
   n->format_buffer = format_ethernet_header_with_length;
   n->unformat_buffer = unformat_ethernet_header;
-  n->unformat_pg_edit = unformat_pg_ethernet_header;
+  pn->unformat_pg_edit = unformat_pg_ethernet_header;
 }
 
 static void ethernet_interface_update_media (ethernet_interface_t * ei,
