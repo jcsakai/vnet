@@ -24,6 +24,7 @@
  */
 
 #include <vlib/vlib.h>
+#include <pg/pg.h>
 #include <ethernet/ethernet.h>
 #include <clib/sparse_vec.h>
 
@@ -44,7 +45,7 @@ typedef struct {
 
 static u8 * format_ethernet_input_trace (u8 * s, va_list * va)
 {
-  UNUSED (vlib_main_t * fn) = va_arg (*va, vlib_main_t *);
+  UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
   UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   ethernet_input_trace_t * t = va_arg (*va, ethernet_input_trace_t *);
 
@@ -61,9 +62,9 @@ typedef struct {
   u32 * sparse_index_by_next_index;
 } ethernet_input_runtime_t;
 
-/* Interface output function. */
-uword
-ethernet_input (vlib_main_t * fn,
+#if 0
+static uword
+ethernet_input (vlib_main_t * vm,
 		vlib_node_runtime_t * node,
 		vlib_frame_t * frame,
 		uword n_packets)
@@ -77,8 +78,8 @@ ethernet_input (vlib_main_t * fn,
   unknown_type_error.code = ETHERNET_ERROR_UNKNOWN_TYPE;
 
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    vlib_trace_packet_data (fn, node, frame, n_packets,
-			  sizeof (ethernet_input_trace_t));
+    vlib_trace_packet_data (vm, node, frame, n_packets,
+			    sizeof (ethernet_input_trace_t));
 
   from = frame->packets;
   n_left_from = n_packets;
@@ -89,8 +90,8 @@ ethernet_input (vlib_main_t * fn,
     {
       u32 n_left_to_next;
 
-      vlib_get_next_frame (fn, node, next_index,
-			 &n_left_to_next, &to_next);
+      vlib_get_next_frame (vm, node, next_index,
+			   &n_left_to_next, &to_next);
 
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
@@ -103,8 +104,8 @@ ethernet_input (vlib_main_t * fn,
 	  {
 	    vlib_packet_t * p2, * p3;
 
-	    p2 = vlib_get_packet (fn, from[2]);
-	    p3 = vlib_get_packet (fn, from[3]);
+	    p2 = vlib_get_packet (vm, from[2]);
+	    p3 = vlib_get_packet (vm, from[3]);
 
 	    vlib_prefetch_buffer_header (p2, LOAD);
 	    vlib_prefetch_buffer_header (p3, LOAD);
@@ -122,8 +123,8 @@ ethernet_input (vlib_main_t * fn,
 	  n_left_to_next -= 2;
 	  n_left_from -= 2;
 
-	  p0 = vlib_get_packet (fn, pi0);
-	  p1 = vlib_get_packet (fn, pi1);
+	  p0 = vlib_get_packet (vm, pi0);
+	  p1 = vlib_get_packet (vm, pi1);
 
 	  e0 = (void *) (p0->packet_data + p0->current_header);
 	  e1 = (void *) (p1->packet_data + p1->current_header);
@@ -149,7 +150,7 @@ ethernet_input (vlib_main_t * fn,
 		{
 		case 0:
 		  ASSERT (i0 + i1 + i_next == 0);
-		  e = vlib_get_next_frame_meta_data (fn, node, next_index,
+		  e = vlib_get_next_frame_meta_data (vm, node, next_index,
 						   n_left_to_next + 2,
 						   sizeof (e[0]));
 		  e[0] = e[1] = unknown_type_error;
@@ -160,7 +161,7 @@ ethernet_input (vlib_main_t * fn,
 		  to_next[-2] = pi1;
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  e = vlib_set_next_frame_meta (fn, node,
+		  e = vlib_set_next_frame_meta (vm, node,
 					      vec_elt (rt->next_by_type, i0),
 					      pi0, sizeof (e[0]));
 		  if (i0 == 0)
@@ -171,7 +172,7 @@ ethernet_input (vlib_main_t * fn,
 		  /* A A B */
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  e = vlib_set_next_frame_meta (fn, node,
+		  e = vlib_set_next_frame_meta (vm, node,
 					      vec_elt (rt->next_by_type, i1),
 					      pi1, sizeof (e[0]));
 		  if (i1 == 0)
@@ -181,13 +182,13 @@ ethernet_input (vlib_main_t * fn,
 		case 3:
 		  to_next -= 2;
 		  n_left_to_next += 2;
-		  e = vlib_set_next_frame_meta (fn, node,
+		  e = vlib_set_next_frame_meta (vm, node,
 					      vec_elt (rt->next_by_type, i0),
 					      pi0, sizeof (e[0]));
 		  if (i0 == 0)
 		    e[0] = unknown_type_error;
 
-		  e = vlib_set_next_frame_meta (fn, node,
+		  e = vlib_set_next_frame_meta (vm, node,
 					      vec_elt (rt->next_by_type, i1),
 					      pi1, sizeof (e[0]));
 		  if (i1 == 0)
@@ -195,11 +196,11 @@ ethernet_input (vlib_main_t * fn,
 
 		  if (i0 == i1)
 		    {
-		      vlib_put_next_frame (fn, node, next_index,
+		      vlib_put_next_frame (vm, node, next_index,
 					 n_left_to_next);
 		      i_next = i1;
 		      next_index = vec_elt (rt->next_by_type, i_next);
-		      vlib_get_next_frame (fn, node, next_index,
+		      vlib_get_next_frame (vm, node, next_index,
 					 &n_left_to_next, &to_next);
 		    }
 		}
@@ -220,7 +221,7 @@ ethernet_input (vlib_main_t * fn,
 	  n_left_from -= 1;
 	  n_left_to_next -= 1;
 
-	  p0 = vlib_get_packet (fn, pi0);
+	  p0 = vlib_get_packet (vm, pi0);
 
 	  e0 = (void *) (p0->packet_data + p0->current_header);
 
@@ -235,10 +236,10 @@ ethernet_input (vlib_main_t * fn,
 	      if (i0 != i_next)
 		{
 		  n_left_to_next += 1;
-		  vlib_put_next_frame (fn, node, next_index, n_left_to_next);
+		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
 		  i_next = i0;
 		  next_index = vec_elt (rt->next_by_type, i_next);
-		  vlib_get_next_frame (fn, node, next_index,
+		  vlib_get_next_frame (vm, node, next_index,
 				     &n_left_to_next, &to_next);
 
 		  to_next[0] = pi0;
@@ -250,7 +251,7 @@ ethernet_input (vlib_main_t * fn,
 		{
 		  vlib_error_meta_data_t * e;
 
-		  e = vlib_get_next_frame_meta_data (fn, node, next_index,
+		  e = vlib_get_next_frame_meta_data (vm, node, next_index,
 						   n_left_to_next + 1,
 						   sizeof (e[0]));
 		  e[0] = unknown_type_error;
@@ -258,23 +259,24 @@ ethernet_input (vlib_main_t * fn,
 	    }
 	}
 
-      vlib_put_next_frame (fn, node, next_index, n_left_to_next);
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
   return n_packets;
 }
+#endif
 
 static clib_error_t *
-ethernet_sw_interface_up_down (vlib_main_t * fn,
+ethernet_sw_interface_up_down (vlib_main_t * vm,
 			       u32 sw_if_index,
 			       u32 flags)
 {
-  ethernet_main_t * em = ethernet_get_main (fn);
+  ethernet_main_t * em = ethernet_get_main (vm);
   vlib_sw_interface_t * si;
   ethernet_vlan_mapping_t * m;
   clib_error_t * error = 0;
 
-  si = vlib_get_sw_interface (fn, sw_if_index);
+  si = vlib_get_sw_interface (vm, sw_if_index);
   if (si->type != VLIB_SW_INTERFACE_TYPE_SUB)
     goto done;
 
@@ -294,12 +296,12 @@ ethernet_sw_interface_up_down (vlib_main_t * fn,
 
 static char * ethernet_error_strings[] = {
 #define ethernet_error(n,c,s) s,
-#include "ethernet_error.def"
+#include "error.def"
 #undef ethernet_error
 };
 
 VLIB_REGISTER_NODE (ethernet_input_node) = {
-  .function = ethernet_input,
+  .function = /* ethernet_input */ 0,
   .name = "ethernet-input",
 
   .runtime_data_bytes = sizeof (ethernet_input_runtime_t),
@@ -314,19 +316,21 @@ VLIB_REGISTER_NODE (ethernet_input_node) = {
 #undef _
   },
 
-  .format_header = format_vlib_ethernet_header,
+  .format_buffer = format_ethernet_header_with_length,
   .format_trace = format_ethernet_input_trace,
-  .unformat_header = unformat_ethernet_header,
+  .unformat_buffer = unformat_ethernet_header,
+#if 0
   .unformat_pg_edit = unformat_pg_ethernet_header,
+#endif
 
   .sw_interface_up_down_function = ethernet_sw_interface_up_down,
 };
 
-static clib_error_t * ethernet_input_init (vlib_main_t * fn)
+static clib_error_t * ethernet_input_init (vlib_main_t * vm)
 {
   ethernet_input_runtime_t * rt;
 
-  rt = vlib_node_get_runtime_data (fn, ethernet_input_node.index);
+  rt = vlib_node_get_runtime_data (vm, ethernet_input_node.index);
 
   rt->next_by_type = sparse_vec_new
     (/* elt bytes */ sizeof (rt->next_by_type[0]),
@@ -345,25 +349,26 @@ static clib_error_t * ethernet_input_init (vlib_main_t * fn)
 VLIB_INIT_FUNCTION (ethernet_input_init);
 
 void
-ethernet_register_input_type (vlib_main_t * fn,
+ethernet_register_input_type (vlib_main_t * vm,
 			      ethernet_type_t type,
 			      u32 node_index)
 {
-  ethernet_main_t * em = ethernet_get_main (fn);
+  ethernet_main_t * em = ethernet_get_main (vm);
   ethernet_type_info_t * ti = ethernet_get_type_info (em, type);
   ethernet_input_runtime_t * rt;
   vlib_node_t * node;
+  pg_node_t * pg_node;
   u16 * n;
   u32 i;
 
   ti->node_index = node_index;
-  ti->next_index = vlib_node_add_next (fn, 
+  ti->next_index = vlib_node_add_next (vm, 
 				     ethernet_input_node.index,
 				     node_index);
 
   /* Setup ethernet type -> next index sparse vector mapping. */
-  rt = vlib_node_get_runtime_data (fn, ethernet_input_node.index);
-  n = sparse_vec_validate (rt->next_by_type, clib_host_to_net_16 (type));
+  rt = vlib_node_get_runtime_data (vm, ethernet_input_node.index);
+  n = sparse_vec_validate (rt->next_by_type, clib_host_to_net_u16 (type));
   n[0] = ti->next_index;
 
   /* Rebuild next index -> sparse index inverse mapping when sparse vector
@@ -372,9 +377,9 @@ ethernet_register_input_type (vlib_main_t * fn,
   for (i = 1; i < vec_len (rt->next_by_type); i++)
     rt->sparse_index_by_next_index[rt->next_by_type[i]] = i;
 
-  node = vlib_get_node (fn, node_index);
+  node = vlib_get_node (vm, node_index);
+  pg_node = pg_get_node (node_index);
 
-  ti->format_header = node->format_header;
-
-  ti->unformat_pg_edit = node->unformat_pg_edit;
+  ti->format_header = node->format_buffer;
+  ti->unformat_pg_edit = pg_node->unformat_pg_edit;
 }
