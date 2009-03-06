@@ -61,7 +61,10 @@ ARFLAGS = cru
 libvnet_a_AR = $(AR) $(ARFLAGS)
 libvnet_a_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
-am_libvnet_a_OBJECTS = pg/cli.$(OBJEXT) pg/edit.$(OBJEXT) \
+am_libvnet_a_OBJECTS = ethernet/cli.$(OBJEXT) \
+	ethernet/format.$(OBJEXT) ethernet/init.$(OBJEXT) \
+	ethernet/interface.$(OBJEXT) ethernet/pg.$(OBJEXT) \
+	ethernet/phy.$(OBJEXT) pg/cli.$(OBJEXT) pg/edit.$(OBJEXT) \
 	pg/init.$(OBJEXT) pg/input.$(OBJEXT) pg/output.$(OBJEXT) \
 	pg/stream.$(OBJEXT)
 libvnet_a_OBJECTS = $(am_libvnet_a_OBJECTS)
@@ -215,10 +218,60 @@ AUTOMAKE_OPTIONS = foreign subdir-objects
 AM_CFLAGS = -Wall
 
 ########################################
+# Layer 2 protocols go here
+########################################
+
+########################################
+# Layer 2 protocol: Ethernet
+########################################
+
+# ethernet/node.c				
+
+########################################
+# Layer 3 protocols go here
+########################################
+
+########################################
+# Layer 3 protocol: IP v4 (& v6)
+########################################
+# libvnet_a_SOURCES +=				\
+#  ip/ip_checksum.c				\
+#  ip/ip_format.c					\
+#  ip/ip_init.c					\
+#  ip/ip_lookup.h					\
+#  ip/ip_lookup.c					\
+#  ip/ip_format.h					\
+#  ip/ip_main.h					\
+#  ip/ip_packet.h					\
+#  ip/protocols.def				\
+#  ip/ports.def					\
+#  ip/ip4.h					\
+#  ip/ip4_error.def				\
+#  ip/ip4_cli.c					\
+#  ip/ip4_format.c				\
+#  ip/ip4_forward.c				\
+#  ip/ip4_input.c					\
+#  ip/ip4_packet.h				\
+#  ip/ip4_pg.c					\
+#  ip/tcp_format.c				\
+#  ip/tcp_init.c					\
+#  ip/tcp_pg.c					\
+#  ip/tcp_udp_lookup.c				\
+#  ip/tcp_packet.h				\
+#  ip/udp_format.c				\
+#  ip/udp_init.c					\
+#  ip/udp_packet.h				\
+#  ip/udp_pg.c
+
+########################################
 # Packet generator
 ########################################
-libvnet_a_SOURCES = pg/pg.h pg/cli.c pg/edit.c pg/edit.h pg/init.c \
-	pg/input.c pg/output.c pg/stream.c
+libvnet_a_SOURCES = ethernet/cli.c ethernet/ethernet.h \
+	ethernet/error.def ethernet/format.c ethernet/init.c \
+	ethernet/interface.c ethernet/pg.c ethernet/phy.c \
+	ethernet/phy.h ethernet/phy_reg.h ethernet/types.def pg/pg.h \
+	pg/cli.c pg/edit.c pg/edit.h pg/init.c pg/input.c pg/output.c \
+	pg/stream.c
 nobase_include_HEADERS = pg/pg.h pg/edit.h
 lib_LIBRARIES = libvnet.a
 vnet_unix_SOURCES = example/main_stub.c
@@ -290,6 +343,24 @@ uninstall-libLIBRARIES:
 
 clean-libLIBRARIES:
 	-test -z "$(lib_LIBRARIES)" || rm -f $(lib_LIBRARIES)
+ethernet/$(am__dirstamp):
+	@$(MKDIR_P) ethernet
+	@: > ethernet/$(am__dirstamp)
+ethernet/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) ethernet/$(DEPDIR)
+	@: > ethernet/$(DEPDIR)/$(am__dirstamp)
+ethernet/cli.$(OBJEXT): ethernet/$(am__dirstamp) \
+	ethernet/$(DEPDIR)/$(am__dirstamp)
+ethernet/format.$(OBJEXT): ethernet/$(am__dirstamp) \
+	ethernet/$(DEPDIR)/$(am__dirstamp)
+ethernet/init.$(OBJEXT): ethernet/$(am__dirstamp) \
+	ethernet/$(DEPDIR)/$(am__dirstamp)
+ethernet/interface.$(OBJEXT): ethernet/$(am__dirstamp) \
+	ethernet/$(DEPDIR)/$(am__dirstamp)
+ethernet/pg.$(OBJEXT): ethernet/$(am__dirstamp) \
+	ethernet/$(DEPDIR)/$(am__dirstamp)
+ethernet/phy.$(OBJEXT): ethernet/$(am__dirstamp) \
+	ethernet/$(DEPDIR)/$(am__dirstamp)
 pg/$(am__dirstamp):
 	@$(MKDIR_P) pg
 	@: > pg/$(am__dirstamp)
@@ -327,6 +398,12 @@ vnet_unix$(EXEEXT): $(vnet_unix_OBJECTS) $(vnet_unix_DEPENDENCIES)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
+	-rm -f ethernet/cli.$(OBJEXT)
+	-rm -f ethernet/format.$(OBJEXT)
+	-rm -f ethernet/init.$(OBJEXT)
+	-rm -f ethernet/interface.$(OBJEXT)
+	-rm -f ethernet/pg.$(OBJEXT)
+	-rm -f ethernet/phy.$(OBJEXT)
 	-rm -f example/main_stub.$(OBJEXT)
 	-rm -f pg/cli.$(OBJEXT)
 	-rm -f pg/edit.$(OBJEXT)
@@ -338,6 +415,12 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/cli.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/format.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/init.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/interface.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/pg.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/phy.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@example/$(DEPDIR)/main_stub.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/cli.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/edit.Po@am__quote@
@@ -603,6 +686,8 @@ clean-generic:
 
 distclean-generic:
 	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
+	-rm -f ethernet/$(DEPDIR)/$(am__dirstamp)
+	-rm -f ethernet/$(am__dirstamp)
 	-rm -f example/$(DEPDIR)/$(am__dirstamp)
 	-rm -f example/$(am__dirstamp)
 	-rm -f pg/$(DEPDIR)/$(am__dirstamp)
@@ -618,7 +703,7 @@ clean-am: clean-generic clean-libLIBRARIES clean-libtool \
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf example/$(DEPDIR) pg/$(DEPDIR)
+	-rm -rf ethernet/$(DEPDIR) example/$(DEPDIR) pg/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-libtool distclean-tags
@@ -654,7 +739,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf example/$(DEPDIR) pg/$(DEPDIR)
+	-rm -rf ethernet/$(DEPDIR) example/$(DEPDIR) pg/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
