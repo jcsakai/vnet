@@ -79,7 +79,7 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
 
   for (i = 0; i < n_vlan; i++)
     {
-      u32 v = clib_net_to_host_16 (m->vlan[i].priority_cfi_and_id);
+      u32 v = clib_net_to_host_u16 (m->vlan[i].priority_cfi_and_id);
       u32 vid = (v & 0xfff);
       u32 cfi = (v >> 12) & 1;
       u32 pri = (v >> 13);
@@ -94,10 +94,11 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
   if (max_header_bytes != 0 && header_bytes > max_header_bytes)
     {
       ethernet_type_info_t * ti = ethernet_get_type_info (em, type);
-      if (ti && ti->format_header)
+      vlib_node_t * node = vlib_get_node (em->vlib_main, ti->node_index);
+      if (node->format_buffer)
 	s = format (s, "\n%U%U",
 		    format_white_space, indent,
-		    ti->format_header, (void *) m + header_bytes,
+		    node->format_buffer, (void *) m + header_bytes,
 		    max_header_bytes - header_bytes);
     }
 
@@ -246,20 +247,20 @@ unformat_ethernet_header (unformat_input_t * input, va_list * args)
       if (n_vlan >= ARRAY_LEN (m->vlan))
 	return 0;
 
-      m->vlan[n_vlan].priority_cfi_and_id = clib_host_to_net_16 (id);
+      m->vlan[n_vlan].priority_cfi_and_id = clib_host_to_net_u16 (id);
       n_vlan++;
     }
 
   if (n_vlan == 0)
-    e->type = clib_host_to_net_16 (type);
+    e->type = clib_host_to_net_u16 (type);
   else
     {
       int i;
 
-      e->type = clib_host_to_net_16 (ETHERNET_TYPE_VLAN);
+      e->type = clib_host_to_net_u16 (ETHERNET_TYPE_VLAN);
       for (i = 0; i < n_vlan - 1; i++)
-	m->vlan[i].type = clib_host_to_net_16 (ETHERNET_TYPE_VLAN);
-      m->vlan[n_vlan - 1].type = clib_host_to_net_16 (type);
+	m->vlan[i].type = clib_host_to_net_u16 (ETHERNET_TYPE_VLAN);
+      m->vlan[n_vlan - 1].type = clib_host_to_net_u16 (type);
     }
 
   /* Add header to result. */

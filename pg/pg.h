@@ -190,7 +190,7 @@ typedef struct {
 /* Per VLIB node data. */
 typedef struct {
   /* Parser function indexed by node index. */
-  unformat_function_t * unformat_pg_edit;
+  unformat_function_t * unformat_edit;
 } pg_node_t;
 
 typedef struct pg_main_t {

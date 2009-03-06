@@ -319,9 +319,6 @@ VLIB_REGISTER_NODE (ethernet_input_node) = {
   .format_buffer = format_ethernet_header_with_length,
   .format_trace = format_ethernet_input_trace,
   .unformat_buffer = unformat_ethernet_header,
-#if 0
-  .unformat_pg_edit = unformat_pg_ethernet_header,
-#endif
 
   .sw_interface_up_down_function = ethernet_sw_interface_up_down,
 };
@@ -356,8 +353,6 @@ ethernet_register_input_type (vlib_main_t * vm,
   ethernet_main_t * em = ethernet_get_main (vm);
   ethernet_type_info_t * ti = ethernet_get_type_info (em, type);
   ethernet_input_runtime_t * rt;
-  vlib_node_t * node;
-  pg_node_t * pg_node;
   u16 * n;
   u32 i;
 
@@ -376,10 +371,4 @@ ethernet_register_input_type (vlib_main_t * vm,
   vec_validate (rt->sparse_index_by_next_index, ti->next_index);
   for (i = 1; i < vec_len (rt->next_by_type); i++)
     rt->sparse_index_by_next_index[rt->next_by_type[i]] = i;
-
-  node = vlib_get_node (vm, node_index);
-  pg_node = pg_get_node (node_index);
-
-  ti->format_header = node->format_buffer;
-  ti->unformat_pg_edit = pg_node->unformat_pg_edit;
 }

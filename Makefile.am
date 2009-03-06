@@ -20,13 +20,12 @@ libvnet_a_SOURCES +=				\
  ethernet/format.c				\
  ethernet/init.c				\
  ethernet/interface.c				\
+ ethernet/node.c				\
  ethernet/pg.c					\
  ethernet/phy.c					\
  ethernet/phy.h					\
  ethernet/phy_reg.h				\
  ethernet/types.def
-
-# ethernet/node.c				
 
 ########################################
 # Layer 3 protocols go here

@@ -236,8 +236,8 @@ new_stream (vlib_main_t * vm,
     else
       n = 0;
 
-    if (n && n->unformat_pg_edit
-	&& unformat_user (&sub_input, n->unformat_pg_edit, &s))
+    if (n && n->unformat_edit
+	&& unformat_user (&sub_input, n->unformat_edit, &s))
       ;
 
     else if (! unformat_user (&sub_input, unformat_pg_payload, &s))

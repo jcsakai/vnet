@@ -97,12 +97,6 @@ typedef struct {
 
   /* Next index for this type. */
   u32 next_index;
-
-  /* Format function for this ether type. */
-  format_function_t * format_header;
-
-  /* Packet generator header parser for this ether type. */
-  unformat_function_t * unformat_pg_edit;
 } ethernet_type_info_t;
 
 typedef enum {

@@ -63,10 +63,10 @@ libvnet_a_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
 am_libvnet_a_OBJECTS = ethernet/cli.$(OBJEXT) \
 	ethernet/format.$(OBJEXT) ethernet/init.$(OBJEXT) \
-	ethernet/interface.$(OBJEXT) ethernet/pg.$(OBJEXT) \
-	ethernet/phy.$(OBJEXT) pg/cli.$(OBJEXT) pg/edit.$(OBJEXT) \
-	pg/init.$(OBJEXT) pg/input.$(OBJEXT) pg/output.$(OBJEXT) \
-	pg/stream.$(OBJEXT)
+	ethernet/interface.$(OBJEXT) ethernet/node.$(OBJEXT) \
+	ethernet/pg.$(OBJEXT) ethernet/phy.$(OBJEXT) pg/cli.$(OBJEXT) \
+	pg/edit.$(OBJEXT) pg/init.$(OBJEXT) pg/input.$(OBJEXT) \
+	pg/output.$(OBJEXT) pg/stream.$(OBJEXT)
 libvnet_a_OBJECTS = $(am_libvnet_a_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -225,8 +225,6 @@ AM_CFLAGS = -Wall
 # Layer 2 protocol: Ethernet
 ########################################
 
-# ethernet/node.c				
-
 ########################################
 # Layer 3 protocols go here
 ########################################
@@ -268,10 +266,10 @@ AM_CFLAGS = -Wall
 ########################################
 libvnet_a_SOURCES = ethernet/cli.c ethernet/ethernet.h \
 	ethernet/error.def ethernet/format.c ethernet/init.c \
-	ethernet/interface.c ethernet/pg.c ethernet/phy.c \
-	ethernet/phy.h ethernet/phy_reg.h ethernet/types.def pg/pg.h \
-	pg/cli.c pg/edit.c pg/edit.h pg/init.c pg/input.c pg/output.c \
-	pg/stream.c
+	ethernet/interface.c ethernet/node.c ethernet/pg.c \
+	ethernet/phy.c ethernet/phy.h ethernet/phy_reg.h \
+	ethernet/types.def pg/pg.h pg/cli.c pg/edit.c pg/edit.h \
+	pg/init.c pg/input.c pg/output.c pg/stream.c
 nobase_include_HEADERS = pg/pg.h pg/edit.h
 lib_LIBRARIES = libvnet.a
 vnet_unix_SOURCES = example/main_stub.c
@@ -357,6 +355,8 @@ ethernet/init.$(OBJEXT): ethernet/$(am__dirstamp) \
 	ethernet/$(DEPDIR)/$(am__dirstamp)
 ethernet/interface.$(OBJEXT): ethernet/$(am__dirstamp) \
 	ethernet/$(DEPDIR)/$(am__dirstamp)
+ethernet/node.$(OBJEXT): ethernet/$(am__dirstamp) \
+	ethernet/$(DEPDIR)/$(am__dirstamp)
 ethernet/pg.$(OBJEXT): ethernet/$(am__dirstamp) \
 	ethernet/$(DEPDIR)/$(am__dirstamp)
 ethernet/phy.$(OBJEXT): ethernet/$(am__dirstamp) \
@@ -402,6 +402,7 @@ mostlyclean-compile:
 	-rm -f ethernet/format.$(OBJEXT)
 	-rm -f ethernet/init.$(OBJEXT)
 	-rm -f ethernet/interface.$(OBJEXT)
+	-rm -f ethernet/node.$(OBJEXT)
 	-rm -f ethernet/pg.$(OBJEXT)
 	-rm -f ethernet/phy.$(OBJEXT)
 	-rm -f example/main_stub.$(OBJEXT)
@@ -419,6 +420,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/format.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/init.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/interface.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/node.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/pg.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/phy.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@example/$(DEPDIR)/main_stub.Po@am__quote@

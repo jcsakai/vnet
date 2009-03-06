@@ -134,18 +134,18 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
   {
     ethernet_main_t * em = &ethernet_main;
     ethernet_type_info_t * ti = 0;
-    unformat_function_t * u;
+    pg_node_t * pg_node = 0;
 
-    u = 0;
     if (ether_type_edit->type == PG_EDIT_FIXED)
       {
 	u16 t = *(u16 *) ether_type_edit->values[PG_EDIT_LO];
 	ti = ethernet_get_type_info (em, clib_net_to_host_u16 (t));
 	if (ti)
-	  u = ti->unformat_pg_edit;
+	  pg_node = pg_get_node (ti->node_index);
       }
 
-    if (u && unformat_user (input, u, s))
+    if (pg_node && pg_node->unformat_edit
+	&& unformat_user (input, pg_node->unformat_edit, s))
       ;
     else if (! unformat_user (input, unformat_pg_payload, s))
       goto done;

@@ -68,7 +68,7 @@ static void ethernet_setup_node (vlib_main_t * vm, u32 node_index)
 
   n->format_buffer = format_ethernet_header_with_length;
   n->unformat_buffer = unformat_ethernet_header;
-  pn->unformat_pg_edit = unformat_pg_ethernet_header;
+  pn->unformat_edit = unformat_pg_ethernet_header;
 }
 
 static void ethernet_interface_update_media (ethernet_interface_t * ei,
