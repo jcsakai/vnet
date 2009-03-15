@@ -14,18 +14,20 @@ nobase_include_HEADERS =
 # Layer 2 protocol: Ethernet
 ########################################
 libvnet_a_SOURCES +=				\
- ethernet/cli.c					\
- ethernet/ethernet.h				\
- ethernet/error.def				\
- ethernet/format.c				\
- ethernet/init.c				\
- ethernet/interface.c				\
- ethernet/node.c				\
- ethernet/pg.c					\
- ethernet/phy.c					\
- ethernet/phy.h					\
- ethernet/phy_reg.h				\
- ethernet/types.def
+ vnet/ethernet/cli.c				\
+ vnet/ethernet/error.def			\
+ vnet/ethernet/format.c				\
+ vnet/ethernet/init.c				\
+ vnet/ethernet/interface.c			\
+ vnet/ethernet/node.c				\
+ vnet/ethernet/pg.c				\
+ vnet/ethernet/phy.c				\
+ vnet/ethernet/types.def
+
+nobase_include_HEADERS +=			\
+ vnet/ethernet/ethernet.h			\
+ vnet/ethernet/phy.h				\
+ vnet/ethernet/phy_reg.h
 
 ########################################
 # Layer 3 protocols go here
@@ -35,51 +37,49 @@ libvnet_a_SOURCES +=				\
 # Layer 3 protocol: IP v4 (& v6)
 ########################################
 # libvnet_a_SOURCES +=				\
-#  ip/ip_checksum.c				\
-#  ip/ip_format.c					\
-#  ip/ip_init.c					\
-#  ip/ip_lookup.h					\
-#  ip/ip_lookup.c					\
-#  ip/ip_format.h					\
-#  ip/ip_main.h					\
-#  ip/ip_packet.h					\
-#  ip/protocols.def				\
-#  ip/ports.def					\
-#  ip/ip4.h					\
-#  ip/ip4_error.def				\
-#  ip/ip4_cli.c					\
-#  ip/ip4_format.c				\
-#  ip/ip4_forward.c				\
-#  ip/ip4_input.c					\
-#  ip/ip4_packet.h				\
-#  ip/ip4_pg.c					\
-#  ip/tcp_format.c				\
-#  ip/tcp_init.c					\
-#  ip/tcp_pg.c					\
-#  ip/tcp_udp_lookup.c				\
-#  ip/tcp_packet.h				\
-#  ip/udp_format.c				\
-#  ip/udp_init.c					\
-#  ip/udp_packet.h				\
-#  ip/udp_pg.c
+#  vnet/ip/ip_checksum.c				\
+#  vnet/ip/ip_format.c					\
+#  vnet/ip/ip_init.c					\
+#  vnet/ip/ip_lookup.h					\
+#  vnet/ip/ip_lookup.c					\
+#  vnet/ip/ip_format.h					\
+#  vnet/ip/ip_main.h					\
+#  vnet/ip/ip_packet.h					\
+#  vnet/ip/protocols.def				\
+#  vnet/ip/ports.def					\
+#  vnet/ip/ip4.h					\
+#  vnet/ip/ip4_error.def				\
+#  vnet/ip/ip4_cli.c					\
+#  vnet/ip/ip4_format.c				\
+#  vnet/ip/ip4_forward.c				\
+#  vnet/ip/ip4_input.c					\
+#  vnet/ip/ip4_packet.h				\
+#  vnet/ip/ip4_pg.c					\
+#  vnet/ip/tcp_format.c				\
+#  vnet/ip/tcp_init.c					\
+#  vnet/ip/tcp_pg.c					\
+#  vnet/ip/tcp_udp_lookup.c				\
+#  vnet/ip/tcp_packet.h				\
+#  vnet/ip/udp_format.c				\
+#  vnet/ip/udp_init.c					\
+#  vnet/ip/udp_packet.h				\
+#  vnet/ip/udp_pg.c
 
 ########################################
 # Packet generator
 ########################################
 
 libvnet_a_SOURCES +=				\
-  pg/pg.h					\
-  pg/cli.c					\
-  pg/edit.c					\
-  pg/edit.h					\
-  pg/init.c					\
-  pg/input.c					\
-  pg/output.c					\
-  pg/stream.c
+  vnet/pg/cli.c					\
+  vnet/pg/edit.c				\
+  vnet/pg/init.c				\
+  vnet/pg/input.c				\
+  vnet/pg/output.c				\
+  vnet/pg/stream.c
 
 nobase_include_HEADERS +=			\
-  pg/pg.h					\
-  pg/edit.h
+  vnet/pg/pg.h					\
+  vnet/pg/edit.h
 
 lib_LIBRARIES = libvnet.a
 

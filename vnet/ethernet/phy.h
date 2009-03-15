@@ -27,7 +27,7 @@
 #define included_ethernet_phy_h
 
 #include <vlib/vlib.h>
-#include <ethernet/phy_reg.h>
+#include <vnet/ethernet/phy_reg.h>
 
 #define ethernet_foreach_media			\
   _ (unknown)					\
@@ -98,14 +98,7 @@ typedef struct ethernet_phy {
   /* Autonegotiation is pending. */
 #define ETHERNET_PHY_AUTONEG_IN_PROGRESS (1 << 2)
 
-  /* Time to wait before polling BMCR after issueing reset.
-   * It is best to allow a little time for the reset to settle
-   * in before we start polling the BMCR again.  Notably, the
-   * DP83840A manual states that there should be a 500us delay
-   * between asserting software reset and attempting MII serial
-   * operations.  Also, a DP83815 can get into a bad state on
-   * cable removal and reinsertion if we do not delay here.
-   */
+  /* Time to wait before polling BMCR after issueing reset. */
   f64 reset_wait_time;
 
   /* Current PHY media. */
@@ -135,11 +128,11 @@ typedef struct ethernet_phy_device_registration {
 
 #define ETHERNET_PHY_REGISTER_DEVICE_ALIGN (16)
 
-#define ETHERNET_PHY_REGISTER_DEVICE(x)					\
+#define REGISTER_ETHERNET_PHY_DEVICE(x)					\
   ethernet_phy_device_registration_t x					\
     __attribute__ ((used,						\
 		    aligned (ETHERNET_PHY_REGISTER_DEVICE_ALIGN),	\
-		    section ("ethernet_phy_devices")))			\
+		    section (VLIB_ELF_SECTION (ethernet_phy))))		\
 
 static inline ethernet_phy_device_registration_t *
 ethernet_phy_device_next_registered (ethernet_phy_device_registration_t * r)

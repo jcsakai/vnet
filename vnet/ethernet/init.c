@@ -24,7 +24,7 @@
  */
 
 #include <vlib/vlib.h>
-#include <ethernet/ethernet.h>
+#include <vnet/ethernet/ethernet.h>
 
 /* Global main structure. */
 ethernet_main_t ethernet_main;

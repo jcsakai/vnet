@@ -23,7 +23,7 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <ethernet/phy.h>
+#include <vnet/ethernet/phy.h>
 
 clib_error_t *
 ethernet_phy_read_write_multiple (ethernet_phy_t * phy,
@@ -90,21 +90,31 @@ clib_error_t * ethernet_phy_reset (ethernet_phy_t * phy)
 
 /* Find PHY specific driver. */
 static ethernet_phy_device_registration_t *
-find_phy_device (u32 vendor_id, u32 device_id)
+find_phy_device (ethernet_phy_t * phy)
 {
-  extern ethernet_phy_device_registration_t ethernet_phy_device_first;
-  extern ethernet_phy_device_registration_t ethernet_phy_device_last;
+  vlib_main_t * vm = phy->vlib_main;
+  ethernet_phy_device_registration_t * lo, * hi;
   ethernet_phy_device_registration_t * r;
   ethernet_phy_device_id_t * i;
+  clib_error_t * error = 0;
 
-  for (r = ethernet_phy_device_next_registered (&ethernet_phy_device_first);
-       r != &ethernet_phy_device_last;
-       r = ethernet_phy_device_next_registered (r))
+  VLIB_ELF_SECTION_BOUNDS (ethernet_phy, lo, hi);
+
+  for (r = lo; r < hi; r++)
     {
       for (i = r->supported_devices; i->vendor_id != 0; i++)
-	if (i->vendor_id == vendor_id && i->device_id == device_id)
+	if (i->vendor_id == phy->vendor_id && i->device_id == phy->device_id)
 	  return r;
     }
+
+  if (vm->os_find_elf_section
+      && ! (error = vm->os_find_elf_section ("ethernet_phy", &lo, &hi)))
+    for (i = r->supported_devices; i->vendor_id != 0; i++)
+      if (i->vendor_id == phy->vendor_id && i->device_id == phy->device_id)
+	return r;
+    
+  /* Ignore error from os_find_elf_section (e.g. symbol not found). */
+  clib_error_free (error);
 
   return 0;
 }
@@ -143,7 +153,7 @@ ethernet_phy_init (ethernet_phy_t * phy)
     phy->device_id = ethernet_phy_id_model (id1, id2);
     phy->revision_id = ethernet_phy_id_revision (id1, id2);
 
-    phy->device = find_phy_device (phy->vendor_id, phy->device_id);
+    phy->device = find_phy_device (phy);
 
     if (phy->device
 	&& phy->device->init

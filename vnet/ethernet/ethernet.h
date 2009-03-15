@@ -26,11 +26,11 @@
 #ifndef included_ethernet_h
 #define included_ethernet_h
 
-#include <ethernet/phy.h>
+#include <vnet/ethernet/phy.h>
 
 typedef enum {
 #define ethernet_type(n,s) ETHERNET_TYPE_##s = n,
-#include "ethernet/types.def"
+#include "vnet/ethernet/types.def"
 #undef ethernet_type
 } ethernet_type_t;
 

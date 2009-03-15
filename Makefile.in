@@ -61,12 +61,13 @@ ARFLAGS = cru
 libvnet_a_AR = $(AR) $(ARFLAGS)
 libvnet_a_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
-am_libvnet_a_OBJECTS = ethernet/cli.$(OBJEXT) \
-	ethernet/format.$(OBJEXT) ethernet/init.$(OBJEXT) \
-	ethernet/interface.$(OBJEXT) ethernet/node.$(OBJEXT) \
-	ethernet/pg.$(OBJEXT) ethernet/phy.$(OBJEXT) pg/cli.$(OBJEXT) \
-	pg/edit.$(OBJEXT) pg/init.$(OBJEXT) pg/input.$(OBJEXT) \
-	pg/output.$(OBJEXT) pg/stream.$(OBJEXT)
+am_libvnet_a_OBJECTS = vnet/ethernet/cli.$(OBJEXT) \
+	vnet/ethernet/format.$(OBJEXT) vnet/ethernet/init.$(OBJEXT) \
+	vnet/ethernet/interface.$(OBJEXT) vnet/ethernet/node.$(OBJEXT) \
+	vnet/ethernet/pg.$(OBJEXT) vnet/ethernet/phy.$(OBJEXT) \
+	vnet/pg/cli.$(OBJEXT) vnet/pg/edit.$(OBJEXT) \
+	vnet/pg/init.$(OBJEXT) vnet/pg/input.$(OBJEXT) \
+	vnet/pg/output.$(OBJEXT) vnet/pg/stream.$(OBJEXT)
 libvnet_a_OBJECTS = $(am_libvnet_a_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -233,44 +234,45 @@ AM_CFLAGS = -Wall
 # Layer 3 protocol: IP v4 (& v6)
 ########################################
 # libvnet_a_SOURCES +=				\
-#  ip/ip_checksum.c				\
-#  ip/ip_format.c					\
-#  ip/ip_init.c					\
-#  ip/ip_lookup.h					\
-#  ip/ip_lookup.c					\
-#  ip/ip_format.h					\
-#  ip/ip_main.h					\
-#  ip/ip_packet.h					\
-#  ip/protocols.def				\
-#  ip/ports.def					\
-#  ip/ip4.h					\
-#  ip/ip4_error.def				\
-#  ip/ip4_cli.c					\
-#  ip/ip4_format.c				\
-#  ip/ip4_forward.c				\
-#  ip/ip4_input.c					\
-#  ip/ip4_packet.h				\
-#  ip/ip4_pg.c					\
-#  ip/tcp_format.c				\
-#  ip/tcp_init.c					\
-#  ip/tcp_pg.c					\
-#  ip/tcp_udp_lookup.c				\
-#  ip/tcp_packet.h				\
-#  ip/udp_format.c				\
-#  ip/udp_init.c					\
-#  ip/udp_packet.h				\
-#  ip/udp_pg.c
+#  vnet/ip/ip_checksum.c				\
+#  vnet/ip/ip_format.c					\
+#  vnet/ip/ip_init.c					\
+#  vnet/ip/ip_lookup.h					\
+#  vnet/ip/ip_lookup.c					\
+#  vnet/ip/ip_format.h					\
+#  vnet/ip/ip_main.h					\
+#  vnet/ip/ip_packet.h					\
+#  vnet/ip/protocols.def				\
+#  vnet/ip/ports.def					\
+#  vnet/ip/ip4.h					\
+#  vnet/ip/ip4_error.def				\
+#  vnet/ip/ip4_cli.c					\
+#  vnet/ip/ip4_format.c				\
+#  vnet/ip/ip4_forward.c				\
+#  vnet/ip/ip4_input.c					\
+#  vnet/ip/ip4_packet.h				\
+#  vnet/ip/ip4_pg.c					\
+#  vnet/ip/tcp_format.c				\
+#  vnet/ip/tcp_init.c					\
+#  vnet/ip/tcp_pg.c					\
+#  vnet/ip/tcp_udp_lookup.c				\
+#  vnet/ip/tcp_packet.h				\
+#  vnet/ip/udp_format.c				\
+#  vnet/ip/udp_init.c					\
+#  vnet/ip/udp_packet.h				\
+#  vnet/ip/udp_pg.c
 
 ########################################
 # Packet generator
 ########################################
-libvnet_a_SOURCES = ethernet/cli.c ethernet/ethernet.h \
-	ethernet/error.def ethernet/format.c ethernet/init.c \
-	ethernet/interface.c ethernet/node.c ethernet/pg.c \
-	ethernet/phy.c ethernet/phy.h ethernet/phy_reg.h \
-	ethernet/types.def pg/pg.h pg/cli.c pg/edit.c pg/edit.h \
-	pg/init.c pg/input.c pg/output.c pg/stream.c
-nobase_include_HEADERS = pg/pg.h pg/edit.h
+libvnet_a_SOURCES = vnet/ethernet/cli.c vnet/ethernet/error.def \
+	vnet/ethernet/format.c vnet/ethernet/init.c \
+	vnet/ethernet/interface.c vnet/ethernet/node.c \
+	vnet/ethernet/pg.c vnet/ethernet/phy.c vnet/ethernet/types.def \
+	vnet/pg/cli.c vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c \
+	vnet/pg/output.c vnet/pg/stream.c
+nobase_include_HEADERS = vnet/ethernet/ethernet.h vnet/ethernet/phy.h \
+	vnet/ethernet/phy_reg.h vnet/pg/pg.h vnet/pg/edit.h
 lib_LIBRARIES = libvnet.a
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDADD = -lvlib_unix -lvlib -lclib -lpthread -ldl
@@ -341,38 +343,44 @@ uninstall-libLIBRARIES:
 
 clean-libLIBRARIES:
 	-test -z "$(lib_LIBRARIES)" || rm -f $(lib_LIBRARIES)
-ethernet/$(am__dirstamp):
-	@$(MKDIR_P) ethernet
-	@: > ethernet/$(am__dirstamp)
-ethernet/$(DEPDIR)/$(am__dirstamp):
-	@$(MKDIR_P) ethernet/$(DEPDIR)
-	@: > ethernet/$(DEPDIR)/$(am__dirstamp)
-ethernet/cli.$(OBJEXT): ethernet/$(am__dirstamp) \
-	ethernet/$(DEPDIR)/$(am__dirstamp)
-ethernet/format.$(OBJEXT): ethernet/$(am__dirstamp) \
-	ethernet/$(DEPDIR)/$(am__dirstamp)
-ethernet/init.$(OBJEXT): ethernet/$(am__dirstamp) \
-	ethernet/$(DEPDIR)/$(am__dirstamp)
-ethernet/interface.$(OBJEXT): ethernet/$(am__dirstamp) \
-	ethernet/$(DEPDIR)/$(am__dirstamp)
-ethernet/node.$(OBJEXT): ethernet/$(am__dirstamp) \
-	ethernet/$(DEPDIR)/$(am__dirstamp)
-ethernet/pg.$(OBJEXT): ethernet/$(am__dirstamp) \
-	ethernet/$(DEPDIR)/$(am__dirstamp)
-ethernet/phy.$(OBJEXT): ethernet/$(am__dirstamp) \
-	ethernet/$(DEPDIR)/$(am__dirstamp)
-pg/$(am__dirstamp):
-	@$(MKDIR_P) pg
-	@: > pg/$(am__dirstamp)
-pg/$(DEPDIR)/$(am__dirstamp):
-	@$(MKDIR_P) pg/$(DEPDIR)
-	@: > pg/$(DEPDIR)/$(am__dirstamp)
-pg/cli.$(OBJEXT): pg/$(am__dirstamp) pg/$(DEPDIR)/$(am__dirstamp)
-pg/edit.$(OBJEXT): pg/$(am__dirstamp) pg/$(DEPDIR)/$(am__dirstamp)
-pg/init.$(OBJEXT): pg/$(am__dirstamp) pg/$(DEPDIR)/$(am__dirstamp)
-pg/input.$(OBJEXT): pg/$(am__dirstamp) pg/$(DEPDIR)/$(am__dirstamp)
-pg/output.$(OBJEXT): pg/$(am__dirstamp) pg/$(DEPDIR)/$(am__dirstamp)
-pg/stream.$(OBJEXT): pg/$(am__dirstamp) pg/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/$(am__dirstamp):
+	@$(MKDIR_P) vnet/ethernet
+	@: > vnet/ethernet/$(am__dirstamp)
+vnet/ethernet/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/ethernet/$(DEPDIR)
+	@: > vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/cli.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/format.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/init.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/interface.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/node.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/pg.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ethernet/phy.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/pg/$(am__dirstamp):
+	@$(MKDIR_P) vnet/pg
+	@: > vnet/pg/$(am__dirstamp)
+vnet/pg/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/pg/$(DEPDIR)
+	@: > vnet/pg/$(DEPDIR)/$(am__dirstamp)
+vnet/pg/cli.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+	vnet/pg/$(DEPDIR)/$(am__dirstamp)
+vnet/pg/edit.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+	vnet/pg/$(DEPDIR)/$(am__dirstamp)
+vnet/pg/init.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+	vnet/pg/$(DEPDIR)/$(am__dirstamp)
+vnet/pg/input.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+	vnet/pg/$(DEPDIR)/$(am__dirstamp)
+vnet/pg/output.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+	vnet/pg/$(DEPDIR)/$(am__dirstamp)
+vnet/pg/stream.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+	vnet/pg/$(DEPDIR)/$(am__dirstamp)
 libvnet.a: $(libvnet_a_OBJECTS) $(libvnet_a_DEPENDENCIES) 
 	-rm -f libvnet.a
 	$(libvnet_a_AR) libvnet.a $(libvnet_a_OBJECTS) $(libvnet_a_LIBADD)
@@ -398,38 +406,38 @@ vnet_unix$(EXEEXT): $(vnet_unix_OBJECTS) $(vnet_unix_DEPENDENCIES)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
-	-rm -f ethernet/cli.$(OBJEXT)
-	-rm -f ethernet/format.$(OBJEXT)
-	-rm -f ethernet/init.$(OBJEXT)
-	-rm -f ethernet/interface.$(OBJEXT)
-	-rm -f ethernet/node.$(OBJEXT)
-	-rm -f ethernet/pg.$(OBJEXT)
-	-rm -f ethernet/phy.$(OBJEXT)
 	-rm -f example/main_stub.$(OBJEXT)
-	-rm -f pg/cli.$(OBJEXT)
-	-rm -f pg/edit.$(OBJEXT)
-	-rm -f pg/init.$(OBJEXT)
-	-rm -f pg/input.$(OBJEXT)
-	-rm -f pg/output.$(OBJEXT)
-	-rm -f pg/stream.$(OBJEXT)
+	-rm -f vnet/ethernet/cli.$(OBJEXT)
+	-rm -f vnet/ethernet/format.$(OBJEXT)
+	-rm -f vnet/ethernet/init.$(OBJEXT)
+	-rm -f vnet/ethernet/interface.$(OBJEXT)
+	-rm -f vnet/ethernet/node.$(OBJEXT)
+	-rm -f vnet/ethernet/pg.$(OBJEXT)
+	-rm -f vnet/ethernet/phy.$(OBJEXT)
+	-rm -f vnet/pg/cli.$(OBJEXT)
+	-rm -f vnet/pg/edit.$(OBJEXT)
+	-rm -f vnet/pg/init.$(OBJEXT)
+	-rm -f vnet/pg/input.$(OBJEXT)
+	-rm -f vnet/pg/output.$(OBJEXT)
+	-rm -f vnet/pg/stream.$(OBJEXT)
 
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/cli.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/format.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/init.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/interface.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/node.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/pg.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@ethernet/$(DEPDIR)/phy.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@example/$(DEPDIR)/main_stub.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/cli.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/edit.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/init.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/input.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/output.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@pg/$(DEPDIR)/stream.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/cli.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/format.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/init.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/interface.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/node.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/pg.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/phy.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/cli.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/edit.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/init.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/input.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/output.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/stream.Po@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.o$$||'`;\
@@ -688,12 +696,12 @@ clean-generic:
 
 distclean-generic:
 	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
-	-rm -f ethernet/$(DEPDIR)/$(am__dirstamp)
-	-rm -f ethernet/$(am__dirstamp)
 	-rm -f example/$(DEPDIR)/$(am__dirstamp)
 	-rm -f example/$(am__dirstamp)
-	-rm -f pg/$(DEPDIR)/$(am__dirstamp)
-	-rm -f pg/$(am__dirstamp)
+	-rm -f vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+	-rm -f vnet/ethernet/$(am__dirstamp)
+	-rm -f vnet/pg/$(DEPDIR)/$(am__dirstamp)
+	-rm -f vnet/pg/$(am__dirstamp)
 
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
@@ -705,7 +713,7 @@ clean-am: clean-generic clean-libLIBRARIES clean-libtool \
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf ethernet/$(DEPDIR) example/$(DEPDIR) pg/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/pg/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-libtool distclean-tags
@@ -741,7 +749,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf ethernet/$(DEPDIR) example/$(DEPDIR) pg/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/pg/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 

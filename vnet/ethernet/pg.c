@@ -24,8 +24,8 @@
  */
 
 #include <vlib/vlib.h>
-#include <pg/pg.h>
-#include <ethernet/ethernet.h>
+#include <vnet/pg/pg.h>
+#include <vnet/ethernet/ethernet.h>
 
 typedef struct {
   pg_edit_t type;

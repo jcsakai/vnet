@@ -24,8 +24,8 @@
  */
 
 #include <vlib/vlib.h>
-#include <pg/pg.h>
-#include <ethernet/ethernet.h>
+#include <vnet/pg/pg.h>
+#include <vnet/ethernet/ethernet.h>
 
 static clib_error_t *
 ethernet_interface_up_down (vlib_main_t * vm,

@@ -24,7 +24,7 @@
  */
 
 #include <vlib/vlib.h>
-#include <ethernet/ethernet.h>
+#include <vnet/ethernet/ethernet.h>
 
 u8 * format_ethernet_address (u8 * s, va_list * args)
 {

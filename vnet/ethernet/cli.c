@@ -24,7 +24,7 @@
  */
 
 #include <vlib/vlib.h>
-#include <ethernet/ethernet.h>
+#include <vnet/ethernet/ethernet.h>
 
 VLIB_CLI_COMMAND (vlib_cli_ethernet_command) = {
   .name = "ethernet",

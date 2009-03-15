@@ -24,8 +24,8 @@
  */
 
 #include <vlib/vlib.h>
-#include <pg/pg.h>
-#include <ethernet/ethernet.h>
+#include <vnet/pg/pg.h>
+#include <vnet/ethernet/ethernet.h>
 #include <clib/sparse_vec.h>
 
 #define foreach_ethernet_input_next		\
