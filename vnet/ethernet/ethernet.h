@@ -30,7 +30,7 @@
 
 typedef enum {
 #define ethernet_type(n,s) ETHERNET_TYPE_##s = n,
-#include "vnet/ethernet/types.def"
+#include <vnet/ethernet/types.def>
 #undef ethernet_type
 } ethernet_type_t;
 
@@ -101,7 +101,7 @@ typedef struct {
 
 typedef enum {
 #define ethernet_error(n,c,s) ETHERNET_ERROR_##n,
-#include "error.def"
+#include <vnet/ethernet/error.def>
 #undef ethernet_error
   ETHERNET_N_ERROR,
 } ethernet_error_t;

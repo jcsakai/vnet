@@ -58,7 +58,7 @@ clib_error_t * ethernet_phy_reset (ethernet_phy_t * phy)
   if (error)
     goto done;
 
-  /* Some PHYs want a busy wait before BMCR is polled for. */
+  /* Some PHYs want some time before BMCR is polled for. */
   if (phy->reset_wait_time > 0)
     vlib_time_wait (phy->vlib_main, phy->reset_wait_time);
 
@@ -88,6 +88,13 @@ clib_error_t * ethernet_phy_reset (ethernet_phy_t * phy)
   return error;
 }
 
+/* Dummy phy driver in case there are no other drivers linked in. */
+static REGISTER_ETHERNET_PHY_DEVICE (dummy) = {
+  .supported_devices = {
+    { 0 },
+  }
+};
+
 /* Find PHY specific driver. */
 static ethernet_phy_device_registration_t *
 find_phy_device (ethernet_phy_t * phy)
@@ -100,7 +107,7 @@ find_phy_device (ethernet_phy_t * phy)
 
   VLIB_ELF_SECTION_BOUNDS (ethernet_phy, lo, hi);
 
-  for (r = lo; r < hi; r++)
+  for (r = lo; r < hi; r = ethernet_phy_device_next_registered (r))
     {
       for (i = r->supported_devices; i->vendor_id != 0; i++)
 	if (i->vendor_id == phy->vendor_id && i->device_id == phy->device_id)
@@ -109,9 +116,12 @@ find_phy_device (ethernet_phy_t * phy)
 
   if (vm->os_find_elf_section
       && ! (error = vm->os_find_elf_section ("ethernet_phy", &lo, &hi)))
-    for (i = r->supported_devices; i->vendor_id != 0; i++)
-      if (i->vendor_id == phy->vendor_id && i->device_id == phy->device_id)
-	return r;
+    {
+      for (r = lo; r < hi; r = ethernet_phy_device_next_registered (r))
+	for (i = r->supported_devices; i->vendor_id != 0; i++)
+	  if (i->vendor_id == phy->vendor_id && i->device_id == phy->device_id)
+	    return r;
+    }
     
   /* Ignore error from os_find_elf_section (e.g. symbol not found). */
   clib_error_free (error);
@@ -161,24 +171,10 @@ ethernet_phy_init (ethernet_phy_t * phy)
       goto done;
   }
 
-  extsr = 0;
-  if ((e = ethernet_phy_get_link (phy, &bmsr)))
+  if ((e = ethernet_phy_read (phy, ETHERNET_PHY_BMSR, &bmsr)))
     goto done;
 
-  if (bmsr & ETHERNET_PHY_BMSR_LINK_UP)
-    {
-      if ((e = ethernet_phy_status (phy)))
-	goto done;
-    }
-  else
-    {
-      if ((e = ethernet_phy_reset (phy)))
-	goto done;
-
-      if ((e = ethernet_phy_read (phy, ETHERNET_PHY_BMSR, &bmsr)))
-	goto done;
-    }
-
+  extsr = 0;
   if (bmsr & ETHERNET_PHY_BMSR_EXTENDED_STATUS)
     {
       e = ethernet_phy_read (phy, ETHERNET_PHY_EXTSR, &extsr);
@@ -569,6 +565,9 @@ u8 * format_ethernet_media (u8 * s, va_list * args)
 		  ? " half-duplex"
 		  : "")));
   
+  if (m->flags & ETHERNET_MEDIA_SERDES)
+    s = format (s, "serdes, ");
+
   if (m->flags & ETHERNET_MEDIA_MASTER)
     s = format (s, "master, ");
 
@@ -578,3 +577,9 @@ u8 * format_ethernet_media (u8 * s, va_list * args)
   return s;
 }
 
+/* Kludge to link in phy drivers along with phy.c */
+void ethernet_phy_reference (void)
+{
+  extern void ethernet_phy_bcm_reference (void);
+  ethernet_phy_bcm_reference ();
+}

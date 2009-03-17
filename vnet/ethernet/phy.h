@@ -31,6 +31,7 @@
 
 #define ethernet_foreach_media			\
   _ (unknown)					\
+  _ (none)					\
   _ (1000T)					\
   _ (1000X)					\
   _ (100TX)					\
@@ -45,12 +46,14 @@ typedef enum {
 
 typedef struct {
   u16 flags;
+  /* Link can be either up/down or neither meaning unknown. */
 #define ETHERNET_MEDIA_LINK_UP		(1 << 0)
 #define ETHERNET_MEDIA_FULL_DUPLEX	(1 << 1)
 #define ETHERNET_MEDIA_HALF_DUPLEX	(1 << 2)
 #define ETHERNET_MEDIA_LOOPBACK		(1 << 3)
 #define ETHERNET_MEDIA_MASTER		(1 << 4)
-
+  /* No MII; raw 10 bit SERDES interface. */
+#define ETHERNET_MEDIA_SERDES		(1 << 5)
   ethernet_media_type_t type : 16;
 } ethernet_media_t;
 
@@ -177,6 +180,10 @@ ethernet_phy_write_multiple (ethernet_phy_t * phy,
 			    ethernet_phy_reg_t * regs,
 			    u32 n_regs)
 { return ethernet_phy_read_write_multiple (phy, regs, n_regs, VLIB_WRITE); }
+
+static always_inline uword
+ethernet_phy_is_link_up (ethernet_phy_t * phy)
+{ return (phy->media.flags & ETHERNET_MEDIA_LINK_UP) != 0; }
 
 clib_error_t * ethernet_phy_init (ethernet_phy_t * phy);
 clib_error_t * ethernet_phy_reset (ethernet_phy_t * phy);

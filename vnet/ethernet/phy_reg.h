@@ -71,7 +71,8 @@
 #define	ETHERNET_PHY_BMCR_SPEED0	(1 << 13) /* speed selection (LSB) */
 #define	ETHERNET_PHY_BMCR_AUTONEG_ENABLE (1 << 12)
 #define	ETHERNET_PHY_BMCR_POWER_DOWN	(1 << 11)	/* power down */
-#define	ETHERNET_PHY_BMCR_ISOLATE	(1 << 10)	/* isolate */
+/* Electrically isolate PHY from MII (e.g. disabled PHY). */
+#define	ETHERNET_PHY_BMCR_ISOLATE	(1 << 10)
 #define	ETHERNET_PHY_BMCR_AUTONEG_START (1 << 9) /* restart autonegotiation */
 #define	ETHERNET_PHY_BMCR_FULL_DUPLEX	(1 << 8)
 #define	ETHERNET_PHY_BMCR_HALF_DUPLEX	(0 << 8)
@@ -96,8 +97,7 @@
 #define	ETHERNET_PHY_BMSR_100T2_FULL_DUPLEX	(1 << 10)
 #define	ETHERNET_PHY_BMSR_100T2_HALF_DUPLEX	(1 << 9)	
 #define	ETHERNET_PHY_BMSR_EXTENDED_STATUS	(1 << 8)
-/* MII Frame Preamble Suppression */
-#define	ETHERNET_PHY_BMSR_MFPS			(1 << 6)
+#define	ETHERNET_PHY_BMSR_MII_FRAME_PREAMBLE_SUPPRESSION (1 << 6)
 #define	ETHERNET_PHY_BMSR_AUTONEG_DONE		(1 << 5)
 #define	ETHERNET_PHY_BMSR_REMOTE_FAULT		(1 << 4)
 #define	ETHERNET_PHY_BMSR_AUTONEG_CAPABLE	(1 << 3)
@@ -121,7 +121,7 @@
    | ETHERNET_PHY_BMSR_100T2_HALF_DUPLEX)
 
 /* Convert BMSR media capabilities to ANAR bits for autonegotiation.
- * Note the shift chopps off the ETHERNET_PHY_BMSR_ANEG bit. */
+ * Note the shift chops off the ETHERNET_PHY_BMSR_ANEG bit. */
 #define	ETHERNET_PHY_BMSR_MEDIA_TO_ANAR(x) \
  (((x) & ETHERNET_PHY_BMSR_MEDIA_MASK) >> 6)
 
@@ -129,27 +129,10 @@
 #define	ETHERNET_PHY_ID1 0x02
 #define	ETHERNET_PHY_ID2 0x03
 
-static inline u8 ethernet_phy_bit_reverse (u8 x)
-{
-  static unsigned char nibbletab[16] = {
-    0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15
-  };
-
-  return ((nibbletab[x & 15] << 4) | nibbletab[x >> 4]);
-}
-
 /* Convert ID registers to OUI. */
 static inline u32
 ethernet_phy_id_oui (u32 id1, u32 id2)
-{
-  u32 h;
-
-  h = (id1 << 6) | (id2 >> 10);
-
-  return ((ethernet_phy_bit_reverse (h >> 16) << 16) |
-	  (ethernet_phy_bit_reverse ((h >> 8) & 255) << 8) |
-	  ethernet_phy_bit_reverse (h & 255));
-}
+{ return (id1 << 6) | (id2 >> 10); }
 
 static inline u32
 ethernet_phy_id_model (u32 id1, u32 id2)

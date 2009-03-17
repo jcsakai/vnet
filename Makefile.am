@@ -15,19 +15,19 @@ nobase_include_HEADERS =
 ########################################
 libvnet_a_SOURCES +=				\
  vnet/ethernet/cli.c				\
- vnet/ethernet/error.def			\
  vnet/ethernet/format.c				\
  vnet/ethernet/init.c				\
  vnet/ethernet/interface.c			\
  vnet/ethernet/node.c				\
  vnet/ethernet/pg.c				\
- vnet/ethernet/phy.c				\
- vnet/ethernet/types.def
+ vnet/ethernet/phy.c
 
 nobase_include_HEADERS +=			\
+ vnet/ethernet/error.def			\
  vnet/ethernet/ethernet.h			\
  vnet/ethernet/phy.h				\
- vnet/ethernet/phy_reg.h
+ vnet/ethernet/phy_reg.h			\
+ vnet/ethernet/types.def
 
 ########################################
 # Layer 3 protocols go here
@@ -80,6 +80,13 @@ libvnet_a_SOURCES +=				\
 nobase_include_HEADERS +=			\
   vnet/pg/pg.h					\
   vnet/pg/edit.h
+
+########################################
+# Hardware devices
+########################################
+
+libvnet_a_SOURCES +=				\
+  vnet/devices/ethernet_phy_bcm.c
 
 lib_LIBRARIES = libvnet.a
 
