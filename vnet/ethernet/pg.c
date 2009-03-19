@@ -140,7 +140,7 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
       {
 	u16 t = *(u16 *) ether_type_edit->values[PG_EDIT_LO];
 	ti = ethernet_get_type_info (em, clib_net_to_host_u16 (t));
-	if (ti)
+	if (ti && ti->node_index != ~0)
 	  pg_node = pg_get_node (ti->node_index);
       }
 
