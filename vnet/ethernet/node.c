@@ -62,28 +62,26 @@ typedef struct {
   u32 * sparse_index_by_next_index;
 } ethernet_input_runtime_t;
 
-#if 0
 static uword
 ethernet_input (vlib_main_t * vm,
 		vlib_node_runtime_t * node,
-		vlib_frame_t * frame,
-		uword n_packets)
+		vlib_frame_t * from_frame)
 {
   ethernet_input_runtime_t * rt = (void *) node->runtime_data;
-  vlib_error_meta_data_t unknown_type_error;
   u32 n_left_from, next_index, i_next, * from, * to_next;
-  sparse_vec_header_t * next_by_type = sparse_vec_header (rt->next_by_type);
+  vlib_error_t unknown_type_error = vlib_error_set (node->node_index, ETHERNET_ERROR_UNKNOWN_TYPE);
 
-  unknown_type_error.node = node->node_index;
-  unknown_type_error.code = ETHERNET_ERROR_UNKNOWN_TYPE;
+  from = vlib_frame_vector_args (from_frame);
+  n_left_from = from_frame->n_vectors;
 
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    vlib_trace_packet_data (vm, node, frame, n_packets,
-			    sizeof (ethernet_input_trace_t));
+    vlib_trace_frame_buffers_only (vm, node,
+				   from,
+				   n_left_from,
+				   sizeof (from[0]),
+				   sizeof (ethernet_input_trace_t));
 
-  from = frame->packets;
-  n_left_from = n_packets;
-  next_index = node->last_next_index;
+  next_index = node->cached_next_index;
   i_next = vec_elt (rt->sparse_index_by_next_index, next_index);
 
   while (n_left_from > 0)
@@ -91,27 +89,28 @@ ethernet_input (vlib_main_t * vm,
       u32 n_left_to_next;
 
       vlib_get_next_frame (vm, node, next_index,
-			   &n_left_to_next, &to_next);
+			   to_next, n_left_to_next);
 
+#if 0
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  u32 pi0, pi1;
-	  vlib_packet_t * p0, * p1;
+	  vlib_buffer_t * p0, * p1;
 	  ethernet_header_t * e0, * e1;
 	  u32 i0, i1, type0, type1, enqueue_code;
 
 	  /* Prefetch next iteration. */
 	  {
-	    vlib_packet_t * p2, * p3;
+	    vlib_buffer_t * p2, * p3;
 
-	    p2 = vlib_get_packet (vm, from[2]);
-	    p3 = vlib_get_packet (vm, from[3]);
+	    p2 = vlib_get_buffer (vm, from[2]);
+	    p3 = vlib_get_buffer (vm, from[3]);
 
 	    vlib_prefetch_buffer_header (p2, LOAD);
 	    vlib_prefetch_buffer_header (p3, LOAD);
 
-	    CLIB_PREFETCH (p2->packet_data, sizeof (e0[0]), LOAD);
-	    CLIB_PREFETCH (p3->packet_data, sizeof (e1[0]), LOAD);
+	    CLIB_PREFETCH (p2->data, sizeof (e0[0]), LOAD);
+	    CLIB_PREFETCH (p3->data, sizeof (e1[0]), LOAD);
 	  }
 
 	  pi0 = from[0];
@@ -123,14 +122,14 @@ ethernet_input (vlib_main_t * vm,
 	  n_left_to_next -= 2;
 	  n_left_from -= 2;
 
-	  p0 = vlib_get_packet (vm, pi0);
-	  p1 = vlib_get_packet (vm, pi1);
+	  p0 = vlib_get_buffer (vm, pi0);
+	  p1 = vlib_get_buffer (vm, pi1);
 
-	  e0 = (void *) (p0->packet_data + p0->current_header);
-	  e1 = (void *) (p1->packet_data + p1->current_header);
+	  e0 = (void *) (p0->data + p0->current_data);
+	  e1 = (void *) (p1->data + p1->current_data);
 
-	  p0->current_header += sizeof (e0[0]);
-	  p1->current_header += sizeof (e1[0]);
+	  p0->current_data += sizeof (e0[0]);
+	  p1->current_data += sizeof (e1[0]);
 
 	  p0->current_length -= sizeof (e0[0]);
 	  p1->current_length -= sizeof (e1[0]);
@@ -206,11 +205,12 @@ ethernet_input (vlib_main_t * vm,
 		}
 	    }
 	}
+#endif
     
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  u32 pi0;
-	  vlib_packet_t * p0;
+	  vlib_buffer_t * p0;
 	  ethernet_header_t * e0;
 	  u32 i0, type0;
 
@@ -221,40 +221,44 @@ ethernet_input (vlib_main_t * vm,
 	  n_left_from -= 1;
 	  n_left_to_next -= 1;
 
-	  p0 = vlib_get_packet (vm, pi0);
+	  p0 = vlib_get_buffer (vm, pi0);
 
-	  e0 = (void *) (p0->packet_data + p0->current_header);
+	  e0 = (void *) (p0->data + p0->current_data);
 
-	  p0->current_header += sizeof (e0[0]);
+	  p0->current_data += sizeof (e0[0]);
 	  p0->current_length -= sizeof (e0[0]);
 
 	  type0 = e0->type;
 	  i0 = sparse_vec_index (rt->next_by_type, type0);
 	  
-	  if (PREDICT_FALSE ((i0 != i_next) || (i0 == 0)))
+	  if (PREDICT_FALSE ((i0 != i_next) || (i0 == SPARSE_VEC_INVALID_INDEX)))
 	    {
+	      n_left_to_next += 1;
+
+	      /* Set packet to wrong next? */
 	      if (i0 != i_next)
 		{
-		  n_left_to_next += 1;
+		  /* Return old frame. */
 		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+
+		  /* Send to correct next. */
 		  i_next = i0;
 		  next_index = vec_elt (rt->next_by_type, i_next);
 		  vlib_get_next_frame (vm, node, next_index,
-				     &n_left_to_next, &to_next);
-
+				       to_next, n_left_to_next);
 		  to_next[0] = pi0;
 		  to_next += 1;
 		  n_left_to_next -= 1;
 		}
 
+	      /* Error? */
 	      if (i0 == 0)
 		{
-		  vlib_error_meta_data_t * e;
-
-		  e = vlib_get_next_frame_meta_data (vm, node, next_index,
-						   n_left_to_next + 1,
-						   sizeof (e[0]));
-		  e[0] = unknown_type_error;
+		  /* No need to write buffer index; it should already
+		     be there. */
+		  ASSERT (to_next[-1] == pi0);
+		  to_next[0] = unknown_type_error;
+		  to_next += 1;
 		}
 	    }
 	}
@@ -262,9 +266,8 @@ ethernet_input (vlib_main_t * vm,
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
-  return n_packets;
+  return from_frame->n_vectors;
 }
-#endif
 
 static clib_error_t *
 ethernet_sw_interface_up_down (vlib_main_t * vm,
@@ -301,7 +304,7 @@ static char * ethernet_error_strings[] = {
 };
 
 VLIB_REGISTER_NODE (ethernet_input_node) = {
-  .function = /* ethernet_input */ 0,
+  .function = ethernet_input,
   .name = "ethernet-input",
 
   .runtime_data_bytes = sizeof (ethernet_input_runtime_t),
@@ -326,6 +329,8 @@ VLIB_REGISTER_NODE (ethernet_input_node) = {
 static clib_error_t * ethernet_input_init (vlib_main_t * vm)
 {
   ethernet_input_runtime_t * rt;
+
+  ethernet_setup_node (vm, ethernet_input_node.index);
 
   rt = vlib_node_get_runtime_data (vm, ethernet_input_node.index);
 

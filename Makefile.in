@@ -55,28 +55,21 @@ am__vpath_adj = case $$p in \
   esac;
 am__strip_dir = `echo $$p | sed -e 's|^.*/||'`;
 am__installdirs = "$(DESTDIR)$(libdir)" "$(DESTDIR)$(includedir)"
-libLIBRARIES_INSTALL = $(INSTALL_DATA)
-LIBRARIES = $(lib_LIBRARIES)
-ARFLAGS = cru
-libvnet_a_AR = $(AR) $(ARFLAGS)
-libvnet_a_LIBADD =
+libLTLIBRARIES_INSTALL = $(INSTALL)
+LTLIBRARIES = $(lib_LTLIBRARIES)
+libvnet_la_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
-am_libvnet_a_OBJECTS = vnet/ethernet/cli.$(OBJEXT) \
-	vnet/ethernet/format.$(OBJEXT) vnet/ethernet/init.$(OBJEXT) \
-	vnet/ethernet/interface.$(OBJEXT) vnet/ethernet/node.$(OBJEXT) \
-	vnet/ethernet/pg.$(OBJEXT) vnet/ethernet/phy.$(OBJEXT) \
-	vnet/pg/cli.$(OBJEXT) vnet/pg/edit.$(OBJEXT) \
-	vnet/pg/init.$(OBJEXT) vnet/pg/input.$(OBJEXT) \
-	vnet/pg/output.$(OBJEXT) vnet/pg/stream.$(OBJEXT) \
-	vnet/devices/ethernet_phy_bcm.$(OBJEXT)
-libvnet_a_OBJECTS = $(am_libvnet_a_OBJECTS)
+am_libvnet_la_OBJECTS = vnet/ethernet/cli.lo vnet/ethernet/format.lo \
+	vnet/ethernet/init.lo vnet/ethernet/interface.lo \
+	vnet/ethernet/node.lo vnet/ethernet/pg.lo vnet/ethernet/phy.lo \
+	vnet/pg/cli.lo vnet/pg/edit.lo vnet/pg/init.lo \
+	vnet/pg/input.lo vnet/pg/output.lo vnet/pg/stream.lo \
+	vnet/devices/ethernet_phy_bcm.lo
+libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
 vnet_unix_OBJECTS = $(am_vnet_unix_OBJECTS)
-vnet_unix_DEPENDENCIES =
-vnet_unix_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
-	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
-	$(vnet_unix_LDFLAGS) $(LDFLAGS) -o $@
+vnet_unix_DEPENDENCIES = libvnet.la
 DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
@@ -89,8 +82,8 @@ CCLD = $(CC)
 LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) \
 	--mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) \
 	$(LDFLAGS) -o $@
-SOURCES = $(libvnet_a_SOURCES) $(vnet_unix_SOURCES)
-DIST_SOURCES = $(libvnet_a_SOURCES) $(vnet_unix_SOURCES)
+SOURCES = $(libvnet_la_SOURCES) $(vnet_unix_SOURCES)
+DIST_SOURCES = $(libvnet_la_SOURCES) $(vnet_unix_SOURCES)
 nobase_includeHEADERS_INSTALL = $(install_sh_DATA)
 HEADERS = $(nobase_include_HEADERS)
 ETAGS = etags
@@ -234,7 +227,7 @@ AM_CFLAGS = -Wall
 ########################################
 # Layer 3 protocol: IP v4 (& v6)
 ########################################
-# libvnet_a_SOURCES +=				\
+# libvnet_la_SOURCES +=				\
 #  vnet/ip/ip_checksum.c				\
 #  vnet/ip/ip_format.c					\
 #  vnet/ip/ip_init.c					\
@@ -270,7 +263,7 @@ AM_CFLAGS = -Wall
 ########################################
 # Hardware devices
 ########################################
-libvnet_a_SOURCES = vnet/ethernet/cli.c vnet/ethernet/format.c \
+libvnet_la_SOURCES = vnet/ethernet/cli.c vnet/ethernet/format.c \
 	vnet/ethernet/init.c vnet/ethernet/interface.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
 	vnet/pg/cli.c vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c \
@@ -280,10 +273,9 @@ nobase_include_HEADERS = vnet/ethernet/error.def \
 	vnet/ethernet/ethernet.h vnet/ethernet/phy.h \
 	vnet/ethernet/phy_reg.h vnet/ethernet/types.def vnet/pg/pg.h \
 	vnet/pg/edit.h
-lib_LIBRARIES = libvnet.a
+lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
-vnet_unix_LDADD = -lvlib_unix -lvlib -lclib -lpthread -ldl
-vnet_unix_LDFLAGS = -static
+vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -ldl
 all: all-am
 
 .SUFFIXES:
@@ -321,54 +313,52 @@ $(top_srcdir)/configure:  $(am__configure_deps)
 	cd $(srcdir) && $(AUTOCONF)
 $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
 	cd $(srcdir) && $(ACLOCAL) $(ACLOCAL_AMFLAGS)
-install-libLIBRARIES: $(lib_LIBRARIES)
+install-libLTLIBRARIES: $(lib_LTLIBRARIES)
 	@$(NORMAL_INSTALL)
 	test -z "$(libdir)" || $(MKDIR_P) "$(DESTDIR)$(libdir)"
-	@list='$(lib_LIBRARIES)'; for p in $$list; do \
+	@list='$(lib_LTLIBRARIES)'; for p in $$list; do \
 	  if test -f $$p; then \
 	    f=$(am__strip_dir) \
-	    echo " $(libLIBRARIES_INSTALL) '$$p' '$(DESTDIR)$(libdir)/$$f'"; \
-	    $(libLIBRARIES_INSTALL) "$$p" "$(DESTDIR)$(libdir)/$$f"; \
-	  else :; fi; \
-	done
-	@$(POST_INSTALL)
-	@list='$(lib_LIBRARIES)'; for p in $$list; do \
-	  if test -f $$p; then \
-	    p=$(am__strip_dir) \
-	    echo " $(RANLIB) '$(DESTDIR)$(libdir)/$$p'"; \
-	    $(RANLIB) "$(DESTDIR)$(libdir)/$$p"; \
+	    echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(libLTLIBRARIES_INSTALL) $(INSTALL_STRIP_FLAG) '$$p' '$(DESTDIR)$(libdir)/$$f'"; \
+	    $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(libLTLIBRARIES_INSTALL) $(INSTALL_STRIP_FLAG) "$$p" "$(DESTDIR)$(libdir)/$$f"; \
 	  else :; fi; \
 	done
 
-uninstall-libLIBRARIES:
+uninstall-libLTLIBRARIES:
 	@$(NORMAL_UNINSTALL)
-	@list='$(lib_LIBRARIES)'; for p in $$list; do \
+	@list='$(lib_LTLIBRARIES)'; for p in $$list; do \
 	  p=$(am__strip_dir) \
-	  echo " rm -f '$(DESTDIR)$(libdir)/$$p'"; \
-	  rm -f "$(DESTDIR)$(libdir)/$$p"; \
+	  echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f '$(DESTDIR)$(libdir)/$$p'"; \
+	  $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f "$(DESTDIR)$(libdir)/$$p"; \
 	done
 
-clean-libLIBRARIES:
-	-test -z "$(lib_LIBRARIES)" || rm -f $(lib_LIBRARIES)
+clean-libLTLIBRARIES:
+	-test -z "$(lib_LTLIBRARIES)" || rm -f $(lib_LTLIBRARIES)
+	@list='$(lib_LTLIBRARIES)'; for p in $$list; do \
+	  dir="`echo $$p | sed -e 's|/[^/]*$$||'`"; \
+	  test "$$dir" != "$$p" || dir=.; \
+	  echo "rm -f \"$${dir}/so_locations\""; \
+	  rm -f "$${dir}/so_locations"; \
+	done
 vnet/ethernet/$(am__dirstamp):
 	@$(MKDIR_P) vnet/ethernet
 	@: > vnet/ethernet/$(am__dirstamp)
 vnet/ethernet/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/ethernet/$(DEPDIR)
 	@: > vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/cli.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+vnet/ethernet/cli.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/format.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+vnet/ethernet/format.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/init.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+vnet/ethernet/init.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/interface.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+vnet/ethernet/interface.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/node.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+vnet/ethernet/node.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/pg.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+vnet/ethernet/pg.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/phy.$(OBJEXT): vnet/ethernet/$(am__dirstamp) \
+vnet/ethernet/phy.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
 vnet/pg/$(am__dirstamp):
 	@$(MKDIR_P) vnet/pg
@@ -376,17 +366,17 @@ vnet/pg/$(am__dirstamp):
 vnet/pg/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/pg/$(DEPDIR)
 	@: > vnet/pg/$(DEPDIR)/$(am__dirstamp)
-vnet/pg/cli.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+vnet/pg/cli.lo: vnet/pg/$(am__dirstamp) \
 	vnet/pg/$(DEPDIR)/$(am__dirstamp)
-vnet/pg/edit.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+vnet/pg/edit.lo: vnet/pg/$(am__dirstamp) \
 	vnet/pg/$(DEPDIR)/$(am__dirstamp)
-vnet/pg/init.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+vnet/pg/init.lo: vnet/pg/$(am__dirstamp) \
 	vnet/pg/$(DEPDIR)/$(am__dirstamp)
-vnet/pg/input.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+vnet/pg/input.lo: vnet/pg/$(am__dirstamp) \
 	vnet/pg/$(DEPDIR)/$(am__dirstamp)
-vnet/pg/output.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+vnet/pg/output.lo: vnet/pg/$(am__dirstamp) \
 	vnet/pg/$(DEPDIR)/$(am__dirstamp)
-vnet/pg/stream.$(OBJEXT): vnet/pg/$(am__dirstamp) \
+vnet/pg/stream.lo: vnet/pg/$(am__dirstamp) \
 	vnet/pg/$(DEPDIR)/$(am__dirstamp)
 vnet/devices/$(am__dirstamp):
 	@$(MKDIR_P) vnet/devices
@@ -394,12 +384,10 @@ vnet/devices/$(am__dirstamp):
 vnet/devices/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/devices/$(DEPDIR)
 	@: > vnet/devices/$(DEPDIR)/$(am__dirstamp)
-vnet/devices/ethernet_phy_bcm.$(OBJEXT): vnet/devices/$(am__dirstamp) \
+vnet/devices/ethernet_phy_bcm.lo: vnet/devices/$(am__dirstamp) \
 	vnet/devices/$(DEPDIR)/$(am__dirstamp)
-libvnet.a: $(libvnet_a_OBJECTS) $(libvnet_a_DEPENDENCIES) 
-	-rm -f libvnet.a
-	$(libvnet_a_AR) libvnet.a $(libvnet_a_OBJECTS) $(libvnet_a_LIBADD)
-	$(RANLIB) libvnet.a
+libvnet.la: $(libvnet_la_OBJECTS) $(libvnet_la_DEPENDENCIES) 
+	$(LINK) -rpath $(libdir) $(libvnet_la_OBJECTS) $(libvnet_la_LIBADD) $(LIBS)
 
 clean-noinstPROGRAMS:
 	@list='$(noinst_PROGRAMS)'; for p in $$list; do \
@@ -417,44 +405,58 @@ example/main_stub.$(OBJEXT): example/$(am__dirstamp) \
 	example/$(DEPDIR)/$(am__dirstamp)
 vnet_unix$(EXEEXT): $(vnet_unix_OBJECTS) $(vnet_unix_DEPENDENCIES) 
 	@rm -f vnet_unix$(EXEEXT)
-	$(vnet_unix_LINK) $(vnet_unix_OBJECTS) $(vnet_unix_LDADD) $(LIBS)
+	$(LINK) $(vnet_unix_OBJECTS) $(vnet_unix_LDADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
 	-rm -f example/main_stub.$(OBJEXT)
 	-rm -f vnet/devices/ethernet_phy_bcm.$(OBJEXT)
+	-rm -f vnet/devices/ethernet_phy_bcm.lo
 	-rm -f vnet/ethernet/cli.$(OBJEXT)
+	-rm -f vnet/ethernet/cli.lo
 	-rm -f vnet/ethernet/format.$(OBJEXT)
+	-rm -f vnet/ethernet/format.lo
 	-rm -f vnet/ethernet/init.$(OBJEXT)
+	-rm -f vnet/ethernet/init.lo
 	-rm -f vnet/ethernet/interface.$(OBJEXT)
+	-rm -f vnet/ethernet/interface.lo
 	-rm -f vnet/ethernet/node.$(OBJEXT)
+	-rm -f vnet/ethernet/node.lo
 	-rm -f vnet/ethernet/pg.$(OBJEXT)
+	-rm -f vnet/ethernet/pg.lo
 	-rm -f vnet/ethernet/phy.$(OBJEXT)
+	-rm -f vnet/ethernet/phy.lo
 	-rm -f vnet/pg/cli.$(OBJEXT)
+	-rm -f vnet/pg/cli.lo
 	-rm -f vnet/pg/edit.$(OBJEXT)
+	-rm -f vnet/pg/edit.lo
 	-rm -f vnet/pg/init.$(OBJEXT)
+	-rm -f vnet/pg/init.lo
 	-rm -f vnet/pg/input.$(OBJEXT)
+	-rm -f vnet/pg/input.lo
 	-rm -f vnet/pg/output.$(OBJEXT)
+	-rm -f vnet/pg/output.lo
 	-rm -f vnet/pg/stream.$(OBJEXT)
+	-rm -f vnet/pg/stream.lo
 
 distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@example/$(DEPDIR)/main_stub.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/$(DEPDIR)/ethernet_phy_bcm.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/cli.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/format.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/init.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/interface.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/node.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/pg.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/phy.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/cli.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/edit.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/init.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/input.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/output.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/stream.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/$(DEPDIR)/ethernet_phy_bcm.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/cli.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/init.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/interface.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/node.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/pg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/phy.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/cli.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/edit.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/init.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/input.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/output.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/stream.Plo@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.o$$||'`;\
@@ -485,6 +487,9 @@ mostlyclean-libtool:
 
 clean-libtool:
 	-rm -rf .libs _libs
+	-rm -rf vnet/devices/.libs vnet/devices/_libs
+	-rm -rf vnet/ethernet/.libs vnet/ethernet/_libs
+	-rm -rf vnet/pg/.libs vnet/pg/_libs
 
 distclean-libtool:
 	-rm -f libtool config.lt
@@ -688,7 +693,7 @@ distcleancheck: distclean
 	       exit 1; } >&2
 check-am: all-am
 check: check-am
-all-am: Makefile $(LIBRARIES) $(PROGRAMS) $(HEADERS)
+all-am: Makefile $(LTLIBRARIES) $(PROGRAMS) $(HEADERS)
 installdirs:
 	for dir in "$(DESTDIR)$(libdir)" "$(DESTDIR)$(includedir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
@@ -727,7 +732,7 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-am
 
-clean-am: clean-generic clean-libLIBRARIES clean-libtool \
+clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
 	clean-noinstPROGRAMS mostlyclean-am
 
 distclean: distclean-am
@@ -751,7 +756,7 @@ install-data-am: install-nobase_includeHEADERS
 
 install-dvi: install-dvi-am
 
-install-exec-am: install-libLIBRARIES
+install-exec-am: install-libLTLIBRARIES
 
 install-html: install-html-am
 
@@ -785,12 +790,12 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-libLIBRARIES uninstall-nobase_includeHEADERS
+uninstall-am: uninstall-libLTLIBRARIES uninstall-nobase_includeHEADERS
 
 .MAKE: install-am install-strip
 
 .PHONY: CTAGS GTAGS all all-am am--refresh check check-am clean \
-	clean-generic clean-libLIBRARIES clean-libtool \
+	clean-generic clean-libLTLIBRARIES clean-libtool \
 	clean-noinstPROGRAMS ctags dist dist-all dist-bzip2 dist-gzip \
 	dist-lzma dist-shar dist-tarZ dist-zip distcheck distclean \
 	distclean-compile distclean-generic distclean-libtool \
@@ -798,13 +803,13 @@ uninstall-am: uninstall-libLIBRARIES uninstall-nobase_includeHEADERS
 	dvi-am html html-am info info-am install install-am \
 	install-data install-data-am install-dvi install-dvi-am \
 	install-exec install-exec-am install-html install-html-am \
-	install-info install-info-am install-libLIBRARIES install-man \
-	install-nobase_includeHEADERS install-pdf install-pdf-am \
-	install-ps install-ps-am install-strip installcheck \
-	installcheck-am installdirs maintainer-clean \
+	install-info install-info-am install-libLTLIBRARIES \
+	install-man install-nobase_includeHEADERS install-pdf \
+	install-pdf-am install-ps install-ps-am install-strip \
+	installcheck installcheck-am installdirs maintainer-clean \
 	maintainer-clean-generic mostlyclean mostlyclean-compile \
 	mostlyclean-generic mostlyclean-libtool pdf pdf-am ps ps-am \
-	tags uninstall uninstall-am uninstall-libLIBRARIES \
+	tags uninstall uninstall-am uninstall-libLTLIBRARIES \
 	uninstall-nobase_includeHEADERS
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.

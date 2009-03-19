@@ -129,26 +129,19 @@ typedef struct ethernet_phy_device_registration {
   ethernet_phy_device_id_t supported_devices[];
 } ethernet_phy_device_registration_t;
 
-#define ETHERNET_PHY_REGISTER_DEVICE_ALIGN (16)
-
-#define REGISTER_ETHERNET_PHY_DEVICE(x)					\
-  ethernet_phy_device_registration_t x					\
-    __attribute__ ((used,						\
-		    aligned (ETHERNET_PHY_REGISTER_DEVICE_ALIGN),	\
-		    section (VLIB_ELF_SECTION (ethernet_phy))))		\
+#define REGISTER_ETHERNET_PHY_DEVICE(x) \
+  VLIB_ELF_SECTION_DATA(x,ethernet_phy_device_registration_t,ethernet_phy)
 
 static inline ethernet_phy_device_registration_t *
 ethernet_phy_device_next_registered (ethernet_phy_device_registration_t * r)
 {
-  uword a, i;
+  uword i;
 
   /* Null vendor id marks end of initialized list. */
   for (i = 0; r->supported_devices[i].vendor_id != 0; i++)
     ;
 
-  a = (pointer_to_uword (r + 1) + i * sizeof (r->supported_devices[0]));
-  a = round_pow2 (a, ETHERNET_PHY_REGISTER_DEVICE_ALIGN);
-  return uword_to_pointer (a, void *);
+  return vlib_elf_section_data_next (r, i * sizeof (r->supported_devices[0]));
 }
 
 static inline clib_error_t *

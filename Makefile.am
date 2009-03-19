@@ -2,7 +2,7 @@ AUTOMAKE_OPTIONS = foreign subdir-objects
 
 AM_CFLAGS = -Wall
 
-libvnet_a_SOURCES =
+libvnet_la_SOURCES =
 
 nobase_include_HEADERS =
 
@@ -13,7 +13,7 @@ nobase_include_HEADERS =
 ########################################
 # Layer 2 protocol: Ethernet
 ########################################
-libvnet_a_SOURCES +=				\
+libvnet_la_SOURCES +=				\
  vnet/ethernet/cli.c				\
  vnet/ethernet/format.c				\
  vnet/ethernet/init.c				\
@@ -36,7 +36,7 @@ nobase_include_HEADERS +=			\
 ########################################
 # Layer 3 protocol: IP v4 (& v6)
 ########################################
-# libvnet_a_SOURCES +=				\
+# libvnet_la_SOURCES +=				\
 #  vnet/ip/ip_checksum.c				\
 #  vnet/ip/ip_format.c					\
 #  vnet/ip/ip_init.c					\
@@ -69,7 +69,7 @@ nobase_include_HEADERS +=			\
 # Packet generator
 ########################################
 
-libvnet_a_SOURCES +=				\
+libvnet_la_SOURCES +=				\
   vnet/pg/cli.c					\
   vnet/pg/edit.c				\
   vnet/pg/init.c				\
@@ -85,13 +85,12 @@ nobase_include_HEADERS +=			\
 # Hardware devices
 ########################################
 
-libvnet_a_SOURCES +=				\
+libvnet_la_SOURCES +=				\
   vnet/devices/ethernet_phy_bcm.c
 
-lib_LIBRARIES = libvnet.a
+lib_LTLIBRARIES = libvnet.la
 
 noinst_PROGRAMS = vnet_unix
 
 vnet_unix_SOURCES = example/main_stub.c
-vnet_unix_LDADD = -lvlib_unix -lvlib -lclib -lpthread -ldl
-vnet_unix_LDFLAGS = -static
+vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -ldl
