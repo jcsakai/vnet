@@ -1258,7 +1258,7 @@ pg_generate_buffers (vlib_node_runtime_t * node,
     {
       u32 * head, * start, * end;
 
-      vlib_get_next (vm, node, s->next_index, to_next, n_left);
+      vlib_get_next_frame (vm, node, s->next_index, to_next, n_left);
 
       n_this_frame = n_buffers_to_generate;
       if (n_this_frame > n_left)
@@ -1373,6 +1373,3 @@ VLIB_REGISTER_NODE (pg_input_node) = {
   /* Input node will be left disabled until a stream is active. */
   .flags = VLIB_NODE_FLAG_IS_DISABLED,
 };
-
-/* Dummy function to get us linked in. */
-void vlib_pg_input_reference (void) {}
