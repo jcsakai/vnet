@@ -233,13 +233,11 @@ ethernet_input (vlib_main_t * vm,
 	  
 	  if (PREDICT_FALSE ((i0 != i_next) || (i0 == SPARSE_VEC_INVALID_INDEX)))
 	    {
-	      n_left_to_next += 1;
-
 	      /* Set packet to wrong next? */
 	      if (i0 != i_next)
 		{
-		  /* Return old frame. */
-		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+		  /* Return old frame; remove incorrectly enqueued packet. */
+		  vlib_put_next_frame (vm, node, next_index, n_left_to_next - 1);
 
 		  /* Send to correct next. */
 		  i_next = i0;
@@ -248,7 +246,6 @@ ethernet_input (vlib_main_t * vm,
 				       to_next, n_left_to_next);
 		  to_next[0] = pi0;
 		  to_next += 1;
-		  n_left_to_next -= 1;
 		}
 
 	      /* Error? */
@@ -306,6 +303,8 @@ static char * ethernet_error_strings[] = {
 VLIB_REGISTER_NODE (ethernet_input_node) = {
   .function = ethernet_input,
   .name = "ethernet-input",
+  /* Takes a vector of packets. */
+  .vector_size = sizeof (u32),
 
   .runtime_data_bytes = sizeof (ethernet_input_runtime_t),
 
