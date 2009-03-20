@@ -67,7 +67,7 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
     }
 
   header_bytes = sizeof (e[0]) + n_vlan * sizeof (v[0]);
-  if (max_header_bytes < header_bytes)
+  if (max_header_bytes != 0 && header_bytes > max_header_bytes)
     return format (s, "ethernet header truncated");
 
   indent = format_get_indent (s);
@@ -118,7 +118,7 @@ unformat_ethernet_address_unix (unformat_input_t * input, va_list * args)
   u8 * result = va_arg (*args, u8 *);
   u32 i, a[6];
 
-  if (! unformat (input, "%x:%x:%x:%x:%x:%x",
+  if (! unformat (input, "%_%x:%x:%x:%x:%x:%x%_",
 		  &a[0], &a[1], &a[2], &a[3], &a[4], &a[5]))
     return 0;
 
@@ -140,7 +140,7 @@ unformat_ethernet_address_cisco (unformat_input_t * input, va_list * args)
   u8 * result = va_arg (*args, u8 *);
   u32 i, a[3];
 
-  if (! unformat (input, "%x.%x.%x", &a[0], &a[1], &a[2]))
+  if (! unformat (input, "%_%x.%x.%x%_", &a[0], &a[1], &a[2]))
     return 0;
 
   /* Check range. */
