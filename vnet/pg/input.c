@@ -819,8 +819,12 @@ static u64 do_it (pg_main_t * pg,
     u32 n_bits = max_bits; 
 
     max_bits = clib_max (max_pow2 (n_bits), 8);
+
     mask = ((u64) 1 << (u64) n_bits) - 1;
     mask &= ~(((u64) 1 << (u64) shift) - 1);
+
+    mask <<= max_bits - n_bits;
+    shift += max_bits - n_bits;
 
     switch (max_bits)
       {
