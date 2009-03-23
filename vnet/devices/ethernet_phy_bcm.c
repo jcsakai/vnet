@@ -221,7 +221,8 @@
 #define	MII_MODEL_BROADCOM_BCM5703	0x0016
 #define	MII_MODEL_BROADCOM_BCM5704	0x0019
 #define	MII_MODEL_BROADCOM_BCM5705	0x001a
-#define	MII_MODEL_BROADCOM_BCM5720	0x001d
+#define	MII_MODEL_BROADCOM_BCM5228	0x001c
+#define	MII_MODEL_BROADCOM_BCM5248	0x001d
 #define	MII_MODEL_BROADCOM_BCM5750	0x0018
 
 static clib_error_t * brgphy_init (ethernet_phy_t * phy)
@@ -355,9 +356,15 @@ static clib_error_t * brgphy_reset (ethernet_phy_t * phy)
     }
 
   if (n_regs > 0)
-    error = ethernet_phy_write_multiple (phy, regs, n_regs);
+    {
+      error = ethernet_phy_write_multiple (phy, regs, n_regs);
+      if (error)
+	return error;
+    }
 
-  if (! error)
+  /* 52[24]8 are not GIGE phys. */
+  if (phy->device_id != MII_MODEL_BROADCOM_BCM5228
+      && phy->device_id != MII_MODEL_BROADCOM_BCM5248)
     error = set_wirespeed (phy);
 
   return error;
@@ -384,9 +391,11 @@ static REGISTER_ETHERNET_PHY_DEVICE (brgphy_phy_device) = {
     { .vendor_id = MII_OUI_BROADCOM,
       .device_id = MII_MODEL_BROADCOM_BCM5705, },
     { .vendor_id = MII_OUI_BROADCOM,
-      .device_id = MII_MODEL_BROADCOM_BCM5720, },
-    { .vendor_id = MII_OUI_BROADCOM,
       .device_id = MII_MODEL_BROADCOM_BCM5750, },
+    { .vendor_id = MII_OUI_BROADCOM,
+      .device_id = MII_MODEL_BROADCOM_BCM5228, },
+    { .vendor_id = MII_OUI_BROADCOM,
+      .device_id = MII_MODEL_BROADCOM_BCM5248, },
     { 0 },
   }
 };
