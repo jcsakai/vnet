@@ -233,7 +233,7 @@ ethernet_input (vlib_main_t * vm,
 	  
 	  if (PREDICT_FALSE ((i0 != i_next) || (i0 == SPARSE_VEC_INVALID_INDEX)))
 	    {
-	      /* Set packet to wrong next? */
+	      /* Sent packet to wrong next? */
 	      if (i0 != i_next)
 		{
 		  /* Return old frame; remove incorrectly enqueued packet. */

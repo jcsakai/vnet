@@ -109,9 +109,9 @@ ethernet_register_interface (vlib_main_t * vm,
     goto done;
 
   hw_if_index = vlib_register_interface (vm,
-				       dev_class, dev_instance,
-				       &ethernet_interface_class,
-				       ei - em->interfaces);
+					 dev_class, dev_instance,
+					 &ethernet_interface_class,
+					 ei - em->interfaces);
   *hw_if_index_return = hw_if_index;
 
   hi = vlib_get_hw_interface (vm, hw_if_index);
