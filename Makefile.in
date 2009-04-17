@@ -275,7 +275,7 @@ nobase_include_HEADERS = vnet/ethernet/error.def \
 	vnet/pg/edit.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
-vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -lclib -lpthread -ldl
+vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -lclib -lpthread -lm -ldl
 all: all-am
 
 .SUFFIXES:
