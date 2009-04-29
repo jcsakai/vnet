@@ -340,3 +340,5 @@ static VLIB_CLI_COMMAND (change_stream_parameters_cli) = {
   .function = change_stream_parameters,
   .parent = &vlib_cli_pg_command,
 };
+
+void pg_reference (void) {}

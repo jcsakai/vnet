@@ -242,4 +242,6 @@ pg_get_node (uword node_index)
   return pg->nodes + node_index;
 }
 
+void pg_reference (void);
+
 #endif /* included_vlib_pg_h */
