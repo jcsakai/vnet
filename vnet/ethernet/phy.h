@@ -54,6 +54,9 @@ typedef struct {
 #define ETHERNET_MEDIA_MASTER		(1 << 4)
   /* No MII; raw 10 bit SERDES interface. */
 #define ETHERNET_MEDIA_SERDES		(1 << 5)
+#define ETHERNET_MEDIA_AUTONEG          (1 << 6)
+#define ETHERNET_MEDIA_GMII_CLOCK       (1 << 7)
+#define ETHERNET_MEDIA_MAC_TO_MAC       (1 << 8)
   ethernet_media_type_t type : 16;
 } ethernet_media_t;
 
