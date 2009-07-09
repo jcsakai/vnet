@@ -558,6 +558,12 @@ u8 * format_ethernet_media (u8 * s, va_list * args)
   if (m->flags & ETHERNET_MEDIA_LOOPBACK)
     s = format (s, "loopback, ");
 
+  if (m->flags & ETHERNET_MEDIA_AUTONEG)
+    s = format (s, "auto-negotiation, ");
+
+  if (m->flags & ETHERNET_MEDIA_GMII_CLOCK)
+    s = format (s, "gmii-clock, ");
+
   return s;
 }
 
