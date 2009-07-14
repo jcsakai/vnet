@@ -246,6 +246,7 @@ ethernet_input (vlib_main_t * vm,
 				       to_next, n_left_to_next);
 		  to_next[0] = pi0;
 		  to_next += 1;
+		  n_left_to_next -= 1;
 		}
 
 	      /* Error? */
