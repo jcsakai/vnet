@@ -95,18 +95,21 @@ ethernet_register_interface (vlib_main_t * vm,
   ethernet_main_t * em = ethernet_get_main (vm);
   ethernet_interface_t * ei;
   vlib_hw_interface_t * hi;
-  clib_error_t * error;
+  clib_error_t * error = 0;
   u32 hw_if_index;
 
   pool_get (em->interfaces, ei);
 
-  ei->phy.vlib_main = vm;
-  ei->phy.opaque = phy->opaque;
-  ei->phy.read_write = phy->read_write;
-  ei->phy.phy_address = phy->phy_address;
-  error = ethernet_phy_init (&ei->phy);
-  if (error)
-    goto done;
+  if (phy)
+    {
+      ei->phy.vlib_main = vm;
+      ei->phy.opaque = phy->opaque;
+      ei->phy.read_write = phy->read_write;
+      ei->phy.phy_address = phy->phy_address;
+      error = ethernet_phy_init (&ei->phy);
+      if (error)
+	goto done;
+    }
 
   hw_if_index = vlib_register_interface (vm,
 					 dev_class, dev_instance,
