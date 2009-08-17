@@ -49,8 +49,8 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
 
   vlib_hw_interface_set_flags (pg->vlib_main, pi->hw_if_index,
 			       (want_enabled
-				? VLIB_INTERFACE_FLAG_IS_UP
-				: VLIB_INTERFACE_FLAG_IS_DOWN));
+				? VLIB_HW_INTERFACE_FLAG_LINK_UP
+				: 0));
 
   vlib_node_enable_disable (pg->vlib_main,
 			    pg_input_node.index,
@@ -60,17 +60,34 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
   s->time_last_generate = 0;
 }
 
+static u8 * format_pg_interface_name (u8 * s, va_list * args)
+{
+  pg_main_t * pg = &pg_main;
+  u32 if_index = va_arg (*args, u32);
+  pg_interface_t * pi;
+
+  s = format (s, "pg/stream");
+  pi = vec_elt_at_index (pg->interfaces, if_index);
+  if (pi->stream_index != ~0)
+    {
+      pg_stream_t * st = vec_elt_at_index (pg->streams, pi->stream_index);
+      s = format (s, "-%v", st->name);
+    }
+
+  return s;
+}
+
 static vlib_device_class_t pg_dev_class = {
   .name = "pg",
   .tx_function = pg_output,
+  .format_device_name = format_pg_interface_name,
 };
 
 static vlib_hw_interface_class_t pg_interface_class = {
   .name = "Packet generator",
-  .interface_base_name = "pg",
 };
 
-u32 pg_interface_find_free (pg_main_t * pg)
+u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
 {
   vlib_main_t * vm = pg->vlib_main;
   pg_interface_t * pi;
@@ -87,6 +104,7 @@ u32 pg_interface_find_free (pg_main_t * pg)
       i = vec_len (pg->interfaces);
       vec_add2 (pg->interfaces, pi, 1);
 
+      pi->stream_index = stream_index;
       pi->hw_if_index = vlib_register_interface (vm,
 						 &pg_dev_class, i,
 						 &pg_interface_class, 0);
@@ -292,7 +310,7 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
   s->free_list_index = vlib_buffer_create_free_list (vm, s->max_buffer_bytes);
 
   /* Find an interface to use. */
-  s->pg_if_index = pg_interface_find_free (pg);
+  s->pg_if_index = pg_interface_find_free (pg, s - pg->streams);
 
   {
     pg_interface_t * pi = vec_elt_at_index (pg->interfaces, s->pg_if_index);

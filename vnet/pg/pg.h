@@ -185,6 +185,9 @@ pg_free_edit_group (pg_stream_t * s)
 typedef struct {
   /* VLIB interface indices. */
   u32 hw_if_index, sw_if_index;
+
+  /* Identifies stream for this interface. */
+  u32 stream_index;
 } pg_interface_t;
 
 /* Per VLIB node data. */
@@ -232,7 +235,7 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init);
 void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int is_enable);
 
 /* Find/create free packet-generator interface index. */
-u32 pg_interface_find_free (pg_main_t * pg);
+u32 pg_interface_find_free (pg_main_t * pg, uword stream_index);
 
 static always_inline pg_node_t *
 pg_get_node (uword node_index)

@@ -34,7 +34,6 @@ ethernet_interface_up_down (vlib_main_t * vm,
 
 static vlib_hw_interface_class_t ethernet_interface_class = {
   .name = "Ethernet",
-  .interface_base_name = "e",
   .format_address = format_ethernet_address,
   .format_header = format_ethernet_header_with_length,
   .up_down_function = ethernet_interface_up_down,
@@ -149,7 +148,7 @@ ethernet_interface_up_down (vlib_main_t * vm,
   hi = vlib_get_hw_interface (vm, hw_if_index);
   ei = ethernet_get_interface (em, hw_if_index);
 
-  if (flags & VLIB_INTERFACE_FLAG_IS_UP)
+  if (flags & VLIB_HW_INTERFACE_FLAG_LINK_UP)
     ethernet_interface_update_media (ei, hi);
 
   sw_if_index = hi->sw_if_index;

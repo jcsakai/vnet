@@ -289,7 +289,7 @@ ethernet_sw_interface_up_down (vlib_main_t * vm,
     goto done;
 
   m->vlan_to_sw_if_index[si->sub.id] =
-    ((flags & VLIB_INTERFACE_FLAG_IS_UP) ? sw_if_index : si->sup_sw_if_index);
+    ((flags & VLIB_SW_INTERFACE_FLAG_UP) ? sw_if_index : si->sup_sw_if_index);
 
  done:
   return error;
