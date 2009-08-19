@@ -29,7 +29,7 @@
 static int
 validate_buffer_data (vlib_buffer_t * b, pg_stream_t * s)
 {
-  u8 * bd, * pd, * pm;
+  u8 * bd, * bd_copy = 0, * pd, * pm;
   u32 i, n_bytes;
 
   bd = b->data;
@@ -39,9 +39,20 @@ validate_buffer_data (vlib_buffer_t * b, pg_stream_t * s)
 
   for (i = 0; i < n_bytes; i++)
     if ((bd[i] & pm[i]) != pd[i])
-      return 0;
+      break;
 
-  return 1;
+  if (i >= n_bytes)
+    return 1;
+
+  bd_copy = 0;
+  vec_add (bd_copy, bd, n_bytes);
+
+  clib_warning ("differ at index %d", i);
+  clib_warning ("is     %U", format_hex_bytes, bd, n_bytes);
+  clib_warning ("expect %U", format_hex_bytes, pd, n_bytes);
+  ASSERT (0);
+
+  return 0;
 }
 
 static always_inline void
@@ -935,9 +946,9 @@ pg_generate_edit (pg_main_t * pg,
 	    v_min = pg_edit_get_value (e, PG_EDIT_LO);
 	    v_max = pg_edit_get_value (e, PG_EDIT_HI);
 
-	    lo_bit = (BITS (u8) * STRUCT_OFFSET_OF (vlib_buffer_t, data)
-		      + e->bit_offset);
-	    hi_bit = lo_bit + e->n_bits;
+	    hi_bit = (BITS (u8) * STRUCT_OFFSET_OF (vlib_buffer_t, data)
+		      + e->lsb_bit_offset);
+	    lo_bit = hi_bit - e->n_bits + BITS (u8);
 
 	    e->last_increment_value
 	      = do_it (pg, s, buffers, n_buffers, lo_bit, hi_bit, v_min, v_max,

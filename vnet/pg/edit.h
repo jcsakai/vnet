@@ -47,8 +47,11 @@ typedef struct {
   pg_edit_type_t type;
 
   /* Bit offset within packet where value is to be written.
-     Negative offsets are encode special edits. */
-  i32 bit_offset;
+     Bits are written in network byte order: high bits first.
+     This is the bit offset of the least significant bit: i.e. the
+     highest numbered byte * 8 plus bit offset within that byte.
+     Negative offsets encode special edits. */
+  i32 lsb_bit_offset;
 
   /* Special offset indicating this edit is for packet length. */
 #define PG_EDIT_PACKET_LENGTH (-1)
@@ -73,60 +76,55 @@ pg_edit_free (pg_edit_t * e)
     vec_free (e->values[i]);
 }
 
-#define pg_edit_init(e,type,field)				\
-do {								\
-  (e)->bit_offset = BITS (u8) * STRUCT_OFFSET_OF (type, field);	\
-  (e)->n_bits = BITS (u8) * STRUCT_SIZE_OF (type, field);	\
-} while (0)
-
 #define pg_edit_init_bitfield(e,type,field,field_offset,field_n_bits)	\
 do {									\
   u32 _bo;								\
 									\
-  /* Starting byte offset. */						\
+  ASSERT ((field_offset) < STRUCT_BITS_OF (type, field));		\
+									\
+  /* Start byte offset. */						\
   _bo = STRUCT_OFFSET_OF (type, field);					\
 									\
-  /* Big endian network byte position. */				\
-  _bo += (STRUCT_SIZE_OF (type, field)					\
-	  - 1 - ((field_n_bits) + (field_offset) - 1) / BITS (u8));	\
+  /* Adjust for big endian byte order. */				\
+  _bo += ((STRUCT_BITS_OF (type, field)					\
+	   - (field_offset) - 1) / BITS (u8));				\
 									\
-  /* Add in bit position within byte. */				\
-  _bo = BITS (u8) * _bo + ((field_offset) % BITS (u8)); 		\
-									\
-  (e)->bit_offset = _bo;						\
+  (e)->lsb_bit_offset = _bo * BITS (u8) + ((field_offset) % BITS (u8));	\
   (e)->n_bits = (field_n_bits);						\
 } while (0)
 
+/* Initialize edit for byte aligned fields. */
+#define pg_edit_init(e,type,field) \
+   pg_edit_init_bitfield(e,type,field,0,STRUCT_BITS_OF(type,field))
+
+static inline uword
+pg_edit_n_alloc_bytes (pg_edit_t * e)
+{
+  int i0, i1, n_bytes, n_bits_left;
+
+  i0 = e->lsb_bit_offset;
+  i1 = i0 % BITS (u8);
+
+  n_bytes = 0;
+  n_bits_left = e->n_bits;
+
+  if (n_bits_left > 0 && i1 != 0)
+    {
+      n_bytes++;
+      n_bits_left -= i1;
+      if (n_bits_left < 0)
+	n_bits_left = 0;
+    }
+
+  n_bytes += (n_bits_left / BITS (u8));
+  n_bytes += (n_bits_left % BITS (u8)) != 0;
+
+  return n_bytes;
+}
+
 static inline void
 pg_edit_alloc_value (pg_edit_t * e, int i)
-{
-  int i0, i1, n, n_bits_left;
-
-  ASSERT (i < ARRAY_LEN (e->values));
-
-  i0 = e->bit_offset;
-  i1 = i0 + e->n_bits;
-
-  n = 0;
-  n_bits_left = e->n_bits;
-  if (n_bits_left > 0 && (i0 % BITS (u8)))
-    {
-      n++;
-      n_bits_left -= i0 % BITS (u8);
-    }
-
-  if (n_bits_left > 0)
-    {
-      n += n_bits_left / BITS (u8);
-      n += (n_bits_left % BITS (u8)) != 0;
-    }
-
-  /* Make sure we have enough room for an int. */
-  if (n < sizeof (int))
-    n = sizeof (int);
-
-  vec_validate (e->values[i], n - 1);
-}
+{ vec_validate (e->values[i], e->lsb_bit_offset / BITS (u8)); }
 
 extern void pg_edit_set_value (pg_edit_t * e, int hi_or_lo, u64 value);
 

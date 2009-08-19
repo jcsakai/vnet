@@ -36,13 +36,13 @@ pg_edit_set_value_helper (pg_edit_t * e, u64 value, u8 * result)
 
   n_bits_left = e->n_bits;
   i = 0;
-  j = e->bit_offset % BITS (v[0]);
+  j = e->lsb_bit_offset % BITS (v[0]);
 
   if (n_bits_left > 0 && j != 0)
     {
       v[i] = (value & 0xff) << j;
-      value >>= j;
-      n_bits_left -= j;
+      value >>= BITS (v[0]) - j;
+      n_bits_left -= BITS (v[0]) - j;
       i += 1;
     }
 
@@ -56,7 +56,7 @@ pg_edit_set_value_helper (pg_edit_t * e, u64 value, u8 * result)
 
   /* Convert to network byte order. */
   for (j = 0; j < i; j++)
-    result[j] = tmp[i - 1 - j];
+    result[j] = v[i - 1 - j];
 }
 
 void
@@ -133,8 +133,11 @@ unformat_pg_payload (unformat_input_t * input, va_list * args)
   e = pg_create_edit_group (s, sizeof (e[0]), 0);
 
   e->type = PG_EDIT_FIXED;
-  e->bit_offset = 0;
   e->n_bits = vec_len (v) * BITS (v[0]);
+
+  /* Least significant bit is at end of bitstream, since everything is always bigendian. */
+  e->lsb_bit_offset = e->n_bits - BITS (v[0]);
+
   e->values[PG_EDIT_LO] = v;
 
   return 1;

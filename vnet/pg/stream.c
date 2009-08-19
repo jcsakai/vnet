@@ -126,26 +126,13 @@ static void perform_fixed_edits (pg_stream_t * stream)
   m = 0;
   vec_foreach (e, old_edits)
     {
-      u32 i, i0, i1, mask, n_bits_left, n_bytes;
+      u32 i, i0, i1, mask, n_bits_left;
 
-      i0 = e->bit_offset / BITS (u8);
-      i1 = e->bit_offset % BITS (u8);
-
-      n_bytes = 0;
-      n_bits_left = e->n_bits;
-      if (i1 != 0 && n_bits_left > 0)
-	{
-	  u32 n = clib_min (n_bits_left, BITS (u8) - i1);
-	  n_bytes++;
-	  n_bits_left -= n;
-	}
-      
-      n_bytes += n_bits_left / BITS (u8);
-      n_bytes += (n_bits_left % BITS (u8)) != 0;
+      i0 = e->lsb_bit_offset / BITS (u8);
 
       /* Make space for edit in value and mask. */
-      vec_validate (s, i0 + n_bytes - 1);
-      vec_validate (m, i0 + n_bytes - 1);
+      vec_validate (s, i0);
+      vec_validate (m, i0);
 
       if (e->type != PG_EDIT_FIXED)
 	{
@@ -164,12 +151,14 @@ static void perform_fixed_edits (pg_stream_t * stream)
 	  continue;
 	}
 
-      i = n_bytes - 1;
-      i0 = (e->bit_offset + e->n_bits - 1) / BITS (u8);
-      i1 = e->bit_offset % BITS (u8);
       n_bits_left = e->n_bits;
-      v = e->values[PG_EDIT_LO];
+      i0 = e->lsb_bit_offset / BITS (u8);
+      i1 = e->lsb_bit_offset % BITS (u8);
 
+      v = e->values[PG_EDIT_LO];
+      i = pg_edit_n_alloc_bytes (e) - 1;
+
+      /* Odd low order bits?. */
       if (i1 != 0 && n_bits_left > 0)
 	{
 	  u32 n = clib_min (n_bits_left, BITS (u8) - i1);
@@ -188,6 +177,7 @@ static void perform_fixed_edits (pg_stream_t * stream)
 	  n_bits_left -= n;
 	}
 
+      /* Even bytes. */
       while (n_bits_left >= 8)
 	{
 	  ASSERT (i0 < vec_len (s));
@@ -201,6 +191,7 @@ static void perform_fixed_edits (pg_stream_t * stream)
 	  n_bits_left -= 8;
 	}
 
+      /* Odd high order bits. */
       if (n_bits_left > 0)
 	{
 	  mask = pow2_mask (n_bits_left);
@@ -240,9 +231,14 @@ compute_edit_bit_offsets (pg_stream_t * s)
       for (j = j0; j < j1; j++)
 	{
 	  e = s->edits + j;
-	  o = clib_max (o, e->bit_offset + e->n_bits);
+	  o = clib_max (o, e->lsb_bit_offset / BITS (u8));
 	}
-      g[0].start_bit_offset = o;
+
+      /* Groups should begin on a byte boundary. */
+      if (o == 0)
+	g[0].start_bit_offset = 0;
+      else
+	g[0].start_bit_offset = BITS (u8) * (1 + o);
 
       /* Relocate all edits in this group by
 	 bit offset of group. */
@@ -253,7 +249,7 @@ compute_edit_bit_offsets (pg_stream_t * s)
       for (j = j0; j < j1; j++)
 	{
 	  e = s->edits + j;
-	  e->bit_offset += g[0].start_bit_offset;
+	  e->lsb_bit_offset += g[0].start_bit_offset;
 	}
     }
 }
@@ -317,10 +313,10 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
     vlib_rx_or_tx_t rx_or_tx;
 
     vlib_foreach_rx_tx (rx_or_tx)
-    {
-      if (s->sw_if_index[rx_or_tx] == ~0)
-	s->sw_if_index[rx_or_tx] = pi->sw_if_index;
-    }
+      {
+	if (s->sw_if_index[rx_or_tx] == ~0)
+	  s->sw_if_index[rx_or_tx] = pi->sw_if_index;
+      }
   }
 
   /* Connect the graph. */
