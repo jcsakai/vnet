@@ -237,7 +237,7 @@ ethernet_input (vlib_main_t * vm,
 	      if (i0 != i_next)
 		{
 		  /* Return old frame; remove incorrectly enqueued packet. */
-		  vlib_put_next_frame (vm, node, next_index, n_left_to_next - 1);
+		  vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
 
 		  /* Send to correct next. */
 		  i_next = i0;

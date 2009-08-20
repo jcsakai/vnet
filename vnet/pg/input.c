@@ -29,7 +29,7 @@
 static int
 validate_buffer_data (vlib_buffer_t * b, pg_stream_t * s)
 {
-  u8 * bd, * bd_copy = 0, * pd, * pm;
+  u8 * bd, * pd, * pm;
   u32 i, n_bytes;
 
   bd = b->data;
@@ -44,14 +44,10 @@ validate_buffer_data (vlib_buffer_t * b, pg_stream_t * s)
   if (i >= n_bytes)
     return 1;
 
-  bd_copy = 0;
-  vec_add (bd_copy, bd, n_bytes);
-
+  clib_warning ("buffer %U", format_vlib_buffer, b);
   clib_warning ("differ at index %d", i);
   clib_warning ("is     %U", format_hex_bytes, bd, n_bytes);
   clib_warning ("expect %U", format_hex_bytes, pd, n_bytes);
-  ASSERT (0);
-
   return 0;
 }
 
@@ -1061,6 +1057,7 @@ static void pg_buffer_init (vlib_main_t * vm,
   pg_main_t * pg = &pg_main;
   pg_stream_t * s;
   s = pool_elt_at_index (pg->streams, fl->opaque);
+  ASSERT (vec_len (s->buffer_data) < fl->n_data_bytes);
   init_buffers_inline (vm, s, buffers, n_buffers,
 		       /* set_data */ 1);
 }
@@ -1218,8 +1215,8 @@ pg_input_trace (pg_main_t * pg,
       b0 = vlib_get_buffer (vm, bi0);
       b1 = vlib_get_buffer (vm, bi1);
 
-      vlib_trace_buffer (vm, node, next_index, b0);
-      vlib_trace_buffer (vm, node, next_index, b1);
+      vlib_trace_buffer (vm, node, next_index, b0, /* follow_chain */ 1);
+      vlib_trace_buffer (vm, node, next_index, b1, /* follow_chain */ 1);
 
       t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
       t1 = vlib_add_trace (vm, node, b1, sizeof (t1[0]));
@@ -1246,7 +1243,7 @@ pg_input_trace (pg_main_t * pg,
 
       b0 = vlib_get_buffer (vm, bi0);
 
-      vlib_trace_buffer (vm, node, next_index, b0);
+      vlib_trace_buffer (vm, node, next_index, b0, /* follow_chain */ 1);
       t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
 
       t0->stream_index = stream_index;

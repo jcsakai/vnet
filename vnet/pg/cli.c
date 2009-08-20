@@ -192,12 +192,12 @@ new_stream (vlib_main_t * vm,
       else if (unformat (input, "rate %f", &s.rate_buffers_per_second))
 	;
 
-      else if (unformat (input, "increment-size %d-%d",
+      else if (unformat (input, "size %d-%d",
 			 &s.min_buffer_bytes,
 			 &s.max_buffer_bytes))
 	s.buffer_size_edit_type = PG_EDIT_INCREMENT;
 
-      else if (unformat (input, "random-size %d-%d",
+      else if (unformat (input, "size %d+%d",
 			 &s.min_buffer_bytes,
 			 &s.max_buffer_bytes))
 	s.buffer_size_edit_type = PG_EDIT_RANDOM;

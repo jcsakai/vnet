@@ -292,6 +292,8 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
     {
     case PG_EDIT_INCREMENT:
     case PG_EDIT_RANDOM:
+      if (s->min_buffer_bytes == s->max_buffer_bytes)
+	s->buffer_size_edit_type = PG_EDIT_FIXED;
       break;
 
     default:
