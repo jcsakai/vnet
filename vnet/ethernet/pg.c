@@ -73,20 +73,21 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
   pg_ethernet_header_t * e;
   pg_ethernet_vlan_header_t * v;
   pg_edit_t * ether_type_edit;
-  u32 n_vlan, error, group_index;
+  u32 n_vlan, error, group_index, e_type;
   
   e = pg_create_edit_group (s, sizeof (e[0]), &group_index);
   pg_ethernet_header_init (e);
   error = 1;
 
   if (! unformat (input, "%U: %U -> %U",
-		  unformat_pg_edit,
-		    unformat_ethernet_type_net_byte_order, &e->type,
+		  unformat_ethernet_type_net_byte_order, &e_type,
 		  unformat_pg_edit,
 		    unformat_ethernet_address, &e->src_address,
 		  unformat_pg_edit,
 		    unformat_ethernet_address, &e->dst_address))
     goto done;
+
+  pg_edit_set_fixed (&e->type, e_type);
 
   n_vlan = 0;
   while (unformat (input, "vlan"))

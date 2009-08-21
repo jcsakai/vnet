@@ -37,7 +37,7 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
     return;
       
   if (want_enabled)
-    s->n_buffers_generated = 0;
+    s->n_packets_generated = 0;
 
   /* Toggle enabled flag. */
   s->flags ^= PG_STREAM_FLAGS_IS_ENABLED;
@@ -56,7 +56,7 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
 			    pg_input_node.index,
 			    ! clib_bitmap_is_zero (pg->enabled_streams));
 
-  s->buffer_accumulator = 0;
+  s->packet_accumulator = 0;
   s->time_last_generate = 0;
 }
 
@@ -208,8 +208,8 @@ static void perform_fixed_edits (pg_stream_t * stream)
     }
 
   vec_free (old_edits);
-  stream->buffer_data = s;
-  stream->buffer_data_mask = m;
+  stream->fixed_packet_data = s;
+  stream->fixed_packet_data_mask = m;
   stream->edits = new_edits;
 }
 
@@ -287,25 +287,41 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
   /* Get fixed part of buffer data. */
   perform_fixed_edits (s);
 
-  /* Determine buffer size. */
-  switch (s->buffer_size_edit_type)
+  /* Determine packet size. */
+  switch (s->packet_size_edit_type)
     {
     case PG_EDIT_INCREMENT:
     case PG_EDIT_RANDOM:
-      if (s->min_buffer_bytes == s->max_buffer_bytes)
-	s->buffer_size_edit_type = PG_EDIT_FIXED;
+      if (s->min_packet_bytes == s->max_packet_bytes)
+	s->packet_size_edit_type = PG_EDIT_FIXED;
       break;
 
     default:
-      /* Get buffer size from fixed edits. */
-      s->buffer_size_edit_type = PG_EDIT_FIXED;
-      s->min_buffer_bytes = s->max_buffer_bytes = vec_len (s->buffer_data);
+      /* Get packet size from fixed edits. */
+      s->packet_size_edit_type = PG_EDIT_FIXED;
+      s->min_packet_bytes = s->max_packet_bytes = vec_len (s->fixed_packet_data);
       break;
     }
 
-  s->last_increment_buffer_size = s->min_buffer_bytes;
+  s->last_increment_packet_size = s->min_packet_bytes;
 
-  s->free_list_index = vlib_buffer_create_free_list (vm, s->max_buffer_bytes);
+  {
+    pg_buffer_index_t * bi;
+    int n;
+
+    if (! s->buffer_bytes)
+      s->buffer_bytes = s->max_packet_bytes;
+
+    s->buffer_bytes = vlib_buffer_round_size (s->buffer_bytes);
+
+    n = s->max_packet_bytes / s->buffer_bytes;
+    n += (s->max_packet_bytes % s->buffer_bytes) != 0;
+
+    vec_resize (s->buffer_indices, n);
+
+    vec_foreach (bi, s->buffer_indices)
+      bi->free_list_index = vlib_buffer_create_free_list (vm, s->buffer_bytes);
+  }
 
   /* Find an interface to use. */
   s->pg_if_index = pg_interface_find_free (pg, s - pg->streams);
@@ -329,6 +345,7 @@ void pg_stream_del (pg_main_t * pg, uword index)
 {
   vlib_main_t * vm = pg->vlib_main;
   pg_stream_t * s;
+  pg_buffer_index_t * bi;
 
   s = pool_elt_at_index (pg->streams, index);
 
@@ -336,8 +353,11 @@ void pg_stream_del (pg_main_t * pg, uword index)
   vec_add1 (pg->free_interfaces, s->pg_if_index);
   hash_unset_mem (pg->stream_index_by_name, s->name);
 
-  vlib_buffer_delete_free_list (vm, s->free_list_index);
-  clib_fifo_free (s->buffer_fifo);
+  vec_foreach (bi, s->buffer_indices)
+    {
+      vlib_buffer_delete_free_list (vm, bi->free_list_index);
+      clib_fifo_free (bi->buffer_fifo);
+    }
 
   pg_stream_free (s);
   pool_put (pg->streams, s);

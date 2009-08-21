@@ -32,8 +32,6 @@
 struct pg_main_t;
 struct pg_stream_t;
 
-/* Function to perform miscellaneous edits (e.g. set IP checksum, ...). */
-
 typedef struct pg_edit_group_t {
   /* Index of first edit in group. */
   u32 start_edit_index;
@@ -41,6 +39,7 @@ typedef struct pg_edit_group_t {
   /* Starting bit offset for this edit group. */
   u32 start_bit_offset;
 
+  /* Function to perform miscellaneous edits (e.g. set IP checksum, ...). */
   void (* edit_function) (struct pg_main_t * pg,
 			  struct pg_stream_t * s,
 			  struct pg_edit_group_t * g,
@@ -51,6 +50,19 @@ typedef struct pg_edit_group_t {
   uword edit_function_opaque;
 } pg_edit_group_t;
 
+/* Packets are made of multiple buffers chained together.
+   This struct keeps track of data per-chain index. */
+typedef struct {
+  /* Vector of buffer edits for this stream and buffer index. */
+  pg_edit_t * edits;
+
+  /* Buffers pre-initialized with fixed buffer data for this stream. */
+  u32 * buffer_fifo;
+
+  /* Buffer free list for this buffer index in stream. */
+  u32 free_list_index;
+} pg_buffer_index_t;
+
 typedef struct pg_stream_t {
   /* Stream name. */
   u8 * name;
@@ -60,25 +72,29 @@ typedef struct pg_stream_t {
   /* Stream is currently enabled. */
 #define PG_STREAM_FLAGS_IS_ENABLED (1 << 0)
 
-  /* Vector of buffer edits for this stream. */
-  pg_edit_t * edits;
-
   /* Edit groups are created by each protocol level (e.g. ethernet,
      ip4, tcp, ...). */
   pg_edit_group_t * edit_groups;
 
-  pg_edit_type_t buffer_size_edit_type;
+  /* Vector of buffer edits for this stream. */
+  pg_edit_t * edits;
 
-  /* Min/max buffer size. */
-  u32 min_buffer_bytes, max_buffer_bytes;
+  pg_edit_type_t packet_size_edit_type;
 
-  /* Last buffer length if buffer size edit type is increment. */
-  u32 last_increment_buffer_size;
+  /* Min/max packet size. */
+  u32 min_packet_bytes, max_packet_bytes;
+
+  /* Size to use for buffers.  0 means use buffers big enough
+     for max_packet_bytes. */
+  u32 buffer_bytes;
+
+  /* Last packet length if packet size edit type is increment. */
+  u32 last_increment_packet_size;
 
   /* Index into main interface pool for this stream. */
   u32 pg_if_index;
 
-  /* Interface used to mark buffers for this stream.  May be different
+  /* Interface used to mark packets for this stream.  May be different
      than hw/sw index from pg main interface pool.  They will be
      different if this stream is being used generate buffers as if
      they were received on a non-pg interface.  For example, suppose you
@@ -92,48 +108,58 @@ typedef struct pg_stream_t {
   /* Output next index to reach output node from stream input node. */
   u32 next_index;
 
-  /* Number of buffers currently generated. */
-  u64 n_buffers_generated;
+  /* Number of packets currently generated. */
+  u64 n_packets_generated;
 
-  /* Stream is disabled when buffer limit is reached.
-     Zero means no buffer limit. */
-  u64 n_buffers_limit;
+  /* Stream is disabled when packet limit is reached.
+     Zero means no packet limit. */
+  u64 n_packets_limit;
 
-  /* Rate for this stream in buffers/second.
+  /* Rate for this stream in packets/second.
      Zero means unlimited rate. */
-  f64 rate_buffers_per_second;
+  f64 rate_packets_per_second;
 
   f64 time_last_generate;
-  f64 buffer_accumulator;
 
-  /* Buffer data with all fixed edits performed.
-     All buffers in stream are initialized according with this
-     data.
-     Mask specifies which bits of buffer data are covered by fixed edits. */
-  u8 * buffer_data, * buffer_data_mask;
+  f64 packet_accumulator;
 
-  /* Buffers pre-initialized with fixed buffer data for this stream. */
-  u32 * buffer_fifo;
+  /* Packet data with all fixed edits performed.
+     All packets in stream are initialized according with this data.
+     Mask specifies which bits of packet data are covered by fixed edits. */
+  u8 * fixed_packet_data, * fixed_packet_data_mask;
 
-  /* Buffer free list for this stream. */
-  u32 free_list_index;
+  pg_buffer_index_t * buffer_indices;
 } pg_stream_t;
 
-static inline void
+static always_inline void
+pg_buffer_index_free (pg_buffer_index_t * bi)
+{
+  vec_free (bi->edits);
+  clib_fifo_free (bi->buffer_fifo);
+}
+
+static always_inline void
 pg_stream_free (pg_stream_t * s)
 {
   vec_free (s->edits);
   vec_free (s->edit_groups);
-  vec_free (s->buffer_data);
-  vec_free (s->buffer_data_mask);
+  vec_free (s->fixed_packet_data);
+  vec_free (s->fixed_packet_data_mask);
   vec_free (s->name);
+
+  {
+    pg_buffer_index_t * bi;
+    vec_foreach (bi, s->buffer_indices)
+      pg_buffer_index_free (bi);
+    vec_free (s->buffer_indices);
+  }
 }
 
-static inline int
+static always_inline int
 pg_stream_is_enabled (pg_stream_t * s)
 { return (s->flags & PG_STREAM_FLAGS_IS_ENABLED) != 0; }
 
-static inline void *
+static always_inline void *
 pg_add_edits (pg_stream_t * s, int n_bytes)
 {
   pg_edit_t * e;
@@ -146,7 +172,7 @@ pg_add_edits (pg_stream_t * s, int n_bytes)
   return e;
 }
 
-static inline void *
+static always_inline void *
 pg_create_edit_group (pg_stream_t * s, int n_bytes, u32 * group_index)
 {
   pg_edit_group_t * g;
@@ -157,18 +183,18 @@ pg_create_edit_group (pg_stream_t * s, int n_bytes, u32 * group_index)
   return pg_add_edits (s, n_bytes);
 }
 
-static inline pg_edit_group_t *
+static always_inline pg_edit_group_t *
 pg_stream_get_group (pg_stream_t * s, u32 group_index)
 { return vec_elt_at_index (s->edit_groups, group_index); }
 
-static inline void *
+static always_inline void *
 pg_get_edit_group (pg_stream_t * s, u32 group_index)
 {
   pg_edit_group_t * g = pg_stream_get_group (s, group_index);
   return vec_elt_at_index (s->edits, g->start_edit_index);
 }
 
-static inline void
+static always_inline void
 pg_free_edit_group (pg_stream_t * s)
 {
   int i, l, n_orig_edits;

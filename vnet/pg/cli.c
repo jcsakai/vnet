@@ -94,13 +94,13 @@ static u8 * format_pg_stream (u8 * s, va_list * va)
   s = format (s, "%-16v%=12s%16Ld",
 	      t->name,
 	      pg_stream_is_enabled (t) ? "Yes" : "No",
-	      t->n_buffers_generated);
+	      t->n_packets_generated);
 
   v = 0;
-  if (t->n_buffers_limit > 0)
-    v = format (v, "limit %Ld, ", t->n_buffers_limit);
-  if (t->rate_buffers_per_second > 0)
-    v = format (v, "rate %.2epps, ", t->rate_buffers_per_second);
+  if (t->n_packets_limit > 0)
+    v = format (v, "limit %Ld, ", t->n_packets_limit);
+  if (t->rate_packets_per_second > 0)
+    v = format (v, "rate %.2epps, ", t->rate_packets_per_second);
   if (v)
     {
       s = format (s, "  %v", v);
@@ -187,20 +187,23 @@ new_stream (vlib_main_t * vm,
 	sub_input_given++;
 			 
       else if (unformat (input, "limit %f", &float_limit))
-	s.n_buffers_limit = float_limit;
+	s.n_packets_limit = float_limit;
 
-      else if (unformat (input, "rate %f", &s.rate_buffers_per_second))
+      else if (unformat (input, "rate %f", &s.rate_packets_per_second))
 	;
 
       else if (unformat (input, "size %d-%d",
-			 &s.min_buffer_bytes,
-			 &s.max_buffer_bytes))
-	s.buffer_size_edit_type = PG_EDIT_INCREMENT;
+			 &s.min_packet_bytes,
+			 &s.max_packet_bytes))
+	s.packet_size_edit_type = PG_EDIT_INCREMENT;
 
       else if (unformat (input, "size %d+%d",
-			 &s.min_buffer_bytes,
-			 &s.max_buffer_bytes))
-	s.buffer_size_edit_type = PG_EDIT_RANDOM;
+			 &s.min_packet_bytes,
+			 &s.max_packet_bytes))
+	s.packet_size_edit_type = PG_EDIT_RANDOM;
+
+      else if (unformat (input, "buffer-size %d", &s.buffer_bytes))
+	;
 
       else
 	{
@@ -210,15 +213,22 @@ new_stream (vlib_main_t * vm,
 	}
     }
 
-  if (s.max_buffer_bytes < s.min_buffer_bytes)
+  if (s.max_packet_bytes < s.min_packet_bytes)
     {
       error = clib_error_create ("max-size >= min-size");
       goto done;
     }
 
+  if (s.buffer_bytes >= 4096)
+    {
+      error = clib_error_create ("buffer-size limited to 4096, given %d",
+				 s.buffer_bytes);
+      goto done;
+    }
+
   if (! sub_input_given)
     {
-      error = clib_error_create ("no buffer data given");
+      error = clib_error_create ("no packet data given");
       goto done;
     }
 
@@ -243,7 +253,7 @@ new_stream (vlib_main_t * vm,
     else if (! unformat_user (&sub_input, unformat_pg_payload, &s))
       {
 	error = clib_error_create
-	  ("failed to parse buffer data from `%U'",
+	  ("failed to parse packet data from `%U'",
 	   format_unformat_error, &sub_input);
 	goto done;
       }
@@ -271,7 +281,7 @@ static VLIB_CLI_COMMAND (new_stream_cli) = {
   "name STRING          sets stream name\n"
   "interface STRING     interface for stream output \n"
   "node NODE-NAME       node for stream output\n"
-  "data STRING          specifies buffer data\n",
+  "data STRING          specifies packet data\n",
 };
 
 static clib_error_t *
@@ -321,10 +331,10 @@ change_stream_parameters (vlib_main_t * vm,
       f64 x;
 
       if (unformat (input, "limit %f", &x))
-	s->n_buffers_limit = x;
+	s->n_packets_limit = x;
 
       else if (unformat (input, "rate %f", &x))
-	s->rate_buffers_per_second = x;
+	s->rate_packets_per_second = x;
 
       else
 	return clib_error_create ("unknown input `%U'",
