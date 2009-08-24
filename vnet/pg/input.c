@@ -1488,6 +1488,16 @@ pg_generate_packets (vlib_node_runtime_t * node,
 	  vlib_set_trace_count (vm, n_trace - n);
 	}
 
+      if (DEBUG > 0)
+	{
+	  u8 * e;
+	  e = vlib_validate_buffers (vm, to_next, n_this_frame,
+				     VLIB_BUFFER_KNOWN_ALLOCATED,
+				     /* follow_buffer_next */ 1);
+	  if (e)
+	    clib_error ("%v", e);
+	}
+
       n_packets_to_generate -= n_this_frame;
       n_packets_generated += n_this_frame;
       n_left -= n_this_frame;
