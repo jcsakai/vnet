@@ -1491,7 +1491,8 @@ pg_generate_packets (vlib_node_runtime_t * node,
       if (DEBUG > 0)
 	{
 	  u8 * e;
-	  e = vlib_validate_buffers (vm, to_next, n_this_frame,
+	  e = vlib_validate_buffers (vm, to_next, /* stride */ 1,
+				     n_this_frame,
 				     VLIB_BUFFER_KNOWN_ALLOCATED,
 				     /* follow_buffer_next */ 1);
 	  if (e)
