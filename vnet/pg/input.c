@@ -1480,12 +1480,12 @@ pg_generate_packets (vlib_node_runtime_t * node,
       vec_foreach (bi, s->buffer_indices)
 	clib_fifo_advance_head (bi->buffer_fifo, n_this_frame);
 
-      n_trace = vlib_get_trace_count (vm);
+      n_trace = vlib_get_trace_count (vm, node);
       if (n_trace > 0)
 	{
 	  u32 n = clib_min (n_trace, n_this_frame);
 	  pg_input_trace (pg, node, s, to_next, n);
-	  vlib_set_trace_count (vm, n_trace - n);
+	  vlib_set_trace_count (vm, node, n_trace - n);
 	}
 
       if (DEBUG > 0)
