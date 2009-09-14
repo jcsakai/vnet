@@ -88,7 +88,7 @@ do {						\
       }
   }
 
-  return 0;
+  return vlib_call_init_function (vm, tcp_udp_lookup_init);
 }
 
 VLIB_INIT_FUNCTION (ip_main_init);

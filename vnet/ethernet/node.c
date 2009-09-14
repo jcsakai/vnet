@@ -361,6 +361,12 @@ ethernet_register_input_type (vlib_main_t * vm,
   u16 * n;
   u32 i;
 
+  {
+    clib_error_t * error = vlib_call_init_function (vm, ethernet_input_init);
+    if (error)
+      clib_error_report (error);
+  }
+
   ti->node_index = node_index;
   ti->next_index = vlib_node_add_next (vm, 
 				       ethernet_input_node.index,
