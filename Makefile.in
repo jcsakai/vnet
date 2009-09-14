@@ -59,11 +59,18 @@ libLTLIBRARIES_INSTALL = $(INSTALL)
 LTLIBRARIES = $(lib_LTLIBRARIES)
 libvnet_la_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
-am_libvnet_la_OBJECTS = vnet/ethernet/cli.lo vnet/ethernet/format.lo \
-	vnet/ethernet/init.lo vnet/ethernet/interface.lo \
-	vnet/ethernet/node.lo vnet/ethernet/pg.lo vnet/ethernet/phy.lo \
-	vnet/pg/cli.lo vnet/pg/edit.lo vnet/pg/init.lo \
-	vnet/pg/input.lo vnet/pg/output.lo vnet/pg/stream.lo \
+am_libvnet_la_OBJECTS = vnet/vnet/rewrite.lo vnet/ethernet/cli.lo \
+	vnet/ethernet/format.lo vnet/ethernet/init.lo \
+	vnet/ethernet/interface.lo vnet/ethernet/node.lo \
+	vnet/ethernet/pg.lo vnet/ethernet/phy.lo vnet/ip/format.lo \
+	vnet/ip/ip4_cli.lo vnet/ip/ip4_format.lo \
+	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
+	vnet/ip/ip_checksum.lo vnet/ip/ip_init.lo vnet/ip/ip_lookup.lo \
+	vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
+	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
+	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
+	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
+	vnet/pg/output.lo vnet/pg/stream.lo \
 	vnet/devices/ethernet_phy_bcm.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
@@ -213,6 +220,10 @@ AUTOMAKE_OPTIONS = foreign subdir-objects
 AM_CFLAGS = -Wall
 
 ########################################
+# Generic stuff
+########################################
+
+########################################
 # Layer 2 protocols go here
 ########################################
 
@@ -227,34 +238,6 @@ AM_CFLAGS = -Wall
 ########################################
 # Layer 3 protocol: IP v4 (& v6)
 ########################################
-# libvnet_la_SOURCES +=				\
-#  vnet/ip/ip_checksum.c				\
-#  vnet/ip/ip_format.c					\
-#  vnet/ip/ip_init.c					\
-#  vnet/ip/ip_lookup.h					\
-#  vnet/ip/ip_lookup.c					\
-#  vnet/ip/ip_format.h					\
-#  vnet/ip/ip_main.h					\
-#  vnet/ip/ip_packet.h					\
-#  vnet/ip/protocols.def				\
-#  vnet/ip/ports.def					\
-#  vnet/ip/ip4.h					\
-#  vnet/ip/ip4_error.def				\
-#  vnet/ip/ip4_cli.c					\
-#  vnet/ip/ip4_format.c				\
-#  vnet/ip/ip4_forward.c				\
-#  vnet/ip/ip4_input.c					\
-#  vnet/ip/ip4_packet.h				\
-#  vnet/ip/ip4_pg.c					\
-#  vnet/ip/tcp_format.c				\
-#  vnet/ip/tcp_init.c					\
-#  vnet/ip/tcp_pg.c					\
-#  vnet/ip/tcp_udp_lookup.c				\
-#  vnet/ip/tcp_packet.h				\
-#  vnet/ip/udp_format.c				\
-#  vnet/ip/udp_init.c					\
-#  vnet/ip/udp_packet.h				\
-#  vnet/ip/udp_pg.c
 
 ########################################
 # Packet generator
@@ -263,9 +246,19 @@ AM_CFLAGS = -Wall
 ########################################
 # Hardware devices
 ########################################
-libvnet_la_SOURCES = vnet/ethernet/cli.c vnet/ethernet/format.c \
+libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/vnet/rewrite.h \
+	vnet/ethernet/cli.c vnet/ethernet/format.c \
 	vnet/ethernet/init.c vnet/ethernet/interface.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
+	vnet/ip/format.c vnet/ip/format.h vnet/ip/ip4_cli.c \
+	vnet/ip/ip4_format.c vnet/ip/ip4_forward.c vnet/ip/ip4.h \
+	vnet/ip/ip4_input.c vnet/ip/ip4_packet.h vnet/ip/ip4_pg.c \
+	vnet/ip/ip6_packet.h vnet/ip/ip_checksum.c vnet/ip/ip.h \
+	vnet/ip/ip_init.c vnet/ip/ip_lookup.c vnet/ip/ip_main.h \
+	vnet/ip/ip_packet.h vnet/ip/lookup.h vnet/ip/tcp_format.c \
+	vnet/ip/tcp_init.c vnet/ip/tcp_packet.h vnet/ip/tcp_pg.c \
+	vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
+	vnet/ip/udp_init.c vnet/ip/udp_packet.h vnet/ip/udp_pg.c \
 	vnet/pg/cli.c vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c \
 	vnet/pg/output.c vnet/pg/stream.c \
 	vnet/devices/ethernet_phy_bcm.c
@@ -340,6 +333,14 @@ clean-libLTLIBRARIES:
 	  echo "rm -f \"$${dir}/so_locations\""; \
 	  rm -f "$${dir}/so_locations"; \
 	done
+vnet/vnet/$(am__dirstamp):
+	@$(MKDIR_P) vnet/vnet
+	@: > vnet/vnet/$(am__dirstamp)
+vnet/vnet/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/vnet/$(DEPDIR)
+	@: > vnet/vnet/$(DEPDIR)/$(am__dirstamp)
+vnet/vnet/rewrite.lo: vnet/vnet/$(am__dirstamp) \
+	vnet/vnet/$(DEPDIR)/$(am__dirstamp)
 vnet/ethernet/$(am__dirstamp):
 	@$(MKDIR_P) vnet/ethernet
 	@: > vnet/ethernet/$(am__dirstamp)
@@ -360,6 +361,44 @@ vnet/ethernet/pg.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
 vnet/ethernet/phy.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/$(am__dirstamp):
+	@$(MKDIR_P) vnet/ip
+	@: > vnet/ip/$(am__dirstamp)
+vnet/ip/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/ip/$(DEPDIR)
+	@: > vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/format.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip4_cli.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip4_format.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip4_forward.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip4_input.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip4_pg.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip_checksum.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip_init.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip_lookup.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/tcp_format.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/tcp_init.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/tcp_pg.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/tcp_udp_lookup.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/udp_format.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/udp_init.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/udp_pg.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/pg/$(am__dirstamp):
 	@$(MKDIR_P) vnet/pg
 	@: > vnet/pg/$(am__dirstamp)
@@ -426,6 +465,38 @@ mostlyclean-compile:
 	-rm -f vnet/ethernet/pg.lo
 	-rm -f vnet/ethernet/phy.$(OBJEXT)
 	-rm -f vnet/ethernet/phy.lo
+	-rm -f vnet/ip/format.$(OBJEXT)
+	-rm -f vnet/ip/format.lo
+	-rm -f vnet/ip/ip4_cli.$(OBJEXT)
+	-rm -f vnet/ip/ip4_cli.lo
+	-rm -f vnet/ip/ip4_format.$(OBJEXT)
+	-rm -f vnet/ip/ip4_format.lo
+	-rm -f vnet/ip/ip4_forward.$(OBJEXT)
+	-rm -f vnet/ip/ip4_forward.lo
+	-rm -f vnet/ip/ip4_input.$(OBJEXT)
+	-rm -f vnet/ip/ip4_input.lo
+	-rm -f vnet/ip/ip4_pg.$(OBJEXT)
+	-rm -f vnet/ip/ip4_pg.lo
+	-rm -f vnet/ip/ip_checksum.$(OBJEXT)
+	-rm -f vnet/ip/ip_checksum.lo
+	-rm -f vnet/ip/ip_init.$(OBJEXT)
+	-rm -f vnet/ip/ip_init.lo
+	-rm -f vnet/ip/ip_lookup.$(OBJEXT)
+	-rm -f vnet/ip/ip_lookup.lo
+	-rm -f vnet/ip/tcp_format.$(OBJEXT)
+	-rm -f vnet/ip/tcp_format.lo
+	-rm -f vnet/ip/tcp_init.$(OBJEXT)
+	-rm -f vnet/ip/tcp_init.lo
+	-rm -f vnet/ip/tcp_pg.$(OBJEXT)
+	-rm -f vnet/ip/tcp_pg.lo
+	-rm -f vnet/ip/tcp_udp_lookup.$(OBJEXT)
+	-rm -f vnet/ip/tcp_udp_lookup.lo
+	-rm -f vnet/ip/udp_format.$(OBJEXT)
+	-rm -f vnet/ip/udp_format.lo
+	-rm -f vnet/ip/udp_init.$(OBJEXT)
+	-rm -f vnet/ip/udp_init.lo
+	-rm -f vnet/ip/udp_pg.$(OBJEXT)
+	-rm -f vnet/ip/udp_pg.lo
 	-rm -f vnet/pg/cli.$(OBJEXT)
 	-rm -f vnet/pg/cli.lo
 	-rm -f vnet/pg/edit.$(OBJEXT)
@@ -438,6 +509,8 @@ mostlyclean-compile:
 	-rm -f vnet/pg/output.lo
 	-rm -f vnet/pg/stream.$(OBJEXT)
 	-rm -f vnet/pg/stream.lo
+	-rm -f vnet/vnet/rewrite.$(OBJEXT)
+	-rm -f vnet/vnet/rewrite.lo
 
 distclean-compile:
 	-rm -f *.tab.c
@@ -451,12 +524,29 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/phy.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_cli.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_forward.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_input.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_pg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip_checksum.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip_init.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip_lookup.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_init.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_pg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_udp_lookup.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/udp_format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/udp_init.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/udp_pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/cli.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/edit.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/init.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/input.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/output.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/stream.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/rewrite.Plo@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.o$$||'`;\
@@ -489,7 +579,9 @@ clean-libtool:
 	-rm -rf .libs _libs
 	-rm -rf vnet/devices/.libs vnet/devices/_libs
 	-rm -rf vnet/ethernet/.libs vnet/ethernet/_libs
+	-rm -rf vnet/ip/.libs vnet/ip/_libs
 	-rm -rf vnet/pg/.libs vnet/pg/_libs
+	-rm -rf vnet/vnet/.libs vnet/vnet/_libs
 
 distclean-libtool:
 	-rm -f libtool config.lt
@@ -724,8 +816,12 @@ distclean-generic:
 	-rm -f vnet/devices/$(am__dirstamp)
 	-rm -f vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/ethernet/$(am__dirstamp)
+	-rm -f vnet/ip/$(DEPDIR)/$(am__dirstamp)
+	-rm -f vnet/ip/$(am__dirstamp)
 	-rm -f vnet/pg/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/pg/$(am__dirstamp)
+	-rm -f vnet/vnet/$(DEPDIR)/$(am__dirstamp)
+	-rm -f vnet/vnet/$(am__dirstamp)
 
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
@@ -737,7 +833,7 @@ clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/pg/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-libtool distclean-tags
@@ -773,7 +869,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/pg/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 

@@ -7,6 +7,13 @@ libvnet_la_SOURCES =
 nobase_include_HEADERS =
 
 ########################################
+# Generic stuff
+########################################
+libvnet_la_SOURCES +=				\
+  vnet/vnet/rewrite.c				\
+  vnet/vnet/rewrite.h
+
+########################################
 # Layer 2 protocols go here
 ########################################
 
@@ -36,34 +43,33 @@ nobase_include_HEADERS +=			\
 ########################################
 # Layer 3 protocol: IP v4 (& v6)
 ########################################
-# libvnet_la_SOURCES +=				\
-#  vnet/ip/ip_checksum.c				\
-#  vnet/ip/ip_format.c					\
-#  vnet/ip/ip_init.c					\
-#  vnet/ip/ip_lookup.h					\
-#  vnet/ip/ip_lookup.c					\
-#  vnet/ip/ip_format.h					\
-#  vnet/ip/ip_main.h					\
-#  vnet/ip/ip_packet.h					\
-#  vnet/ip/protocols.def				\
-#  vnet/ip/ports.def					\
-#  vnet/ip/ip4.h					\
-#  vnet/ip/ip4_error.def				\
-#  vnet/ip/ip4_cli.c					\
-#  vnet/ip/ip4_format.c				\
-#  vnet/ip/ip4_forward.c				\
-#  vnet/ip/ip4_input.c					\
-#  vnet/ip/ip4_packet.h				\
-#  vnet/ip/ip4_pg.c					\
-#  vnet/ip/tcp_format.c				\
-#  vnet/ip/tcp_init.c					\
-#  vnet/ip/tcp_pg.c					\
-#  vnet/ip/tcp_udp_lookup.c				\
-#  vnet/ip/tcp_packet.h				\
-#  vnet/ip/udp_format.c				\
-#  vnet/ip/udp_init.c					\
-#  vnet/ip/udp_packet.h				\
-#  vnet/ip/udp_pg.c
+ libvnet_la_SOURCES +=				\
+   vnet/ip/format.c				\
+   vnet/ip/format.h				\
+   vnet/ip/ip4_cli.c				\
+   vnet/ip/ip4_format.c				\
+   vnet/ip/ip4_forward.c			\
+   vnet/ip/ip4.h				\
+   vnet/ip/ip4_input.c				\
+   vnet/ip/ip4_packet.h				\
+   vnet/ip/ip4_pg.c				\
+   vnet/ip/ip6_packet.h				\
+   vnet/ip/ip_checksum.c			\
+   vnet/ip/ip.h					\
+   vnet/ip/ip_init.c				\
+   vnet/ip/ip_lookup.c				\
+   vnet/ip/ip_main.h				\
+   vnet/ip/ip_packet.h				\
+   vnet/ip/lookup.h				\
+   vnet/ip/tcp_format.c				\
+   vnet/ip/tcp_init.c				\
+   vnet/ip/tcp_packet.h				\
+   vnet/ip/tcp_pg.c				\
+   vnet/ip/tcp_udp_lookup.c			\
+   vnet/ip/udp_format.c				\
+   vnet/ip/udp_init.c				\
+   vnet/ip/udp_packet.h				\
+   vnet/ip/udp_pg.c
 
 ########################################
 # Packet generator
