@@ -40,12 +40,15 @@ compute_length_and_or_checksum (vlib_main_t * vm,
 
   while (n_packets >= 2)
     {
+      u32 pi0, pi1;
       vlib_buffer_t * p0, * p1;
       ip4_header_t * ip0, * ip1;
       ip_csum_t sum0, sum1;
 
-      p0 = vlib_get_buffer (vm, packets[0]);
-      p1 = vlib_get_buffer (vm, packets[1]);
+      pi0 = packets[0];
+      pi1 = packets[1];
+      p0 = vlib_get_buffer (vm, pi0);
+      p1 = vlib_get_buffer (vm, pi1);
       n_packets -= 2;
       packets += 2;
 
@@ -54,8 +57,8 @@ compute_length_and_or_checksum (vlib_main_t * vm,
 
       if (flags & IP4_PG_EDIT_LENGTH)
 	{
-	  ip0->length = clib_host_to_net_u16 (vlib_buffer_n_bytes_in_chain (vm, p0) - ip_header_offset);
-	  ip1->length = clib_host_to_net_u16 (vlib_buffer_n_bytes_in_chain (vm, p1) - ip_header_offset);
+	  ip0->length = clib_host_to_net_u16 (vlib_buffer_n_bytes_in_chain (vm, pi0) - ip_header_offset);
+	  ip1->length = clib_host_to_net_u16 (vlib_buffer_n_bytes_in_chain (vm, pi1) - ip_header_offset);
 	}
 
       if (flags & IP4_PG_EDIT_CHECKSUM)
@@ -83,18 +86,20 @@ compute_length_and_or_checksum (vlib_main_t * vm,
 
   while (n_packets >= 1)
     {
+      u32 pi0;
       vlib_buffer_t * p0;
       ip4_header_t * ip0;
       ip_csum_t sum0;
 
-      p0 = vlib_get_buffer (vm, packets[0]);
+      pi0 = packets[0];
+      p0 = vlib_get_buffer (vm, pi0);
       n_packets -= 1;
       packets += 1;
 
       ip0 = (void *) (p0->data + ip_header_offset);
 
       if (flags & IP4_PG_EDIT_LENGTH)
-	ip0->length = clib_host_to_net_u16 (vlib_buffer_n_bytes_in_chain (vm, p0) - ip_header_offset);
+	ip0->length = clib_host_to_net_u16 (vlib_buffer_n_bytes_in_chain (vm, pi0) - ip_header_offset);
 
       if (flags & IP4_PG_EDIT_CHECKSUM)
 	{

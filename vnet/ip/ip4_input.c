@@ -184,6 +184,7 @@ ip4_input_inline (vlib_main_t * vm,
       vlib_get_next_frame (vm, node, next_index,
 			   to_next, n_left_to_next);
 
+#if 0
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
@@ -301,6 +302,7 @@ ip4_input_inline (vlib_main_t * vm,
 		 &next_index, &to_next, &n_left_to_next);
 	    }
 	}
+#endif
     
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
@@ -407,6 +409,7 @@ static char * ip4_error_strings[] = {
 VLIB_REGISTER_NODE (ip4_input_node) = {
   .function = ip4_input,
   .name = "ip4-input",
+  .vector_size = sizeof (u32),
 
   .n_errors = IP4_N_ERROR,
   .error_strings = ip4_error_strings,
@@ -425,6 +428,7 @@ VLIB_REGISTER_NODE (ip4_input_node) = {
 static VLIB_REGISTER_NODE (ip4_input_no_checksum_node) = {
   .function = ip4_input_no_checksum,
   .name = "ip4-input-no-csum",
+  .vector_size = sizeof (u32),
 
   .n_next_nodes = IP4_INPUT_N_NEXT,
   .next_nodes = {

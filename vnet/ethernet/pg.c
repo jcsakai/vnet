@@ -80,7 +80,7 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
   error = 1;
 
   if (! unformat (input, "%U: %U -> %U",
-		  unformat_ethernet_type_net_byte_order, &e_type,
+		  unformat_ethernet_type_host_byte_order, &e_type,
 		  unformat_pg_edit,
 		    unformat_ethernet_address, &e->src_address,
 		  unformat_pg_edit,

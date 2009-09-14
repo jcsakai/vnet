@@ -243,6 +243,7 @@ ip4_lookup (vlib_main_t * vm,
 static VLIB_REGISTER_NODE (ip4_lookup_node) = {
   .function = ip4_lookup,
   .name = "ip4-lookup",
+  .vector_size = sizeof (u32),
 
   .n_next_nodes = IP_LOOKUP_N_NEXT,
   .next_nodes = {
@@ -439,10 +440,10 @@ ip4_miss (vlib_main_t * vm,
 static VLIB_REGISTER_NODE (ip4_drop_node) = {
   .function = ip4_drop,
   .name = "ip4-drop",
+  .vector_size = sizeof (ip_buffer_and_adjacency_t),
 
   .format_trace = format_ip4_forward_next_trace,
 
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
   .n_next_nodes = 1,
   .next_nodes = {
     [0] = "error-drop",
@@ -452,10 +453,10 @@ static VLIB_REGISTER_NODE (ip4_drop_node) = {
 static VLIB_REGISTER_NODE (ip4_punt_node) = {
   .function = ip4_punt,
   .name = "ip4-punt",
+  .vector_size = sizeof (ip_buffer_and_adjacency_t),
 
   .format_trace = format_ip4_forward_next_trace,
 
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
   .n_next_nodes = 1,
   .next_nodes = {
     [0] = "error-punt",
@@ -465,10 +466,10 @@ static VLIB_REGISTER_NODE (ip4_punt_node) = {
 static VLIB_REGISTER_NODE (ip4_miss_node) = {
   .function = ip4_miss,
   .name = "ip4-miss",
+  .vector_size = sizeof (ip_buffer_and_adjacency_t),
 
   .format_trace = format_ip4_forward_next_trace,
 
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
   .n_next_nodes = 1,
   .next_nodes = {
     [0] = "error-drop",
@@ -848,10 +849,10 @@ while (n_left_from > 0)
 static VLIB_REGISTER_NODE (ip4_local_node) = {
   .function = ip4_local,
   .name = "ip4-local",
+  .vector_size = sizeof (ip_buffer_and_adjacency_t),
 
   .format_trace = format_ip4_forward_next_trace,
 
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
   .n_next_nodes = IP_LOCAL_N_NEXT,
   .next_nodes = {
     [IP_LOCAL_NEXT_DROP] = "error-drop",
@@ -938,10 +939,10 @@ ip4_glean (vlib_main_t * vm,
 static VLIB_REGISTER_NODE (ip4_glean_node) = {
   .function = ip4_glean,
   .name = "ip4-glean",
+  .vector_size = sizeof (ip_buffer_and_adjacency_t),
 
   .format_trace = format_ip4_forward_next_trace,
 
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
   .n_next_nodes = 1,
   .next_nodes = {
     [0] = "error-drop",
@@ -993,13 +994,14 @@ ip4_rewrite_slow_path (vlib_main_t * vm,
       /* FIXME fragment packet. */
     }
 
-  if (error_code0 != ~0)
-    next0 = IP4_REWRITE_NEXT_DROP;
-
   /* Now put the packet on the appropriate next frame. */
   to_next = vlib_set_next_frame (vm, node, next0);
   to_next[0] = pi0;
-  to_next[1] = vlib_error_set (ip4_input_node.index, error_code0);
+  if (error_code0 != ~0)
+    {
+      next0 = IP4_REWRITE_NEXT_DROP;
+      to_next[1] = vlib_error_set (ip4_input_node.index, error_code0);
+    }
 
   return 0;
 }
@@ -1066,6 +1068,10 @@ ip4_rewrite (vlib_main_t * vm,
 	     Works either endian, so no need for byte swap. */
 	  {
 	    i32 ttl0 = ip0->ttl, ttl1 = ip1->ttl;
+
+	    /* Input node should have reject packets with ttl 0. */
+	    ASSERT (ip0->ttl > 0);
+	    ASSERT (ip1->ttl > 0);
 
 	    checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
 	    checksum1 = ip1->checksum + clib_host_to_net_u16 (0x0100);
@@ -1170,6 +1176,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  {
 	    i32 ttl0 = ip0->ttl;
 
+	    ASSERT (ip0->ttl > 0);
+
 	    ttl0 -= 1;
 
 	    ip0->ttl = ttl0;
@@ -1224,10 +1232,10 @@ ip4_rewrite (vlib_main_t * vm,
 VLIB_REGISTER_NODE (ip4_rewrite_node) = {
   .function = ip4_rewrite,
   .name = "ip4-rewrite",
+  .vector_size = sizeof (ip_buffer_and_adjacency_t),
 
   .format_trace = format_ip4_forward_next_trace,
 
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
   .n_next_nodes = 1,
   .next_nodes = {
     [IP4_REWRITE_NEXT_DROP] = "error-drop",
@@ -1259,8 +1267,8 @@ ip4_multipath (vlib_main_t * vm,
 static VLIB_REGISTER_NODE (ip4_multipath_node) = {
   .function = ip4_multipath,
   .name = "ip4-multipath",
-
   .vector_size = sizeof (ip_buffer_and_adjacency_t),
+
   .n_next_nodes = 1,
   .next_nodes = {
     [0] = "ip4-rewrite",

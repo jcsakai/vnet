@@ -363,8 +363,8 @@ ethernet_register_input_type (vlib_main_t * vm,
 
   ti->node_index = node_index;
   ti->next_index = vlib_node_add_next (vm, 
-				     ethernet_input_node.index,
-				     node_index);
+				       ethernet_input_node.index,
+				       node_index);
 
   /* Setup ethernet type -> next index sparse vector mapping. */
   rt = vlib_node_get_runtime_data (vm, ethernet_input_node.index);
