@@ -26,6 +26,7 @@
 #ifndef included_vlib_pg_h
 #define included_vlib_pg_h
 
+#include <vlib/vlib.h>		/* for VLIB_N_RX_TX */
 #include <vnet/pg/edit.h>
 #include <clib/fifo.h>		/* for buffer_fifo */
 

@@ -26,6 +26,9 @@
 #ifndef included_packet_generator_pg_edit_h
 #define included_packet_generator_pg_edit_h
 
+#include <clib/format.h>
+#include <clib/vec.h>
+
 typedef enum {
   /* Invalid type used to poison edits. */
   PG_EDIT_INVALID_TYPE,
