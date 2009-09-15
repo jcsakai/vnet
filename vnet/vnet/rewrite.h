@@ -29,7 +29,11 @@
 #include <vlib/vlib.h>
 
 /* Basic data type for painting rewrite strings. */
+#ifdef CLIB_HAVE_VEC128
 typedef u8x16 vnet_rewrite_data_t;
+#else
+typedef uword vnet_rewrite_data_t;
+#endif
 
 typedef PACKED (struct {
   /* Interface to mark re-written packets with. */
@@ -93,7 +97,13 @@ vnet_rewrite_set_data_internal (vnet_rewrite_header_t * rw,
 
 static always_inline void
 vnet_rewrite_copy_one (vnet_rewrite_data_t * p0, vnet_rewrite_data_t * rw0, int i)
-{ u8x16_store_unaligned (rw0[-i], p0 - i); }
+{
+#ifdef CLIB_HAVE_VEC128
+  u8x16_store_unaligned (rw0[-i], p0 - i);
+#else
+  p0[-i] = rw0[-i];
+#endif
+}
 
 static always_inline void
 _vnet_rewrite_one_header (vnet_rewrite_header_t * h0,
