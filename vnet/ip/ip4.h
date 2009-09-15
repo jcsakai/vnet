@@ -27,15 +27,19 @@
 #define included_ip_ip4_h
 
 #define foreach_ip4_error				\
+  /* Must be first. */					\
+  _ (NONE, "no error")					\
+							\
   /* Errors signalled by ip4-input */			\
   _ (TOO_SHORT, "length < 20 bytes")			\
   _ (BAD_LENGTH, "l3 length > l2 length")		\
   _ (BAD_CHECKSUM, "bad checksum")			\
-  _ (OPTIONS, "options present or version != 4")	\
+  _ (VERSION, "version != 4")				\
+  _ (OPTIONS, "options present")			\
   _ (FRAGMENT_OFFSET_ONE, "fragment offset == 1")	\
+  _ (TIME_EXPIRED, "ttl <= 1")				\
 							\
   /* Errors signalled by ip4-rewrite. */		\
-  _ (TIME_EXPIRED, "ttl reached 0")			\
   _ (MTU_EXCEEDED, "rewritten packet larger than MTU")	\
   _ (LOOKUP_MISS, "lookup miss")			\
   _ (ADJACENCY_DROP, "adjacency drop")			\
