@@ -26,23 +26,9 @@
 #ifndef included_ethernet_h
 #define included_ethernet_h
 
+#include <vnet/ethernet/packet.h>
 #include <vnet/ethernet/phy.h>
 #include <vnet/pg/pg.h>
-
-typedef enum {
-#define ethernet_type(n,s) ETHERNET_TYPE_##s = n,
-#include <vnet/ethernet/types.def>
-#undef ethernet_type
-} ethernet_type_t;
-
-typedef struct {
-  /* Source/destination address. */
-  u8 dst_address[6];
-  u8 src_address[6];
-
-  /* Ethernet type. */
-  u16 type;
-} ethernet_header_t;
 
 static inline u64
 ethernet_mac_address_u64 (u8 * a)
@@ -52,17 +38,6 @@ ethernet_mac_address_u64 (u8 * a)
 	  | ((u64) a[3] << (u64) (2*8))
 	  | ((u64) a[4] << (u64) (1*8))
 	  | ((u64) a[5] << (u64) (0*8))); }
-
-/* For VLAN ethernet type. */
-typedef struct {
-  /* 3 bit priority, 1 bit CFI and 12 bit vlan id. */
-  u16 priority_cfi_and_id;
-
-#define ETHERNET_N_VLAN (1 << 12)
-
-  /* Inner ethernet type. */
-  u16 type;
-} ethernet_vlan_header_t;
 
 /* Max. sized ethernet/vlan header for parsing. */
 typedef struct {

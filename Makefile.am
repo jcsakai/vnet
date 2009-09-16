@@ -34,6 +34,7 @@ libvnet_la_SOURCES +=				\
 nobase_include_HEADERS +=			\
  vnet/ethernet/error.def			\
  vnet/ethernet/ethernet.h			\
+ vnet/ethernet/packet.h				\
  vnet/ethernet/phy.h				\
  vnet/ethernet/phy_reg.h			\
  vnet/ethernet/types.def
@@ -68,6 +69,7 @@ nobase_include_HEADERS +=			\
  vnet/ip/format.h				\
  vnet/ip/ip.h					\
  vnet/ip/ip4.h					\
+ vnet/ip/ip4_error.h				\
  vnet/ip/ip4_packet.h				\
  vnet/ip/ip6_packet.h				\
  vnet/ip/lookup.h				\

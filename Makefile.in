@@ -259,13 +259,13 @@ libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/cli.c \
 	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c
 nobase_include_HEADERS = vnet/vnet/rewrite.h vnet/ethernet/error.def \
-	vnet/ethernet/ethernet.h vnet/ethernet/phy.h \
-	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
-	vnet/ip/format.h vnet/ip/ip.h vnet/ip/ip4.h \
-	vnet/ip/ip4_packet.h vnet/ip/ip6_packet.h vnet/ip/lookup.h \
-	vnet/ip/ip_packet.h vnet/ip/ports.def vnet/ip/protocols.def \
-	vnet/ip/tcp_packet.h vnet/ip/udp_packet.h vnet/pg/pg.h \
-	vnet/pg/edit.h
+	vnet/ethernet/ethernet.h vnet/ethernet/packet.h \
+	vnet/ethernet/phy.h vnet/ethernet/phy_reg.h \
+	vnet/ethernet/types.def vnet/ip/format.h vnet/ip/ip.h \
+	vnet/ip/ip4.h vnet/ip/ip4_error.h vnet/ip/ip4_packet.h \
+	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
+	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
+	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -lclib -lpthread -lm -ldl

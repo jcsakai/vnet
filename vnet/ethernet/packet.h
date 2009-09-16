@@ -1,5 +1,5 @@
 /*
- * ip/ip4.h: ip4 main include file
+ * ethernet/packet.h: ethernet packet format.
  *
  * Copyright (c) 2008 Eliot Dresselhaus
  *
@@ -23,40 +23,33 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef included_ip_ip4_h
-#define included_ip_ip4_h
+#ifndef included_ethernet_packet_h
+#define included_ethernet_packet_h
+
+typedef enum {
+#define ethernet_type(n,s) ETHERNET_TYPE_##s = n,
+#include <vnet/ethernet/types.def>
+#undef ethernet_type
+} ethernet_type_t;
 
 typedef struct {
-  /* Hash table for each prefix length mapping. */
-  uword * adj_index_by_dst_address[33];
+  /* Source/destination address. */
+  u8 dst_address[6];
+  u8 src_address[6];
 
-  u32 masks[33];
-} ip4_really_slow_fib_t;
+  /* Ethernet type. */
+  u16 type;
+} ethernet_header_t;
 
+/* For VLAN ethernet type. */
 typedef struct {
-  ip_lookup_main_t lookup_main;
+  /* 3 bit priority, 1 bit CFI and 12 bit vlan id. */
+  u16 priority_cfi_and_id;
 
-  /* FIXME stupid fib. */
-  ip4_really_slow_fib_t fib;
-} ip4_main_t;
+#define ETHERNET_N_VLAN (1 << 12)
 
-/* Global ip4 main structure. */
-extern ip4_main_t ip4_main;
+  /* Inner ethernet type. */
+  u16 type;
+} ethernet_vlan_header_t;
 
-/* Global ip4 input node.  Errors get attached to ip4 input node. */
-extern vlib_node_registration_t ip4_input_node;
-extern vlib_node_registration_t ip4_rewrite_node;
-
-/* Longest match IP lookup. */
-ip_lookup_next_t
-ip4_fib_lookup (ip4_main_t * im, u8 * dst_address, u32 * adj_index);
-
-/* Add a route to the FIB. */
-void
-ip4_route_add_del (ip4_main_t * im,
-		   u8 * address,
-		   u32 address_length,
-		   u32 adj_index,
-		   u32 is_del);
-
-#endif /* included_ip_ip4_h */
+#endif /* included_ethernet_packet_h */

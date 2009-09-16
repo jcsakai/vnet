@@ -39,6 +39,7 @@
 #include <vnet/ip/udp_packet.h>
 
 #include <vnet/ip/ip4.h>
+#include <vnet/ip/ip4_error.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/ip6_packet.h>
 

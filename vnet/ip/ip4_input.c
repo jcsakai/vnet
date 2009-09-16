@@ -135,19 +135,7 @@ ip4_input_inline (vlib_main_t * vm,
 	    {
 	      ip_csum_t sum0, sum1;
 
-	      sum0 = clib_mem_unaligned (&ip0->data64[0], u64);
-	      sum1 = clib_mem_unaligned (&ip1->data64[0], u64);
-
-	      sum0 = ip_csum_with_carry
-		(sum0, clib_mem_unaligned (&ip0->data64[1], u64));
-	      sum1 = ip_csum_with_carry
-		(sum1, clib_mem_unaligned (&ip1->data64[1], u64));
-
-	      sum0 = ip_csum_with_carry
-		(sum0, clib_mem_unaligned (&ip0->data32[0], u32));
-	      sum1 = ip_csum_with_carry
-		(sum1, clib_mem_unaligned (&ip1->data32[0], u32));
-
+	      ip4_partial_header_checksum_x2 (ip0, ip1, sum0, sum1);
 	      error0 = 0xffff != ip_csum_fold (sum0) ? IP4_ERROR_BAD_CHECKSUM : error0;
 	      error1 = 0xffff != ip_csum_fold (sum1) ? IP4_ERROR_BAD_CHECKSUM : error1;
 	    }
@@ -283,14 +271,7 @@ ip4_input_inline (vlib_main_t * vm,
 	    {
 	      ip_csum_t sum0;
 
-	      sum0 = clib_mem_unaligned (&ip0->data64[0], u64);
-
-	      sum0 = ip_csum_with_carry
-		(sum0, clib_mem_unaligned (&ip0->data64[1], u64));
-
-	      sum0 = ip_csum_with_carry
-		(sum0, clib_mem_unaligned (&ip0->data32[0], u32));
-
+	      ip4_partial_header_checksum_x1 (ip0, sum0);
 	      error0 = 0xffff != ip_csum_fold (sum0) ? IP4_ERROR_BAD_CHECKSUM : error0;
 	    }
 

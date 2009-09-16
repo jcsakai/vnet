@@ -64,11 +64,16 @@ typedef union {
     u8 dst_address[4];
   };
 
-  /* For checksumming we'll want to access IP header as 2 64 bit
-     numbers followed by a 32 bit number. */
+  /* For checksumming we'll want to access IP header in word sized chunks. */
+  /* For 64 bit machines. */
   PACKED (struct {
-    u64 data64[2];
-    u32 data32[1];
+    u64 checksum_data_64[2];
+    u32 checksum_data_64_32[1];
+  });
+
+  /* For 32 bit machines. */
+  PACKED (struct {
+    u32 checksum_data_32[5];
   });
 } ip4_header_t;
 
@@ -112,6 +117,50 @@ ip4_header_checksum (ip4_header_t * i)
 static inline uword
 ip4_header_checksum_is_valid (ip4_header_t * i)
 { return i->checksum == ip4_header_checksum (i); }
+
+#define ip4_partial_header_checksum_x1(ip0,sum0)			\
+do {									\
+  if (BITS (ip_csum_t) > 32)						\
+    {									\
+      sum0 = ip0->checksum_data_64[0];					\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_64[1]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_64_32[0]);	\
+    }									\
+  else									\
+    {									\
+      sum0 = ip0->checksum_data_32[0];					\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[1]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[2]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[3]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[4]);	\
+    }									\
+} while (0)
+
+#define ip4_partial_header_checksum_x2(ip0,ip1,sum0,sum1)		\
+do {									\
+  if (BITS (ip_csum_t) > 32)						\
+    {									\
+      sum0 = ip0->checksum_data_64[0];					\
+      sum1 = ip1->checksum_data_64[0];					\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_64[1]);	\
+      sum1 = ip_csum_with_carry (sum1, ip1->checksum_data_64[1]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_64_32[0]);	\
+      sum1 = ip_csum_with_carry (sum1, ip1->checksum_data_64_32[0]);	\
+    }									\
+  else									\
+    {									\
+      sum0 = ip0->checksum_data_32[0];					\
+      sum1 = ip1->checksum_data_32[0];					\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[1]);	\
+      sum1 = ip_csum_with_carry (sum1, ip1->checksum_data_32[1]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[2]);	\
+      sum1 = ip_csum_with_carry (sum1, ip1->checksum_data_32[2]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[3]);	\
+      sum1 = ip_csum_with_carry (sum1, ip1->checksum_data_32[3]);	\
+      sum0 = ip_csum_with_carry (sum0, ip0->checksum_data_32[4]);	\
+      sum1 = ip_csum_with_carry (sum1, ip1->checksum_data_32[4]);	\
+    }									\
+} while (0)
 
 /* VLIB buffer flags for ip4 packets.  Set by input interfaces for ip4
    tcp/udp packets with hardware computed checksums. */

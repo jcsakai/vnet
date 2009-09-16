@@ -257,6 +257,9 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
   },
 };
 
+/* Global IP4 main. */
+ip4_main_t ip4_main;
+
 static clib_error_t *
 ip4_lookup_init (vlib_main_t * vm)
 {

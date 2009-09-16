@@ -69,13 +69,7 @@ compute_length_and_or_checksum (vlib_main_t * vm,
 	  ip0->checksum = 0;
 	  ip1->checksum = 0;
 
-	  sum0 = ip0->data64[0];
-	  sum1 = ip1->data64[0];
-	  sum0 = ip_csum_with_carry (sum0, ip0->data64[1]);
-	  sum1 = ip_csum_with_carry (sum1, ip1->data64[1]);
-	  sum0 = ip_csum_with_carry (sum0, ip0->data32[0]);
-	  sum1 = ip_csum_with_carry (sum1, ip1->data32[0]);
-
+	  ip4_partial_header_checksum_x2 (ip0, ip1, sum0, sum1);
 	  ip0->checksum = ~ ip_csum_fold (sum0);
 	  ip1->checksum = ~ ip_csum_fold (sum1);
 
@@ -107,10 +101,7 @@ compute_length_and_or_checksum (vlib_main_t * vm,
 
 	  ip0->checksum = 0;
 
-	  sum0 = ip0->data64[0];
-	  sum0 = ip_csum_with_carry (sum0, ip0->data64[1]);
-	  sum0 = ip_csum_with_carry (sum0, ip0->data32[0]);
-
+	  ip4_partial_header_checksum_x1 (ip0, sum0);
 	  ip0->checksum = ~ ip_csum_fold (sum0);
 
 	  ASSERT (ip0->checksum == ip4_header_checksum (ip0));

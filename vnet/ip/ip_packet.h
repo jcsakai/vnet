@@ -44,12 +44,12 @@ typedef enum {
 /* IP checksum support. */
 
 /* Incremental checksum update. */
-typedef u64 ip_csum_t;
+typedef uword ip_csum_t;
 
-static always_inline u64
-ip_csum_with_carry (u64 sum, u64 x)
+static always_inline ip_csum_t
+ip_csum_with_carry (ip_csum_t sum, ip_csum_t x)
 {
-  u64 t = sum + x;
+  ip_csum_t t = sum + x;
   return t + (t < x);
 }
 
@@ -75,9 +75,11 @@ ip_csum_sub_even (ip_csum_t c, ip_csum_t x)
 static always_inline u16 ip_csum_fold (ip_csum_t c)
 {
   /* Reduce to 16 bits. */
-  c = (c & (u64) 0xffffffff) + (c >> (u64) 32);
-
+#if uword_bits == 64
+  c = (c & (ip_csum_t) 0xffffffff) + (c >> (ip_csum_t) 32);
   c = (c & 0xffff) + (c >> 16);
+#endif
+
   c = (c & 0xffff) + (c >> 16);
   c = (c & 0xffff) + (c >> 16);
 

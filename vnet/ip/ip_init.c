@@ -88,7 +88,20 @@ do {						\
       }
   }
 
-  return vlib_call_init_function (vm, tcp_udp_lookup_init);
+  {
+    clib_error_t * error;
+
+    if ((error = vlib_call_init_function (vm, tcp_udp_lookup_init)))
+      return error;
+
+    if ((error = vlib_call_init_function (vm, tcp_init)))
+      return error;
+
+    if ((error = vlib_call_init_function (vm, udp_init)))
+      return error;
+
+    return error;
+  }
 }
 
 VLIB_INIT_FUNCTION (ip_main_init);

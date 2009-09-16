@@ -113,8 +113,10 @@ uword
 unformat_pg_payload (unformat_input_t * input, va_list * args)
 {
   pg_stream_t * s = va_arg (*args, pg_stream_t *);
+  pg_main_t * pg = &pg_main;
+  vlib_main_t * vm = pg->vlib_main;
   pg_edit_t * e;
-  u32 i, len;
+  u32 i, node_index, len;
   u8 * v;
   
   v = 0;
@@ -126,6 +128,14 @@ unformat_pg_payload (unformat_input_t * input, va_list * args)
     }
   else if (unformat (input, "0x%U", unformat_hex_string, &v))
     ;
+
+  else if (unformat (input, "%U", unformat_vlib_node, vm, &node_index))
+    {
+      pg_node_t * pn = pg_get_node (node_index);
+      if (! pn->unformat_edit)
+	return 0;
+      return unformat (input, "%U", pn->unformat_edit, s);
+    }
 
   else
     return 0;

@@ -36,6 +36,7 @@ ip_incremental_checksum (ip_csum_t sum, void * _data, uword n_bytes)
 
   /* Align data pointer to 64 bits. */
 #define _(t)					\
+do {						\
   if (n_bytes >= sizeof (t)			\
       && sizeof (t) < sizeof (ip_csum_t)	\
       && (data % (2 * sizeof (t))) != 0)	\
@@ -43,11 +44,13 @@ ip_incremental_checksum (ip_csum_t sum, void * _data, uword n_bytes)
       sum0 += * uword_to_pointer (data, t *);	\
       data += sizeof (t);			\
       n_bytes -= sizeof (t);			\
-    }
+    }						\
+} while (0)
 
   _ (u8);
   _ (u16);
-  _ (u32);
+  if (BITS (ip_csum_t) > 32)
+    _ (u32);
 
 #undef _
 
@@ -66,14 +69,17 @@ ip_incremental_checksum (ip_csum_t sum, void * _data, uword n_bytes)
  }
    
 #define _(t)								\
- if (n_bytes >= sizeof (t) && sizeof (t) <= sizeof (ip_csum_t))		\
-   {									\
-     sum0 = ip_csum_with_carry (sum0, * uword_to_pointer (data, t *));	\
-     data += sizeof (t);						\
-     n_bytes -= sizeof (t);						\
-   }
+do {									\
+  if (n_bytes >= sizeof (t) && sizeof (t) <= sizeof (ip_csum_t))	\
+    {									\
+      sum0 = ip_csum_with_carry (sum0, * uword_to_pointer (data, t *));	\
+      data += sizeof (t);						\
+      n_bytes -= sizeof (t);						\
+    }									\
+} while (0)
 
- _ (u64);
+ if (BITS (ip_csum_t) > 32)
+   _ (u64);
  _ (u32);
  _ (u16);
  _ (u8);
