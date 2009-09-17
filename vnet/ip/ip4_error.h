@@ -28,22 +28,22 @@
 
 #define foreach_ip4_error				\
   /* Must be first. */					\
-  _ (NONE, "no error")					\
+  _ (NONE, "ip4 packets")				\
 							\
   /* Errors signalled by ip4-input */			\
-  _ (TOO_SHORT, "length < 20 bytes")			\
-  _ (BAD_LENGTH, "l3 length > l2 length")		\
-  _ (BAD_CHECKSUM, "bad checksum")			\
-  _ (VERSION, "version != 4")				\
-  _ (OPTIONS, "options present")			\
-  _ (FRAGMENT_OFFSET_ONE, "fragment offset == 1")	\
-  _ (TIME_EXPIRED, "ttl <= 1")				\
+  _ (TOO_SHORT, "ip4 length < 20 bytes")		\
+  _ (BAD_LENGTH, "ip4 length > l2 length")		\
+  _ (BAD_CHECKSUM, "bad ip4 checksum")			\
+  _ (VERSION, "ip4 version != 4")			\
+  _ (OPTIONS, "ip4 options present")			\
+  _ (FRAGMENT_OFFSET_ONE, "ip4 fragment offset == 1")	\
+  _ (TIME_EXPIRED, "ip4 ttl <= 1")			\
 							\
   /* Errors signalled by ip4-rewrite. */		\
-  _ (MTU_EXCEEDED, "rewritten packet larger than MTU")	\
-  _ (LOOKUP_MISS, "lookup miss")			\
-  _ (ADJACENCY_DROP, "adjacency drop")			\
-  _ (ADJACENCY_PUNT, "adjacency punt")			\
+  _ (MTU_EXCEEDED, "ip4 MTU exceeded and DF set")	\
+  _ (LOOKUP_MISS, "ip4 lookup miss")			\
+  _ (ADJACENCY_DROP, "ip4 adjacency drop")		\
+  _ (ADJACENCY_PUNT, "ip4 adjacency punt")		\
 							\
   /* Errors signalled by ip4-local. */			\
   _ (UNKNOWN_PROTOCOL, "unknown ip protocol")		\
