@@ -351,4 +351,8 @@ static VLIB_CLI_COMMAND (change_stream_parameters_cli) = {
   .parent = &vlib_cli_pg_command,
 };
 
-void pg_reference (void) {}
+/* Dummy init function so that we can be linked in. */
+static clib_error_t * pg_cli_init (vlib_main_t * vm)
+{ return 0; }
+
+VLIB_INIT_FUNCTION (pg_cli_init);

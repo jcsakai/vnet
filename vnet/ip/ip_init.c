@@ -91,6 +91,9 @@ do {						\
   {
     clib_error_t * error;
 
+    if ((error = vlib_call_init_function (vm, ip4_init)))
+      return error;
+
     if ((error = vlib_call_init_function (vm, tcp_udp_lookup_init)))
       return error;
 

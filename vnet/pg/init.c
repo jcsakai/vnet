@@ -40,6 +40,9 @@ static clib_error_t * pg_init (vlib_main_t * vm)
   if ((error = vlib_call_init_function (vm, vlib_interface_init)))
     goto done;
 
+  if ((error = vlib_call_init_function (vm, pg_cli_init)))
+    goto done;
+
   /* Create/free first interface so that it exists and can be
      used as a destination interface for streams. */
   i = pg_interface_find_free (pg, ~0);

@@ -61,7 +61,7 @@ static clib_error_t * ethernet_init (vlib_main_t * vm)
 #include "types.def"
 #undef ethernet_type
 
-  return 0;
+  return vlib_call_init_function (vm, ethernet_input_init);
 }
 
 VLIB_INIT_FUNCTION (ethernet_init);
