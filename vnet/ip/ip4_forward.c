@@ -1185,7 +1185,7 @@ ip4_rewrite (vlib_main_t * vm,
 
 	    ip0->ttl = ttl0;
 
-	    is_slow_path += ttl0 <= 0;
+	    is_slow_path = ttl0 <= 0;
 	  }
 
 	  ASSERT (ip0->checksum == ip4_header_checksum (ip0));
