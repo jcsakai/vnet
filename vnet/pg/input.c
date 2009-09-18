@@ -1013,8 +1013,9 @@ pg_generate_edit (pg_main_t * pg,
 	    v_max = pg_edit_get_value (e, PG_EDIT_HI);
 
 	    hi_bit = (BITS (u8) * STRUCT_OFFSET_OF (vlib_buffer_t, data)
+		      + BITS (u8)
 		      + e->lsb_bit_offset);
-	    lo_bit = hi_bit - e->n_bits + BITS (u8);
+	    lo_bit = hi_bit - e->n_bits;
 
 	    e->last_increment_value
 	      = do_it (pg, s, buffers, n_buffers, lo_bit, hi_bit, v_min, v_max,
