@@ -60,8 +60,15 @@ typedef union {
     u16 checksum;
 
     /* Source and destination address. */
-    u8 src_address[4];
-    u8 dst_address[4];
+    union {
+      u8 src_address[4];
+      u32 src_address_u32;
+    };
+
+    union {
+      u8 dst_address[4];
+      u32 dst_address_u32;
+    };
   };
 
   /* For checksumming we'll want to access IP header in word sized chunks. */
