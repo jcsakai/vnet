@@ -28,7 +28,7 @@
 
 #define foreach_ip4_error				\
   /* Must be first. */					\
-  _ (NONE, "ip4 packets")				\
+  _ (NONE, "valid ip4 packets")				\
 							\
   /* Errors signalled by ip4-input */			\
   _ (TOO_SHORT, "ip4 length < 20 bytes")		\
