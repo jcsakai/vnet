@@ -40,6 +40,14 @@ nobase_include_HEADERS +=			\
  vnet/ethernet/types.def
 
 ########################################
+# Layer 2 protocol: PPP
+########################################
+libvnet_la_SOURCES +=
+
+nobase_include_HEADERS +=			\
+ vnet/ppp/packet.h
+
+########################################
 # Layer 3 protocols go here
 ########################################
 

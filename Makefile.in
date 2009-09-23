@@ -62,11 +62,11 @@ am__dirstamp = $(am__leading_dot)dirstamp
 am_libvnet_la_OBJECTS = vnet/vnet/rewrite.lo vnet/ethernet/cli.lo \
 	vnet/ethernet/format.lo vnet/ethernet/init.lo \
 	vnet/ethernet/interface.lo vnet/ethernet/node.lo \
-	vnet/ethernet/pg.lo vnet/ethernet/phy.lo vnet/ip/format.lo \
-	vnet/ip/ip4_cli.lo vnet/ip/ip4_format.lo \
-	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
-	vnet/ip/ip_checksum.lo vnet/ip/ip_init.lo vnet/ip/ip_lookup.lo \
-	vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
+	vnet/ethernet/pg.lo vnet/ip/format.lo vnet/ip/ip4_cli.lo \
+	vnet/ip/ip4_format.lo vnet/ip/ip4_forward.lo \
+	vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo vnet/ip/ip_checksum.lo \
+	vnet/ip/ip_init.lo vnet/ip/ip_lookup.lo vnet/ip/tcp_format.lo \
+	vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
 	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
 	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
 	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
@@ -232,6 +232,10 @@ AM_CFLAGS = -Wall
 ########################################
 
 ########################################
+# Layer 2 protocol: PPP
+########################################
+
+########################################
 # Layer 3 protocols go here
 ########################################
 
@@ -249,7 +253,7 @@ AM_CFLAGS = -Wall
 libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/cli.c \
 	vnet/ethernet/format.c vnet/ethernet/init.c \
 	vnet/ethernet/interface.c vnet/ethernet/node.c \
-	vnet/ethernet/pg.c vnet/ethernet/phy.c vnet/ip/format.c \
+	vnet/ethernet/pg.c vnet/ethernet/phy.c\ vnet/ip/format.c \
 	vnet/ip/ip4_cli.c vnet/ip/ip4_format.c vnet/ip/ip4_forward.c \
 	vnet/ip/ip4_input.c vnet/ip/ip4_pg.c vnet/ip/ip_checksum.c \
 	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/ip_lookup.c \
@@ -261,11 +265,12 @@ libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/cli.c \
 nobase_include_HEADERS = vnet/vnet/rewrite.h vnet/ethernet/error.def \
 	vnet/ethernet/ethernet.h vnet/ethernet/packet.h \
 	vnet/ethernet/phy.h vnet/ethernet/phy_reg.h \
-	vnet/ethernet/types.def vnet/ip/format.h vnet/ip/ip.h \
-	vnet/ip/ip4.h vnet/ip/ip4_error.h vnet/ip/ip4_packet.h \
-	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
-	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
-	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h
+	vnet/ethernet/types.def vnet/ppp/packet.h vnet/ip/format.h \
+	vnet/ip/ip.h vnet/ip/ip4.h vnet/ip/ip4_error.h \
+	vnet/ip/ip4_packet.h vnet/ip/ip6_packet.h vnet/ip/lookup.h \
+	vnet/ip/ip_packet.h vnet/ip/ports.def vnet/ip/protocols.def \
+	vnet/ip/tcp_packet.h vnet/ip/udp_packet.h vnet/pg/pg.h \
+	vnet/pg/edit.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -lclib -lpthread -lm -ldl
@@ -358,8 +363,6 @@ vnet/ethernet/interface.lo: vnet/ethernet/$(am__dirstamp) \
 vnet/ethernet/node.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
 vnet/ethernet/pg.lo: vnet/ethernet/$(am__dirstamp) \
-	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
-vnet/ethernet/phy.lo: vnet/ethernet/$(am__dirstamp) \
 	vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/$(am__dirstamp):
 	@$(MKDIR_P) vnet/ip
@@ -463,8 +466,6 @@ mostlyclean-compile:
 	-rm -f vnet/ethernet/node.lo
 	-rm -f vnet/ethernet/pg.$(OBJEXT)
 	-rm -f vnet/ethernet/pg.lo
-	-rm -f vnet/ethernet/phy.$(OBJEXT)
-	-rm -f vnet/ethernet/phy.lo
 	-rm -f vnet/ip/format.$(OBJEXT)
 	-rm -f vnet/ip/format.lo
 	-rm -f vnet/ip/ip4_cli.$(OBJEXT)
@@ -523,7 +524,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/interface.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/pg.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/phy.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_cli.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_format.Plo@am__quote@
