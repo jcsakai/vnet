@@ -567,9 +567,12 @@ u8 * format_ethernet_media (u8 * s, va_list * args)
   return s;
 }
 
-/* Kludge to link in phy drivers along with phy.c */
-void ethernet_phy_reference (void)
+/* Placeholder to get us linked in with ethernet code. */
+static clib_error_t * ethernet_phy_main_init (vlib_main_t * vm)
 {
   extern void ethernet_phy_bcm_reference (void);
   ethernet_phy_bcm_reference ();
+  return 0;
 }
+
+VLIB_INIT_FUNCTION (ethernet_phy_main_init);

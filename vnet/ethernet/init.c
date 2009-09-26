@@ -50,6 +50,7 @@ static void add_type (ethernet_main_t * em,
 static clib_error_t * ethernet_init (vlib_main_t * vm)
 {
   ethernet_main_t * em = &ethernet_main;
+  clib_error_t * error;
 
   memset (em, 0, sizeof (em[0]));
   em->vlib_main = vm;
@@ -61,7 +62,12 @@ static clib_error_t * ethernet_init (vlib_main_t * vm)
 #include "types.def"
 #undef ethernet_type
 
-  return vlib_call_init_function (vm, ethernet_input_init);
+  if ((error = vlib_call_init_function (vm, ethernet_input_init)))
+    return error;
+  if ((error = vlib_call_init_function (vm, ethernet_phy_main_init)))
+    return error;
+
+  return error;
 }
 
 VLIB_INIT_FUNCTION (ethernet_init);

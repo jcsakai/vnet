@@ -480,8 +480,7 @@ static VLIB_REGISTER_NODE (ip4_miss_node) = {
 };
 
 /* Compute TCP/UDP checksum in software. */
-static u32
-ip4_tcp_udp_checksum (vlib_buffer_t * p0)
+u32 ip4_tcp_udp_checksum (vlib_buffer_t * p0)
 {
   ip4_header_t * ip0;
   ip_csum_t sum0;
