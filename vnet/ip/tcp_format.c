@@ -53,8 +53,8 @@ u8 * format_tcp_header (u8 * s, va_list * args)
   indent += 2;
 
   s = format (s, "TCP: %U -> %U",
-	      format_tcp_udp_port, tcp->src_port,
-	      format_tcp_udp_port, tcp->dst_port);
+	      format_tcp_udp_port, tcp->ports.src,
+	      format_tcp_udp_port, tcp->ports.dst);
 
   data_offset_and_flags = clib_net_to_host_u16 (tcp->data_offset_and_flags);
   s = format (s, "\n%Useq. tx 0x%08x rx 0x%08x",
@@ -105,7 +105,7 @@ u8 * format_tcp_header (u8 * s, va_list * args)
       ip_main_t * im = &ip_main;
       tcp_udp_port_info_t * pi;
 
-      pi = ip_get_tcp_udp_port_info (im, tcp->dst_port);
+      pi = ip_get_tcp_udp_port_info (im, tcp->ports.dst);
 
       if (pi && pi->format_header)
 	s = format (s, "\n%U%U",

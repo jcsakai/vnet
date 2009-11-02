@@ -73,7 +73,7 @@ tcp_pg_edit_function (pg_main_t * pg,
 }
 
 typedef struct {
-  pg_edit_t src_port, dst_port;
+  struct { pg_edit_t src, dst; } ports;
   pg_edit_t seq_number, ack_number;
   pg_edit_t data_offset;
 #define _(f) pg_edit_t f##_flag;
@@ -89,8 +89,8 @@ pg_tcp_header_init (pg_tcp_header_t * p)
 {
   /* Initialize fields that are not bit fields in the IP header. */
 #define _(f) pg_edit_init (&p->f, tcp_header_t, f);
-  _ (src_port);
-  _ (dst_port);
+  _ (ports.src);
+  _ (ports.dst);
   _ (seq_number);
   _ (ack_number);
   _ (window);
@@ -139,9 +139,9 @@ unformat_pg_tcp_header (unformat_input_t * input, va_list * args)
 
   if (! unformat (input, "TCP: %U -> %U",
 		  unformat_pg_edit,
-		    unformat_tcp_udp_port, &p->src_port,
+		    unformat_tcp_udp_port, &p->ports.src,
 		  unformat_pg_edit,
-		    unformat_tcp_udp_port, &p->dst_port))
+		    unformat_tcp_udp_port, &p->ports.dst))
     goto error;
 
   /* Parse options. */
@@ -173,9 +173,9 @@ unformat_pg_tcp_header (unformat_input_t * input, va_list * args)
     tcp_udp_port_info_t * pi;
 
     pi = 0;
-    if (p->dst_port.type == PG_EDIT_FIXED)
+    if (p->ports.dst.type == PG_EDIT_FIXED)
       {
-	dst_port = pg_edit_get_value (&p->dst_port, PG_EDIT_LO);
+	dst_port = pg_edit_get_value (&p->ports.dst, PG_EDIT_LO);
 	pi = ip_get_tcp_udp_port_info (im, dst_port);
       }
 

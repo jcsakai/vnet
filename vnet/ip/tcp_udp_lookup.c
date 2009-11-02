@@ -49,7 +49,7 @@ ip4_tcp_udp_address_from_header (ip4_tcp_udp_address_t * a,
 {
   tcp_header_t * tcp = ip4_next_header (ip);
   a->src_dst_address64 = clib_mem_unaligned (&ip->src_address, u64);
-  a->src_dst_port32 = clib_mem_unaligned (&tcp->src_port, u32);
+  a->src_dst_port32 = clib_mem_unaligned (&tcp->ports.src_and_dst, u32);
 }
 
 static u8 * format_ip4_tcp_udp_address (u8 * s, va_list * args)
@@ -319,7 +319,7 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	  ci0 = pci0 ? pci0[0] : 0;
 	  c0 = pool_elt_at_index (lm->connection_pool, ci0);
 
-	  li0 = lm->listener_index_by_dst_port[tcp0->dst_port];
+	  li0 = lm->listener_index_by_dst_port[tcp0->ports.dst];
 	  l0 = pool_elt_at_index (lm->listener_pool, li0);
 
 	  listener_is_valid0 =

@@ -31,13 +31,20 @@ typedef struct {
   uword * adj_index_by_dst_address[33];
 
   u32 masks[33];
+
+  u32 table_id;
 } ip4_really_slow_fib_t;
 
 typedef struct {
   ip_lookup_main_t lookup_main;
 
   /* FIXME stupid fib. */
-  ip4_really_slow_fib_t fib;
+  ip4_really_slow_fib_t * fibs;
+
+  /* Table id for default FIB (equal to zero). */
+  u32 default_fib_table_id;
+
+  uword * fib_index_by_table_id;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
@@ -47,13 +54,10 @@ extern ip4_main_t ip4_main;
 extern vlib_node_registration_t ip4_input_node;
 extern vlib_node_registration_t ip4_rewrite_node;
 
-/* Longest match IP lookup. */
-ip_lookup_next_t
-ip4_fib_lookup (ip4_main_t * im, u8 * dst_address, u32 * adj_index);
-
 /* Add a route to the FIB. */
 void
 ip4_route_add_del (ip4_main_t * im,
+		   u32 table_id,
 		   u8 * address,
 		   u32 address_length,
 		   u32 adj_index,

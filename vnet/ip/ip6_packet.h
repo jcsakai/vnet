@@ -26,6 +26,13 @@
 #ifndef included_ip6_packet_h
 #define included_ip6_packet_h
 
+typedef union {
+  u8 data[16];
+  u16 data_u16[8];
+  u32 data_u32[4];
+  u64 data_u64[2];
+} ip6_address_t;
+
 typedef struct {
   /* 4 bit version, 8 bit traffic class and 20 bit flow label. */
   u32 ip_version_traffic_class_and_flow_label;
@@ -40,8 +47,7 @@ typedef struct {
   u8 ttl;
 
   /* Source and destination address. */
-  u8 src_address[16];
-  u8 dst_address[16];
+  ip6_address_t src_address, dst_address;
 } ip6_header_t;
 
 #endif /* included_ip6_packet_h */

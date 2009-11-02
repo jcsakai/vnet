@@ -27,6 +27,14 @@
 #define included_ip4_packet_h
 
 #include <vnet/ip/ip_packet.h>	/* for ip_csum_t */
+#include <clib/byte_order.h>	/* for clib_net_to_host_u16 */
+
+/* IP4 address which can be accessed either as 4 bytes
+   or as a 32-bit number. */
+typedef union {
+  u8 data[4];
+  u32 data_u32;
+} ip4_address_t;
 
 typedef union {
   struct {
@@ -60,15 +68,7 @@ typedef union {
     u16 checksum;
 
     /* Source and destination address. */
-    union {
-      u8 src_address[4];
-      u32 src_address_u32;
-    };
-
-    union {
-      u8 dst_address[4];
-      u32 dst_address_u32;
-    };
+    ip4_address_t src_address, dst_address;
   };
 
   /* For checksumming we'll want to access IP header in word sized chunks. */

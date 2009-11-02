@@ -26,7 +26,7 @@
 #ifndef included_ip_packet_h
 #define included_ip_packet_h
 
-#include <clib/clib.h>
+#include <clib/error.h>
 
 typedef enum ip_protocol {
 #define ip_protocol(n,s) IP_PROTOCOL_##s = n,

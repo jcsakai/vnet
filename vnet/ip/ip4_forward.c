@@ -27,16 +27,16 @@
 #include <vnet/ethernet/ethernet.h>	/* for ethernet_header_t */
 
 /* This is really, really simple but stupid fib. */
-ip_lookup_next_t
-ip4_fib_lookup (ip4_main_t * im, u8 * dst_address8, u32 * adj_index)
+static ip_lookup_next_t
+ip4_fib_lookup (ip4_main_t * im, u32 fib_index, ip4_address_t * dst, u32 * adj_index)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
-  ip4_really_slow_fib_t * fib = &im->fib;
+  ip4_really_slow_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
   ip_adjacency_t * adj;
   uword * p, * hash, key;
   i32 i, dst_address, ai;
 
-  dst_address = clib_mem_unaligned (dst_address8, u32);
+  dst_address = clib_mem_unaligned (&dst->data_u32, u32);
   for (i = ARRAY_LEN (fib->adj_index_by_dst_address) - 1; i >= 0; i--)
     {
       hash = fib->adj_index_by_dst_address[i];
@@ -60,14 +60,45 @@ ip4_fib_lookup (ip4_main_t * im, u8 * dst_address8, u32 * adj_index)
   return adj->lookup_next_index;
 }
 
+static ip4_really_slow_fib_t *
+find_fib_by_table_id (ip4_main_t * im, u32 table_id)
+{
+  ip4_really_slow_fib_t * fib;
+  uword * p = hash_get (im->fib_index_by_table_id, table_id);
+  uword i;
+
+  if (p)
+    return vec_elt_at_index (im->fibs, p[0]);
+
+  hash_set (im->fib_index_by_table_id, table_id, vec_len (im->fibs));
+  vec_add2 (im->fibs, fib, 1);
+
+  fib->table_id = table_id;
+
+  /* Initialize masks on first call. */
+  for (i = 0; i < ARRAY_LEN (fib->masks); i++)
+    {
+      u32 m;
+
+      if (i < 32)
+	m = pow2_mask (i) << (32 - i);
+      else 
+	m = ~0;
+      fib->masks[i] = clib_host_to_net_u32 (m);
+    }
+
+  return fib;
+}
+
 void
 ip4_route_add_del (ip4_main_t * im,
+		   u32 table_id,
 		   u8 * address,
 		   u32 address_length,
 		   u32 adj_index,
 		   u32 is_del)
 {
-  ip4_really_slow_fib_t * fib = &im->fib;
+  ip4_really_slow_fib_t * fib = find_fib_by_table_id (im, table_id);
   u32 dst_address = * (u32 *) address;
   uword * hash;
 
@@ -131,8 +162,8 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  next0 = ip4_fib_lookup (im, ip0->dst_address, &adj_index0);
-	  next1 = ip4_fib_lookup (im, ip1->dst_address, &adj_index1);
+	  next0 = ip4_fib_lookup (im, im->default_fib_table_id, &ip0->dst_address, &adj_index0);
+	  next1 = ip4_fib_lookup (im, im->default_fib_table_id, &ip1->dst_address, &adj_index1);
 
 	  to_next[0].buffer = pi0;
 	  to_next[0].adj_index = adj_index0;
@@ -209,7 +240,7 @@ ip4_lookup (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 
 	  ip0 = vlib_buffer_get_current (p0);
-	  next0 = ip4_fib_lookup (im, ip0->dst_address, &adj_index0);
+	  next0 = ip4_fib_lookup (im, im->default_fib_table_id, &ip0->dst_address, &adj_index0);
 
 	  to_next[0].buffer = pi0;
 	  to_next[0].adj_index = adj_index0;
@@ -265,24 +296,11 @@ ip4_lookup_init (vlib_main_t * vm)
 {
   ip4_main_t * im = &ip4_main;
 
+  /* Create FIB with table id of 0. */
+  im->default_fib_table_id = 0;
+  (void) find_fib_by_table_id (im, im->default_fib_table_id);
+
   ip_lookup_init (&im->lookup_main, ip4_lookup_node.index);
-
-  /* Initialize masks on first call. */
-  {
-    ip4_really_slow_fib_t * fib = &im->fib;
-    u32 i;
-
-    for (i = 0; i < ARRAY_LEN (fib->masks); i++)
-      {
-	u32 m;
-
-	if (i < 32)
-	  m = pow2_mask (i) << (32 - i);
-	else 
-	  m = ~0;
-	fib->masks[i] = clib_host_to_net_u32 (m);
-      }
-  }
 
   return 0;
 }
