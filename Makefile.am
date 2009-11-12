@@ -110,6 +110,16 @@ nobase_include_HEADERS +=			\
 libvnet_la_SOURCES +=				\
   vnet/devices/ethernet_phy_bcm.c
 
+########################################
+# Unix kernel related
+########################################
+
+libvnet_la_SOURCES +=				\
+  vnet/unix/tuntap.c
+
+nobase_include_HEADERS +=			\
+  vnet/unix/tuntap.h
+
 lib_LTLIBRARIES = libvnet.la
 
 noinst_PROGRAMS = vnet_unix
