@@ -52,10 +52,10 @@ typedef struct {
 } tuntap_main_t;
 
 tuntap_main_t *tuntap_main;
-static char *inject_node_name = "misc-drop-buffers";
+static char *inject_node_name = "ethernet-input";
 
-/* Yes, this name is confusing. Sorry. */
 enum {
+    /* Yes, this name is confusing. Sorry. */
     PUNT_INJECT, 
 };
 
@@ -152,7 +152,7 @@ static clib_error_t * tuntap_read (unix_file_t * uf)
     int nbuffers;
     int n_bytes_left;
     i8 *icp;
-    vlib_buffer_t *b;
+    vlib_buffer_t *b = 0;
     vlib_node_runtime_t *node_runtime;
     u32 * to_next, n_left;
     /* $$$$ this should be a #define, see also vlib_buffer_init() */
@@ -337,17 +337,17 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
     struct sockaddr_in *sin;
     u32 ipv4_addr = 0xC0A80101; /* 192.168.1.1 */
     unix_file_t template = {0};
-    int mtu = 4096 + 256;	/* per Rick Payne */
+    /* Suitable defaults for an Ethernet-like tun/tap device */
+    int mtu = 4096 + 256;
     char *tap_name = "tap9";
+    int flags = IFF_TAP | IFF_NO_PI;
     u8 mac_address [6] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
     tuntap_main_t *ttm;
 
     while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT) {
-	/* $$$ set IP address, mtu etc. */
+	/* $$$ configure tap vs. tun, flags, mac address, mtu */
 	break;
     }
-
-    /* Step 1: create tap0 */
 
     ttfd = open ("/dev/net/tun", O_RDWR);
 
@@ -367,7 +367,7 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 
     /* Pick an arbitrary device number */
     strcpy(ifr.ifr_name, tap_name);
-    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+    ifr.ifr_flags = flags;
     if (ioctl(ttfd, TUNSETIFF, (void *)&ifr) < 0) {
 	clib_unix_warning("TUNSETIFF");
     barf:
@@ -422,12 +422,15 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 	clib_unix_warning("SIOCSIFMTU");
     }
 
-    ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
-    memcpy (ifr.ifr_hwaddr.sa_data, ttm->mac_address, 
-	    sizeof (ttm->mac_address));
+    /* MAC address only makes sense with a tap device */
+    if (flags & IFF_TAP) {
+        ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
+        memcpy (ifr.ifr_hwaddr.sa_data, ttm->mac_address, 
+                sizeof (ttm->mac_address));
 
-    if (ioctl (sfd, SIOCSIFHWADDR, &ifr) < 0) {
-	clib_unix_warning("SIOCSIFHWADDR");
+        if (ioctl (sfd, SIOCSIFHWADDR, &ifr) < 0) {
+            clib_unix_warning("SIOCSIFHWADDR");
+        }
     }
 
     /* get flags, modify to bring up interface... */
@@ -444,7 +447,6 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
     }
 
     /* Graph topology setup */
-    
     ttm->punt_node_index = tuntap_punt_node.index;
     if (vlib_node_add_named_next_with_slot (vm, ttm->punt_node_index,
                                             inject_node_name, PUNT_INJECT)
@@ -475,6 +477,13 @@ tuntap_init (vlib_main_t * vm)
 }
 
 VLIB_INIT_FUNCTION (tuntap_init);
+
+/* 
+ * register_tuntap_inject_node_name
+ *
+ * If you want pkts injected somewhere other than ethernet-input,
+ * call this function to register a different inject point... 
+ */
 
 void register_tuntap_inject_node_name (char *name)
 {
