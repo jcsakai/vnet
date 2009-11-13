@@ -347,7 +347,7 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   return 0;
 }
 
-static VLIB_CLI_COMMAND (ip_adj_command) = {
+static VLIB_CLI_COMMAND (ip4_show_fib_command) = {
   .name = "fib",
   .short_help = "Show IP4 routing table",
   .function = ip4_show_fib,
