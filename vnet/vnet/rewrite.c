@@ -29,13 +29,14 @@ u8 * format_vnet_rewrite (u8 * s, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
   vnet_rewrite_header_t * rw = va_arg (*args, vnet_rewrite_header_t *);
+  vlib_sw_interface_t * si = vlib_get_sw_interface (vm, rw->sw_if_index);
   u32 max_data_bytes = va_arg (*args, u32);
   vlib_node_t * next;
 
   next = vlib_get_next_node (vm, rw->node_index, rw->next_index);
 
   if (rw->sw_if_index != ~0)
-    s = format (s, "%U", format_vlib_sw_interface_name, vm, rw->sw_if_index);
+    s = format (s, "%U", format_vlib_sw_interface_name, vm, si);
   else
     s = format (s, "%v", next->name);
 
