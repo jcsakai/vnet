@@ -80,8 +80,8 @@ u8 * format_ip4_header (u8 * s, va_list * args)
 
   s = format (s, "%U: %U -> %U",
 	      format_ip_protocol, ip->protocol,
-	      format_ip4_address, ip->src_address,
-	      format_ip4_address, ip->dst_address);
+	      format_ip4_address, ip->src_address.data,
+	      format_ip4_address, ip->dst_address.data);
 
   /* Show IP version and header length only with unexpected values. */
   if (ip_version != 4 || header_bytes != sizeof (ip4_header_t))
