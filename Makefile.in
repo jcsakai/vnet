@@ -77,6 +77,9 @@ PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
 vnet_unix_OBJECTS = $(am_vnet_unix_OBJECTS)
 vnet_unix_DEPENDENCIES = libvnet.la
+vnet_unix_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(vnet_unix_LDFLAGS) $(LDFLAGS) -o $@
 DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
@@ -279,6 +282,7 @@ nobase_include_HEADERS = vnet/vnet/rewrite.h vnet/ethernet/error.def \
 	vnet/pg/edit.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
+vnet_unix_LDFLAGS = -static
 vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -lclib -lpthread -lm -ldl
 all: all-am
 
@@ -463,7 +467,7 @@ example/main_stub.$(OBJEXT): example/$(am__dirstamp) \
 	example/$(DEPDIR)/$(am__dirstamp)
 vnet_unix$(EXEEXT): $(vnet_unix_OBJECTS) $(vnet_unix_DEPENDENCIES) 
 	@rm -f vnet_unix$(EXEEXT)
-	$(LINK) $(vnet_unix_OBJECTS) $(vnet_unix_LDADD) $(LIBS)
+	$(vnet_unix_LINK) $(vnet_unix_OBJECTS) $(vnet_unix_LDADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
