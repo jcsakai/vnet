@@ -155,7 +155,8 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
   error = 0;
 
  done:
-  /* Caller will free allocated edits in case of error. */
+  if (error)
+    pg_free_edit_group (s);
   return error == 0;
 }
 
