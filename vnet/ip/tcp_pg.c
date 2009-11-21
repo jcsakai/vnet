@@ -117,7 +117,8 @@ unformat_pg_tcp_header (unformat_input_t * input, va_list * args)
   pg_tcp_header_t * p;
   u32 group_index;
   
-  p = pg_create_edit_group (s, sizeof (p[0]), &group_index);
+  p = pg_create_edit_group (s, sizeof (p[0]), sizeof (tcp_header_t),
+			    &group_index);
   pg_tcp_header_init (p);
 
   /* Defaults. */

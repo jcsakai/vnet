@@ -42,7 +42,10 @@ typedef struct pg_edit_group_t {
   u8 * fixed_packet_data_mask;
 
   /* Byte offset where packet data begins. */
-  uword start_byte_offset;
+  u32 start_byte_offset;
+
+  /* Number of packet bytes for this edit group. */
+  u32 n_packet_bytes;
 
   /* Function to perform miscellaneous edits (e.g. set IP checksum, ...). */
   void (* edit_function) (struct pg_main_t * pg,
@@ -187,7 +190,10 @@ pg_stream_get_group (pg_stream_t * s, u32 group_index)
 { return vec_elt_at_index (s->edit_groups, group_index); }
 
 static always_inline void *
-pg_create_edit_group (pg_stream_t * s, int n_bytes, u32 * group_index)
+pg_create_edit_group (pg_stream_t * s,
+		      int n_edit_bytes,
+		      int n_packet_bytes,
+		      u32 * group_index)
 {
   pg_edit_group_t * g;
   int n_edits;
@@ -196,22 +202,26 @@ pg_create_edit_group (pg_stream_t * s, int n_bytes, u32 * group_index)
   if (group_index)
     *group_index = g - s->edit_groups;
 
-  ASSERT (n_bytes % sizeof (pg_edit_t) == 0);
-  n_edits = n_bytes / sizeof (pg_edit_t);
+  ASSERT (n_edit_bytes % sizeof (pg_edit_t) == 0);
+  n_edits = n_edit_bytes / sizeof (pg_edit_t);
   vec_resize (g->edits, n_edits);
+
+  g->n_packet_bytes = n_packet_bytes;
 
   return g->edits;
 }
 
 static always_inline void *
-pg_add_edits (pg_stream_t * s, int n_bytes, u32 group_index)
+pg_add_edits (pg_stream_t * s, int n_edit_bytes, int n_packet_bytes,
+	      u32 group_index)
 {
   pg_edit_group_t * g = pg_stream_get_group (s, group_index);
   pg_edit_t * e;
   int n_edits;
-  ASSERT (n_bytes % sizeof (pg_edit_t) == 0);
-  n_edits = n_bytes / sizeof (pg_edit_t);
+  ASSERT (n_edit_bytes % sizeof (pg_edit_t) == 0);
+  n_edits = n_edit_bytes / sizeof (pg_edit_t);
   vec_add2 (g->edits, e, n_edits);
+  g->n_packet_bytes += n_packet_bytes;
   return e;
 }
 
@@ -227,17 +237,11 @@ static always_inline uword
 pg_edit_group_n_bytes (pg_stream_t * s, u32 group_index)
 {
   pg_edit_group_t * g;
-  pg_edit_t * e;
-  uword n_bits = 0;
+  uword n_bytes = 0;
 
   for (g = s->edit_groups + group_index; g < vec_end (s->edit_groups); g++)
-    {
-      vec_foreach (e, g->edits)
-	n_bits += e->n_bits;
-    }
-
-  ASSERT ((n_bits % BITS (u8)) == 0);
-  return n_bits / 8;
+    n_bytes += g->n_packet_bytes;
+  return n_bytes;
 }
 
 static always_inline void
