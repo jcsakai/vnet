@@ -38,10 +38,7 @@ udp_init (vlib_main_t * vm)
     {
       pi = ip_get_protocol_info (im, IP_PROTOCOL_UDP);
       pi->format_header = format_udp_header;
-
-#ifdef VLIB_PACKET_GENERATOR
       pi->unformat_pg_edit = unformat_pg_udp_header;
-#endif
     }
 
   return 0;

@@ -119,9 +119,7 @@ ip4_pg_edit_function (pg_main_t * pg,
   vlib_main_t * vm = pg->vlib_main;
   u32 ip_offset;
 
-  /* Bit offset must be on byte boundary. */
-  ASSERT (g->start_bit_offset % BITS (u8) == 0);
-  ip_offset = g->start_bit_offset / BITS (u8);
+  ip_offset = g->start_byte_offset;
 
   switch (g->edit_function_opaque)
     {
@@ -318,6 +316,31 @@ unformat_pg_ip4_header (unformat_input_t * input, va_list * args)
 
     else if (! unformat_user (input, unformat_pg_payload, s))
       goto error;
+
+    if (p->length.type == PG_EDIT_UNSPECIFIED
+	&& s->min_packet_bytes == s->max_packet_bytes
+	&& group_index + 1 < vec_len (s->edit_groups))
+      {
+	pg_edit_set_fixed (&p->length,
+			   pg_edit_group_n_bytes (s, group_index + 1));
+      }
+
+    /* Compute IP header checksum if all edits are fixed. */
+    if (p->checksum.type == PG_EDIT_UNSPECIFIED)
+      {
+	ip4_header_t fixed_header, fixed_mask, cmp_mask;
+	
+	/* See if header is all fixed and specified except for
+	   checksum field. */
+	memset (&cmp_mask, ~0, sizeof (cmp_mask));
+	cmp_mask.checksum = 0;
+
+	pg_edit_group_get_fixed_packet_data (s, group_index,
+					     &fixed_header, &fixed_mask);
+	if (! memcmp (&fixed_mask, &cmp_mask, sizeof (cmp_mask)))
+	  pg_edit_set_fixed (&p->checksum,
+			     clib_net_to_host_u16 (ip4_header_checksum (&fixed_header)));
+      }
 
     p = pg_get_edit_group (s, group_index);
     if (p->length.type == PG_EDIT_UNSPECIFIED

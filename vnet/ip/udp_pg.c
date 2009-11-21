@@ -40,10 +40,8 @@ udp_pg_edit_function_inline (pg_main_t * pg,
   vlib_main_t * vm = pg->vlib_main;
   u32 ip_offset, udp_offset;
 
-  /* Bit offset must be on byte boundary. */
-  ASSERT (g->start_bit_offset % BITS (u8) == 0);
-  udp_offset = g->start_bit_offset / BITS (u8);
-  ip_offset = (g-1)->start_bit_offset / BITS (u8); 
+  udp_offset = g->start_byte_offset;
+  ip_offset = (g-1)->start_byte_offset;
 
   while (n_packets >= 1)
     {

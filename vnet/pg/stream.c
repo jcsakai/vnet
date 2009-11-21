@@ -115,145 +115,144 @@ u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
   return i;
 }
 
-static void perform_fixed_edits (pg_stream_t * stream)
+static void do_edit (pg_stream_t * stream,
+		     pg_edit_group_t * g,
+		     pg_edit_t * e,
+		     uword want_commit)
 {
-  pg_edit_t * e, * old_edits, * new_edits;
-  u8 * s, * v, * m;
+  u32 i, i0, i1, mask, n_bits_left;
+  u8 * v, * s, * m;
 
-  old_edits = stream->edits;
-  new_edits = 0;
-  s = 0;
-  m = 0;
-  vec_foreach (e, old_edits)
+  i0 = e->lsb_bit_offset / BITS (u8);
+
+  /* Make space for edit in value and mask. */
+  vec_validate (g->fixed_packet_data, i0);
+  vec_validate (g->fixed_packet_data_mask, i0);
+
+  if (e->type != PG_EDIT_FIXED)
     {
-      u32 i, i0, i1, mask, n_bits_left;
-
-      i0 = e->lsb_bit_offset / BITS (u8);
-
-      /* Make space for edit in value and mask. */
-      vec_validate (s, i0);
-      vec_validate (m, i0);
-
-      if (e->type != PG_EDIT_FIXED)
+      switch (e->type)
 	{
-	  switch (e->type)
-	    {
-	    case PG_EDIT_RANDOM:
-	    case PG_EDIT_INCREMENT:
-	      e->last_increment_value = pg_edit_get_value (e, PG_EDIT_LO);
-	      break;
+	case PG_EDIT_RANDOM:
+	case PG_EDIT_INCREMENT:
+	  e->last_increment_value = pg_edit_get_value (e, PG_EDIT_LO);
+	  break;
 
-	    default:
-	      break;
-	    }
-
-	  vec_add1 (new_edits, e[0]);
-	  continue;
+	default:
+	  break;
 	}
 
-      n_bits_left = e->n_bits;
-      i0 = e->lsb_bit_offset / BITS (u8);
-      i1 = e->lsb_bit_offset % BITS (u8);
-
-      v = e->values[PG_EDIT_LO];
-      i = pg_edit_n_alloc_bytes (e) - 1;
-
-      /* Odd low order bits?. */
-      if (i1 != 0 && n_bits_left > 0)
-	{
-	  u32 n = clib_min (n_bits_left, BITS (u8) - i1);
-
-	  mask = pow2_mask (n) << i1;
-
-	  ASSERT (i0 < vec_len (s));
-	  ASSERT (i < vec_len (v));
-	  ASSERT ((v[i] &~ mask) == 0);
-
-	  s[i0] |= v[i] & mask;
-	  m[i0] |= mask;
-
-	  i0--;
-	  i--;
-	  n_bits_left -= n;
-	}
-
-      /* Even bytes. */
-      while (n_bits_left >= 8)
-	{
-	  ASSERT (i0 < vec_len (s));
-	  ASSERT (i < vec_len (v));
-
-	  s[i0] = v[i];
-	  m[i0] = ~0;
-
-	  i0--;
-	  i--;
-	  n_bits_left -= 8;
-	}
-
-      /* Odd high order bits. */
-      if (n_bits_left > 0)
-	{
-	  mask = pow2_mask (n_bits_left);
-
-	  ASSERT (i0 < vec_len (s));
-	  ASSERT (i < vec_len (v));
-	  ASSERT ((v[i] &~ mask) == 0);
-
-	  s[i0] |= v[i] & mask;
-	  m[i0] |= mask;
-	}
-
-      pg_edit_free (e);
+      if (want_commit)
+	vec_add1 (stream->non_fixed_edits, e[0]);
+      return;
     }
 
-  vec_free (old_edits);
-  stream->fixed_packet_data = s;
-  stream->fixed_packet_data_mask = m;
-  stream->edits = new_edits;
+  s = g->fixed_packet_data;
+  m = g->fixed_packet_data_mask;
+
+  n_bits_left = e->n_bits;
+  i0 = e->lsb_bit_offset / BITS (u8);
+  i1 = e->lsb_bit_offset % BITS (u8);
+
+  v = e->values[PG_EDIT_LO];
+  i = pg_edit_n_alloc_bytes (e) - 1;
+
+  /* Odd low order bits?. */
+  if (i1 != 0 && n_bits_left > 0)
+    {
+      u32 n = clib_min (n_bits_left, BITS (u8) - i1);
+
+      mask = pow2_mask (n) << i1;
+
+      ASSERT (i0 < vec_len (s));
+      ASSERT (i < vec_len (v));
+      ASSERT ((v[i] &~ mask) == 0);
+
+      s[i0] |= v[i] & mask;
+      m[i0] |= mask;
+
+      i0--;
+      i--;
+      n_bits_left -= n;
+    }
+
+  /* Even bytes. */
+  while (n_bits_left >= 8)
+    {
+      ASSERT (i0 < vec_len (s));
+      ASSERT (i < vec_len (v));
+
+      s[i0] = v[i];
+      m[i0] = ~0;
+
+      i0--;
+      i--;
+      n_bits_left -= 8;
+    }
+
+  /* Odd high order bits. */
+  if (n_bits_left > 0)
+    {
+      mask = pow2_mask (n_bits_left);
+
+      ASSERT (i0 < vec_len (s));
+      ASSERT (i < vec_len (v));
+      ASSERT ((v[i] &~ mask) == 0);
+
+      s[i0] |= v[i] & mask;
+      m[i0] |= mask;
+    }
+
+  if (want_commit)
+    pg_edit_free (e);
 }
 
-static void
-compute_edit_bit_offsets (pg_stream_t * s)
+void pg_edit_group_get_fixed_packet_data (pg_stream_t * s,
+					  u32 group_index,
+					  void * packet_data,
+					  void * packet_data_mask)
 {
+  pg_edit_group_t * g = pg_stream_get_group (s, group_index);
   pg_edit_t * e;
+
+  vec_foreach (e, g->edits)
+    do_edit (s, g, e, /* want_commit */ 0);
+
+  memcpy (packet_data, g->fixed_packet_data, vec_len (g->fixed_packet_data));
+  memcpy (packet_data_mask, g->fixed_packet_data_mask, vec_len (g->fixed_packet_data_mask));
+}
+
+static void perform_fixed_edits (pg_stream_t * s)
+{
   pg_edit_group_t * g;
-  u32 o, i, j, j0, j1;
+  pg_edit_t * e;
+  word i;
 
-  for (i = 1; i < vec_len (s->edit_groups); i++)
+  for (i = vec_len (s->edit_groups) - 1; i >= 0; i--)
     {
-      g = s->edit_groups + i;
+      g = vec_elt_at_index (s->edit_groups, i);
+      vec_foreach (e, g->edits)
+	do_edit (s, g, e, /* want_commit */ 1);
 
-      j0 = g[-1].start_edit_index;
-      j1 = g[0].start_edit_index;
+      /* All edits have either been performed or added to
+	 stream->non_fixed_edits.  So, we can delete the vector. */
+      vec_free (g->edits);
+    }
 
-      o = 0;
-      for (j = j0; j < j1; j++)
-	{
-	  e = s->edits + j;
-	  o = clib_max (o, e->lsb_bit_offset / BITS (u8));
-	}
-
-      /* Groups should begin on a byte boundary. */
-      if (o == 0)
-	g[0].start_bit_offset = 0;
-      else
-	g[0].start_bit_offset = BITS (u8) * (1 + o);
-
-      /* Relocate all edits in this group by
-	 bit offset of group. */
-      j0 = j1;
-      j1 = (g + 1 < vec_end (s->edit_groups)
-	    ? g[1].start_edit_index
-	    : vec_len (s->edits));
-      for (j = j0; j < j1; j++)
-	{
-	  e = s->edits + j;
-	  e->lsb_bit_offset += g[0].start_bit_offset;
-	}
+  vec_free (s->fixed_packet_data_mask);
+  vec_free (s->fixed_packet_data);
+  vec_foreach (g, s->edit_groups)
+    {
+      g->start_byte_offset = vec_len (s->fixed_packet_data);
+      vec_add (s->fixed_packet_data,
+	       g->fixed_packet_data,
+	       vec_len (g->fixed_packet_data));
+      vec_add (s->fixed_packet_data_mask,
+	       g->fixed_packet_data_mask,
+	       vec_len (g->fixed_packet_data_mask));
     }
 }
-	
+
 void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
 {
   vlib_main_t * vm = pg->vlib_main;
@@ -281,8 +280,6 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
     s->name = vec_dup (s->name);
 
   hash_set_mem (pg->stream_index_by_name, s->name, s - pg->streams);
-
-  compute_edit_bit_offsets (s);
 
   /* Get fixed part of buffer data. */
   perform_fixed_edits (s);

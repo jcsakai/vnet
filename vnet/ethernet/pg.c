@@ -92,7 +92,7 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
   n_vlan = 0;
   while (unformat (input, "vlan"))
     {
-      v = pg_add_edits (s, sizeof (v[0]));
+      v = pg_add_edits (s, sizeof (v[0]), group_index);
       pg_ethernet_vlan_header_init (v, n_vlan);
 
       if (! unformat_user (input, unformat_pg_edit,

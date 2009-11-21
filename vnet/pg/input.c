@@ -999,7 +999,7 @@ pg_generate_edit (pg_main_t * pg,
 {
   pg_edit_t * e;
 
-  vec_foreach (e, s->edits)
+  vec_foreach (e, s->non_fixed_edits)
     {
       switch (e->type)
 	{
@@ -1028,6 +1028,7 @@ pg_generate_edit (pg_main_t * pg,
 	  break;
 
 	default:
+	  /* Should not be any fixed edits left. */
 	  ASSERT (0);
 	  break;
 	}
@@ -1039,10 +1040,8 @@ pg_generate_edit (pg_main_t * pg,
     for (i = vec_len (s->edit_groups) - 1; i >= 0; i--)
       {
 	pg_edit_group_t * g = s->edit_groups + i;
-
-	if (! g->edit_function)
-	  continue;
-	g->edit_function (pg, s, g, buffers, n_buffers);
+	if (g->edit_function)
+	  g->edit_function (pg, s, g, buffers, n_buffers);
       }
   }
 }

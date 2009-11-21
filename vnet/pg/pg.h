@@ -34,11 +34,15 @@ struct pg_main_t;
 struct pg_stream_t;
 
 typedef struct pg_edit_group_t {
-  /* Index of first edit in group. */
-  u32 start_edit_index;
+  /* Edits in this group. */
+  pg_edit_t * edits;
 
-  /* Starting bit offset for this edit group. */
-  u32 start_bit_offset;
+  /* Fixed edits for this group. */
+  u8 * fixed_packet_data;
+  u8 * fixed_packet_data_mask;
+
+  /* Byte offset where packet data begins. */
+  uword start_byte_offset;
 
   /* Function to perform miscellaneous edits (e.g. set IP checksum, ...). */
   void (* edit_function) (struct pg_main_t * pg,
@@ -77,13 +81,19 @@ typedef struct pg_stream_t {
      ip4, tcp, ...). */
   pg_edit_group_t * edit_groups;
 
-  /* Vector of buffer edits for this stream. */
-  pg_edit_t * edits;
-
   pg_edit_type_t packet_size_edit_type;
 
   /* Min/max packet size. */
   u32 min_packet_bytes, max_packet_bytes;
+
+  /* Vector of non-fixed edits for this stream.
+     All fixed edits are performed and placed into fixed_packet_data. */
+  pg_edit_t * non_fixed_edits;
+
+  /* Packet data with all fixed edits performed.
+     All packets in stream are initialized according with this data.
+     Mask specifies which bits of packet data are covered by fixed edits. */
+  u8 * fixed_packet_data, * fixed_packet_data_mask;
 
   /* Size to use for buffers.  0 means use buffers big enough
      for max_packet_bytes. */
@@ -124,11 +134,6 @@ typedef struct pg_stream_t {
 
   f64 packet_accumulator;
 
-  /* Packet data with all fixed edits performed.
-     All packets in stream are initialized according with this data.
-     Mask specifies which bits of packet data are covered by fixed edits. */
-  u8 * fixed_packet_data, * fixed_packet_data_mask;
-
   pg_buffer_index_t * buffer_indices;
 } pg_stream_t;
 
@@ -140,9 +145,26 @@ pg_buffer_index_free (pg_buffer_index_t * bi)
 }
 
 static always_inline void
+pg_edit_group_free (pg_edit_group_t * g)
+{
+  pg_edit_t * e;
+  vec_foreach (e, g->edits)
+    pg_edit_free (e);
+  vec_free (g->edits);
+  vec_free (g->fixed_packet_data);
+  vec_free (g->fixed_packet_data_mask);
+}
+
+static always_inline void
 pg_stream_free (pg_stream_t * s)
 {
-  vec_free (s->edits);
+  pg_edit_group_t * g;
+  pg_edit_t * e;
+  vec_foreach (e, s->non_fixed_edits)
+    pg_edit_free (e);
+  vec_free (s->non_fixed_edits);
+  vec_foreach (g, s->edit_groups)
+    pg_edit_group_free (g);
   vec_free (s->edit_groups);
   vec_free (s->fixed_packet_data);
   vec_free (s->fixed_packet_data_mask);
@@ -160,53 +182,73 @@ static always_inline int
 pg_stream_is_enabled (pg_stream_t * s)
 { return (s->flags & PG_STREAM_FLAGS_IS_ENABLED) != 0; }
 
-static always_inline void *
-pg_add_edits (pg_stream_t * s, int n_bytes)
-{
-  pg_edit_t * e;
-  int n_edits = n_bytes / sizeof (e[0]);
-
-  ASSERT (n_bytes % sizeof (pg_edit_t) == 0);
-
-  vec_add2 (s->edits, e, n_edits);
-
-  return e;
-}
-
-static always_inline void *
-pg_create_edit_group (pg_stream_t * s, int n_bytes, u32 * group_index)
-{
-  pg_edit_group_t * g;
-  vec_add2 (s->edit_groups, g, 1);
-  g->start_edit_index = vec_len (s->edits);
-  if (group_index)
-    *group_index = g - s->edit_groups;
-  return pg_add_edits (s, n_bytes);
-}
-
 static always_inline pg_edit_group_t *
 pg_stream_get_group (pg_stream_t * s, u32 group_index)
 { return vec_elt_at_index (s->edit_groups, group_index); }
 
 static always_inline void *
+pg_create_edit_group (pg_stream_t * s, int n_bytes, u32 * group_index)
+{
+  pg_edit_group_t * g;
+  int n_edits;
+
+  vec_add2 (s->edit_groups, g, 1);
+  if (group_index)
+    *group_index = g - s->edit_groups;
+
+  ASSERT (n_bytes % sizeof (pg_edit_t) == 0);
+  n_edits = n_bytes / sizeof (pg_edit_t);
+  vec_resize (g->edits, n_edits);
+
+  return g->edits;
+}
+
+static always_inline void *
+pg_add_edits (pg_stream_t * s, int n_bytes, u32 group_index)
+{
+  pg_edit_group_t * g = pg_stream_get_group (s, group_index);
+  pg_edit_t * e;
+  int n_edits;
+  ASSERT (n_bytes % sizeof (pg_edit_t) == 0);
+  n_edits = n_bytes / sizeof (pg_edit_t);
+  vec_add2 (g->edits, e, n_edits);
+  return e;
+}
+
+static always_inline void *
 pg_get_edit_group (pg_stream_t * s, u32 group_index)
 {
   pg_edit_group_t * g = pg_stream_get_group (s, group_index);
-  return vec_elt_at_index (s->edits, g->start_edit_index);
+  return g->edits;
+}
+
+/* Number of bytes for all groups >= given group. */
+static always_inline uword
+pg_edit_group_n_bytes (pg_stream_t * s, u32 group_index)
+{
+  pg_edit_group_t * g;
+  pg_edit_t * e;
+  uword n_bits = 0;
+
+  for (g = s->edit_groups + group_index; g < vec_end (s->edit_groups); g++)
+    {
+      vec_foreach (e, g->edits)
+	n_bits += e->n_bits;
+    }
+
+  ASSERT ((n_bits % BITS (u8)) == 0);
+  return n_bits / 8;
 }
 
 static always_inline void
 pg_free_edit_group (pg_stream_t * s)
 {
-  int i, l, n_orig_edits;
+  uword i = vec_len (s->edit_groups) - 1;
+  pg_edit_group_t * g = pg_stream_get_group (s, i);
 
-  l = vec_len (s->edit_groups);
-  n_orig_edits = s->edit_groups[l-1].start_edit_index;
-  for (i = n_orig_edits; i < vec_len (s->edits); i++)
-    pg_edit_free (s->edits + i);
-
-  _vec_len (s->edits) = n_orig_edits;
-  _vec_len (s->edit_groups) = l - 1;
+  pg_edit_group_free (g);
+  memset (g, 0, sizeof (g[0]));
+  _vec_len (s->edit_groups) = i;
 }
 
 typedef struct {
@@ -271,5 +313,10 @@ pg_get_node (uword node_index)
   vec_validate (pg->nodes, node_index);
   return pg->nodes + node_index;
 }
+
+void pg_edit_group_get_fixed_packet_data (pg_stream_t * s,
+					  u32 group_index,
+					  void * fixed_packet_data,
+					  void * fixed_packet_data_mask);
 
 #endif /* included_vlib_pg_h */

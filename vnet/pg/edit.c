@@ -116,17 +116,18 @@ unformat_pg_payload (unformat_input_t * input, va_list * args)
   pg_main_t * pg = &pg_main;
   vlib_main_t * vm = pg->vlib_main;
   pg_edit_t * e;
-  u32 i, node_index, len;
+  u32 i, node_index, len, max_len;
   u8 * v;
   
   v = 0;
-  if (unformat (input, "fixed %d", &len))
+
+  if (unformat (input, "incrementing %d", &len))
     {
       vec_resize (v, len);
       for (i = 0; i < len; i++)
 	v[i] = i;
     }
-  else if (unformat (input, "0x%U", unformat_hex_string, &v))
+  else if (unformat (input, "hex 0x%U", unformat_hex_string, &v))
     ;
 
   else if (unformat (input, "%U", unformat_vlib_node, vm, &node_index))
@@ -139,6 +140,16 @@ unformat_pg_payload (unformat_input_t * input, va_list * args)
 
   else
     return 0;
+
+  /* Length not including this payload. */
+  max_len = pg_edit_group_n_bytes (s, 0);
+  if (max_len + vec_len (v) >= s->max_packet_bytes)
+    {
+      if (s->max_packet_bytes >= max_len)
+	_vec_len (v) = s->max_packet_bytes - max_len;
+      else
+	_vec_len (v) = 0;
+    }
 
   e = pg_create_edit_group (s, sizeof (e[0]), 0);
 
