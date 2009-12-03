@@ -247,7 +247,7 @@ static void pci_bus_probe (pci_probe_main_t *pm)
         int fd;
         u32 bus_devfn, vend_dev;
 
-        clib_error_t *(*fp)(int fd, u8 *regbase, u64 *resources,
+        clib_error_t *(*fp)(u16 device, int fd, u8 *regbase, u64 *resources,
                             u16 bus, u16 devfn, u32 irq);
         pci_probe_register_t *regp;
 
@@ -295,7 +295,7 @@ static void pci_bus_probe (pci_probe_main_t *pm)
     
         regp = pm->pci_probe_registrations + p[0];
         
-#if DEBUG
+#if DEBUG > 1
         fformat(stderr, 
                 "%2x:%2x.%d: found reg for vendor 0x%x, device 0x%x",
                 bus, PCI_SLOT(devfn), PCI_FUNC(devfn),
@@ -349,7 +349,7 @@ static void pci_bus_probe (pci_probe_main_t *pm)
          * created (if any), and the resource array 
          */
         fp = regp->callback;
-        error = (*fp)(fd, regp->regbase, resources, bus, devfn, irq);
+        error = (*fp)(device, fd, regp->regbase, resources, bus, devfn, irq);
 
         close(fd);
 
@@ -360,6 +360,8 @@ static void pci_bus_probe (pci_probe_main_t *pm)
         }
     }
     vec_free(contents);
+    hash_free(pm->pci_probe_hash);
+    vec_free(pm->pci_probe_registrations);
 }
 
 static clib_error_t *
