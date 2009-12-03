@@ -371,35 +371,10 @@ pci_probe_config (vlib_main_t *vm, unformat_input_t * input)
 }
 
 VLIB_CONFIG_FUNCTION (pci_probe_config, "pci_probe");
-
-
-static clib_error_t *
-toy_ixgbe_probe (int fd, u8 *regbase, u64 * resources, u16 bus, u16 devfn,
-                 u32 irq)
-{
-    clib_warning (
-        "toy ixgbe probe, regbase 0x%llx, bus 0x%2x, devfn 0x%2x irq 0x%x\n",
-        regbase, bus, devfn, irq);
-    return 0;
-}
-
 /* call in main() to force the linker to load this module... */
-
-#define PCI_VENDOR_ID_INTEL 0x8086
-#define PCI_DEVICE_ID_IXGBE 0x10c6
-
 clib_error_t *
 pci_probe_init (vlib_main_t * vm)
 {
-
-    static u8 once;
-
-    if (once == 0) {
-        pci_probe_register (PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_IXGBE,
-                            0x10000, toy_ixgbe_probe);
-        once = 1;
-    }
-
     return 0;
 }
 VLIB_INIT_FUNCTION (pci_probe_init);
