@@ -2193,11 +2193,13 @@ ixgbe_update_link_status(struct adapter *adapter)
 {
     // struct ifnet	*ifp = adapter->ifp;
     // struct tx_ring *txr = adapter->tx_rings;
+    ixgbe_port_t *port = adapter->port;
 
     if (adapter->link_up){ 
         if (adapter->link_active == FALSE) {
             if (bootverbose)
-                clib_warning("Link is up %d Gbps %s \n",
+                clib_warning("Port %d: Link is up %d Gbps %s \n",
+                             port - ixgbe_main.ports,
                              ((adapter->link_speed == 128)? 10:1),
                              "Full Duplex");
             adapter->link_active = TRUE;
@@ -2206,7 +2208,8 @@ ixgbe_update_link_status(struct adapter *adapter)
     } else { /* Link down */
         if (adapter->link_active == TRUE) {
             if (bootverbose)
-                clib_warning("Link is Down\n");
+                clib_warning("Port %d: Link is Down\n", 
+                             port - ixgbe_main.ports);
             // if_link_state_change(ifp, LINK_STATE_DOWN);
             adapter->link_active = FALSE;
 #if 0
@@ -5045,55 +5048,55 @@ void ixgbe_print_hw_stats(struct adapter * adapter)
  *  maintained by the driver and hardware.
  *
  **********************************************************************/
-void ixgbe_print_debug_info(struct adapter *adapter)
+void ixgbe_print_debug_info(vlib_main_t *vm, struct adapter *adapter)
 {
     // struct rx_ring *rxr = adapter->rx_rings;
     // struct tx_ring *txr = adapter->tx_rings;
     struct ixgbe_hw *hw = &adapter->hw;
     int i;
 
-    fformat(stdout,"Error Byte Count = %u \n",
+    vlib_cli_output(vm,"Error Byte Count = %u \n",
 	    IXGBE_READ_REG(hw, IXGBE_ERRBC));
 
     for (i = 0; i < adapter->num_queues; i++) {
         // struct lro_ctrl		*lro = &rxr->lro;
-        fformat(stdout,"Queue[%d]: rdh = %d, hw rdt = %d\n",
+        vlib_cli_output(vm,"Queue[%d]: rdh = %d, hw rdt = %d\n",
                 i, IXGBE_READ_REG(hw, IXGBE_RDH(i)),
                 IXGBE_READ_REG(hw, IXGBE_RDT(i)));
 #if 0
-        fformat(stdout,"RX(%d) Packets Received: %lld\n",
+        vlib_cli_output(vm,"RX(%d) Packets Received: %lld\n",
                 rxr->me, (long long)rxr->rx_packets);
-        fformat(stdout,"RX(%d) Split RX Packets: %lld\n",
+        vlib_cli_output(vm,"RX(%d) Split RX Packets: %lld\n",
                 rxr->me, (long long)rxr->rx_split_packets);
-        fformat(stdout,"RX(%d) Bytes Received: %lu\n",
+        vlib_cli_output(vm,"RX(%d) Bytes Received: %lu\n",
                 rxr->me, (long)rxr->rx_bytes);
-        fformat(stdout,"RX(%d) IRQ Handled: %lu\n",
+        vlib_cli_output(vm,"RX(%d) IRQ Handled: %lu\n",
                 rxr->me, (long)rxr->rx_irq);
-        fformat(stdout,"RX(%d) LRO Queued= %d\n",
+        vlib_cli_output(vm,"RX(%d) LRO Queued= %d\n",
                 rxr->me, lro->lro_queued);
-        fformat(stdout,"RX(%d) LRO Flushed= %d\n",
+        vlib_cli_output(vm,"RX(%d) LRO Flushed= %d\n",
                 rxr->me, lro->lro_flushed);
-        fformat(stdout,"RX(%d) HW LRO Merges= %lu\n",
+        vlib_cli_output(vm,"RX(%d) HW LRO Merges= %lu\n",
                 rxr->me, (long)rxr->rsc_num);
 #endif
     }
 
     for (i = 0; i < adapter->num_queues; i++) {
-        fformat(stdout,"Queue(%d) tdh = %d, hw tdt = %d\n", i,
+        vlib_cli_output(vm,"Queue(%d) tdh = %d, hw tdt = %d\n", i,
                 IXGBE_READ_REG(hw, IXGBE_TDH(i)),
                 IXGBE_READ_REG(hw, IXGBE_TDT(i)));
 #if 0
-        fformat(stdout,"TX(%d) Packets Sent: %lu\n",
+        vlib_cli_output(vm,"TX(%d) Packets Sent: %lu\n",
                 txr->me, (long)txr->total_packets);
-        fformat(stdout,"TX(%d) IRQ Handled: %lu\n",
+        vlib_cli_output(vm,"TX(%d) IRQ Handled: %lu\n",
                 txr->me, (long)txr->tx_irq);
-        fformat(stdout,"TX(%d) NO Desc Avail: %lu\n",
+        vlib_cli_output(vm,"TX(%d) NO Desc Avail: %lu\n",
                 txr->me, (long)txr->no_tx_desc_avail);
 #endif
     }
 
-    fformat(stdout,"Link IRQ Handled: %lu\n",
-    	    (long)adapter->link_irq);
+    vlib_cli_output(vm,"Link IRQ Handled: %lu\n",
+                    (long)adapter->link_irq);
     return;
 }
 

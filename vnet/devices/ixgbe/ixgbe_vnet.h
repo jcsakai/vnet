@@ -91,6 +91,6 @@ int ixgbe_attach(ixgbe_port_t *ixp);
 void ixgbe_init(void *arg);
 void ixgbe_handle_link (ixgbe_port_t *ixp);
 void ixgbe_print_hw_stats(struct adapter * adapter);
-void ixgbe_print_debug_info(struct adapter *adapter);
+void ixgbe_print_debug_info(vlib_main_t *vm, struct adapter *adapter);
 
 #endif /* __included_ixgbe_vnet_h__ */

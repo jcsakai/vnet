@@ -243,13 +243,6 @@ ixgbe_probe (u16 device, int fd, u8 *regbase,
         clib_warning ("unknown ixgbe flavor, outta here...");
         return 0;
     }
-    /* 
-     * Aggravation: back-pointers in ported code means that we have
-     * to preallocate the port vector.
-     */
-    vec_validate(im->ports, 1);
-    _vec_len(im->ports) = 0;
-
     vec_add2(im->ports, port, 1);
 
     port->hw_if_index 
@@ -295,9 +288,46 @@ ixgbe_vlib_init (vlib_main_t * vm)
 
     ixgbe_main.vm = vm;
     ixgbe_vlib_main = vm;
+    /* 
+     * Aggravation: back-pointers in ported code means that we have
+     * to preallocate the port vector.
+     */
+    vec_validate(ixgbe_main.ports, 1);
+    _vec_len(ixgbe_main.ports) = 0;
 
     pci_probe_register (PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_IXGBE,
                         128<<10, ixgbe_probe);
     return 0;
 }
+
 VLIB_INIT_FUNCTION (ixgbe_vlib_init);
+
+
+static clib_error_t *
+ixgbe_cli_command (vlib_main_t * vm,
+                   unformat_input_t * input,
+                   vlib_cli_command_t * cmd)
+{
+    ixgbe_main_t *im = &ixgbe_main;
+    ixgbe_port_t *port;
+    int i;
+
+    if (unformat (input, "debug")) {
+        for (i = 0; i < vec_len(im->ports); i++) {
+            port = im->ports + i;
+            vlib_cli_output (im->vm, "Port %d debug info:\n", i);
+            ixgbe_print_debug_info (im->vm, &port->adapter);
+        }
+    } else {
+        clib_warning ("unknown ixgbe show command");
+    }
+
+    return 0;
+}
+
+static VLIB_CLI_COMMAND (debug_cli_command) = {
+  .name = "ixgbe",
+  .short_help = "Intel 10xGE NIC show commands",
+  .function = ixgbe_cli_command,
+  .parent = &vlib_cli_show_command,
+};
