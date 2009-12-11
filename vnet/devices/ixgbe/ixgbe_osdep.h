@@ -43,7 +43,7 @@
 #define msec_delay(x) \
     do { vlib_process_suspend (ixgbe_vlib_main, ((double)(x))*1e-3); } while (0)
 
-#define DBG 1
+#define DBG 0
 #define MSGOUT(S, A, B)     clib_warning(S, A, B)
 #define DEBUGFUNC(F)        DEBUGOUT(F);
 #if DBG

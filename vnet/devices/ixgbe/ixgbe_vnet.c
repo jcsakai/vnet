@@ -176,20 +176,22 @@ ixgbe_process (vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 {
     int i;
     ixgbe_main_t *im = &ixgbe_main;
+    ixgbe_port_t *port;
 
     /* Initialize */
     for (i = 0; i < vec_len(im->ports); i++) {
+        port = im->ports + i;
         /* setup rings */
-        if (ixgbe_ring_init (im->ports + i, IXGBE_TX_RINGSIZE, VLIB_TX))
+        if (ixgbe_ring_init (port, IXGBE_TX_RINGSIZE, VLIB_TX))
             goto broken;
-        if (ixgbe_ring_init (im->ports + i, IXGBE_RX_RINGSIZE, VLIB_RX))
+        if (ixgbe_ring_init (port, IXGBE_RX_RINGSIZE, VLIB_RX))
             goto broken;
 
         /* setup bsd driver */
-        if (ixgbe_attach (im->ports + i))
+        if (ixgbe_attach (port))
             goto broken;
         /* init hardware */
-        ixgbe_init (&((im->ports + i)->adapter));
+        ixgbe_init (&port->adapter);
     }
 
     /* Turn on rx/tx processing */
@@ -241,6 +243,12 @@ ixgbe_probe (u16 device, int fd, u8 *regbase,
         clib_warning ("unknown ixgbe flavor, outta here...");
         return 0;
     }
+    /* 
+     * Aggravation: back-pointers in ported code means that we have
+     * to preallocate the port vector.
+     */
+    vec_validate(im->ports, 1);
+    _vec_len(im->ports) = 0;
 
     vec_add2(im->ports, port, 1);
 
@@ -258,6 +266,7 @@ ixgbe_probe (u16 device, int fd, u8 *regbase,
     adapter->port = port;
     adapter->num_queues = 1;
     adapter->if_mtu = ETHERMTU;
+    adapter->hw.hw_addr = regbase;
     
     adapter->hw.vendor_id = PCI_VENDOR_ID_INTEL; /* duh */
     adapter->hw.device_id = device;
