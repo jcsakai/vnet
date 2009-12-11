@@ -44,9 +44,13 @@
 #include <vlib/unix/unix.h>
 
 #include <vnet/unix/pci_probe.h>
+
+#include <vnet/devices/ixgbe/ixgbe.h>
 #include <vnet/devices/ixgbe/ixgbe_vnet.h>
 
 #include <vnet/pg/pg.h>
+
+ixgbe_main_t ixgbe_main;
 
 static uword
 ixgbe_tx (vlib_main_t * vm,
@@ -113,6 +117,108 @@ VLIB_REGISTER_NODE (ixgbe_input_node) = {
     },
 };
 
+int ixgbe_ring_init (ixgbe_port_t * port,
+                     uword n_descriptors,
+                     vlib_rx_or_tx_t rx_or_tx)
+{
+    vlib_main_t * vm = port->im->vm;
+    ixgbe_descriptor_t * d, * ring;
+    clib_error_t * error;
+
+    ring = vlib_physmem_alloc_aligned (vm,
+				       &error,
+				       n_descriptors * sizeof (ring[0]),
+				       CLIB_CACHE_LINE_BYTES);
+    if (error) {
+	/* Allocation error is fatal. */
+	clib_error_report (error);
+	return 1;
+    }
+
+    memset (ring, 0, n_descriptors * sizeof (ring[0]));
+
+    if (rx_or_tx == VLIB_RX) {
+        /* $$$$$ Remember to set RCTL_BSIZE_512B = 0x00020000 */
+	port->buffer_bytes = 512;
+	port->buffer_free_list_index = 
+            vlib_buffer_get_or_create_free_list (vm, port->buffer_bytes);
+
+	vec_validate (port->rx_buffers, n_descriptors - 1);
+	if (n_descriptors != 
+            vlib_buffer_alloc_from_free_list (vm, port->rx_buffers,
+                                              n_descriptors,
+                                              port->buffer_free_list_index)) {
+	    vlib_physmem_free (vm, ring);
+            clib_error("buffer alloc failed");
+	    return 1;
+	}
+
+	for (d = ring; d < ring + n_descriptors; d++) {
+	    u32 bi = port->rx_buffers[d - ring];
+            d->bufaddr = vlib_get_buffer_data_physical_address (vm, bi);
+	}
+        port->rx_ring = ring;
+    } else {
+        port->tx_ring = ring;
+        vec_validate(port->tx_buffers, n_descriptors-1);
+    }
+    return 0;
+}
+
+static int ixgbe_poller(ixgbe_port_t *port)
+{
+    ixgbe_handle_link (port);
+    return 0;
+}
+
+static uword
+ixgbe_process (vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
+{
+    int i;
+    ixgbe_main_t *im = &ixgbe_main;
+
+    /* Initialize */
+    for (i = 0; i < vec_len(im->ports); i++) {
+        /* setup rings */
+        if (ixgbe_ring_init (im->ports + i, IXGBE_TX_RINGSIZE, VLIB_TX))
+            goto broken;
+        if (ixgbe_ring_init (im->ports + i, IXGBE_RX_RINGSIZE, VLIB_RX))
+            goto broken;
+
+        /* setup bsd driver */
+        if (ixgbe_attach (im->ports + i))
+            goto broken;
+        /* init hardware */
+        ixgbe_init (&((im->ports + i)->adapter));
+    }
+
+    /* Turn on rx/tx processing */
+    vlib_node_enable_disable (im->vm, ixgbe_input_node.index, 
+                              /* enable */ 1);
+    while (1) {
+        for (i = 0; i < vec_len(im->ports); i++)
+            if (ixgbe_poller (im->ports + i))
+                goto broken;
+        vlib_process_suspend (vm, 200e-3);
+    }
+
+broken:
+    clib_warning ("stopping ixgbe process...");
+    vlib_process_suspend (vm, 1e70);
+    return 0; /* not this year... */
+}
+
+
+VLIB_REGISTER_NODE (ixgbe_process_node) = {
+    .function = ixgbe_process,
+    .type = VLIB_NODE_TYPE_PROCESS,
+    .name = "ixgbe-process",
+    
+    /* Will be enabled if/when hardware is detected. */
+    .flags = VLIB_NODE_FLAG_IS_DISABLED,
+};
+
+
 
 #define PCI_VENDOR_ID_INTEL 0x8086
 #define PCI_DEVICE_ID_IXGBE 0x10c6 /* $$$ register all of 'em*/
@@ -124,6 +230,7 @@ ixgbe_probe (u16 device, int fd, u8 *regbase,
     ixgbe_main_t *im = &ixgbe_main;
     ixgbe_port_t *port;
     vlib_hw_interface_t *hw_if;
+    struct adapter *adapter;
 
     clib_warning (
         "device 0x%x regbase 0x%llx, bus 0x%2x, devfn 0x%2x irq 0x%x\n",
@@ -145,30 +252,30 @@ ixgbe_probe (u16 device, int fd, u8 *regbase,
     hw_if = vlib_get_hw_interface (im->vm, port->hw_if_index);
     port->sw_if_index = hw_if->sw_if_index;
     port->regs = regbase;
-
-#if 0   /* fuckme code, shows we really have hold of the dev */
-    {
-#define IXGBE_STATUS(regs) ((regs) + 0x8)
-#define IXGBE_READ(r) (*((u32 *)(r)))
-
-        u32 status;
-        volatile u8 *regs;
-
-        regs = regbase;
-        /* 
-         * expect STATUS 0x00080004 from one port,
-         *        STATUS 0x00080000 from the other port 
-         */
-        status = IXGBE_READ(IXGBE_STATUS(regs));
-        clib_warning("STATUS 0x%08x\n", status);
-    }
-#endif
-
+    port->im = im;
+    port->pci_device_id = device;
+    adapter = &port->adapter;
+    adapter->port = port;
+    adapter->num_queues = 1;
+    adapter->if_mtu = ETHERMTU;
+    
+    adapter->hw.vendor_id = PCI_VENDOR_ID_INTEL; /* duh */
+    adapter->hw.device_id = device;
+    /* pci_read_config(dev, PCIR_REVID, 1); */
+    adapter->hw.revision_id = 0; 
+    /* pci_read_config(dev, PCIR_SUBVEND_0, 2); */
+    adapter->hw.subsystem_vendor_id = 0; 
+    /* pci_read_config(dev, PCIR_SUBDEV_0, 2); */
+    adapter->hw.subsystem_device_id = 0;
+    
+    /* Found at least one ixgbe port, so enable the nanny process */
+    vlib_node_enable_disable (im->vm, ixgbe_process_node.index, 
+                              /* enable */ 1);
     return 0;
 }
 
 clib_error_t *
-ixgbe_init (vlib_main_t * vm)
+ixgbe_vlib_init (vlib_main_t * vm)
 {
     static u8 once;
 
@@ -178,9 +285,10 @@ ixgbe_init (vlib_main_t * vm)
     once = 1;
 
     ixgbe_main.vm = vm;
+    ixgbe_vlib_main = vm;
 
     pci_probe_register (PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_IXGBE,
                         128<<10, ixgbe_probe);
     return 0;
 }
-VLIB_INIT_FUNCTION (ixgbe_init);
+VLIB_INIT_FUNCTION (ixgbe_vlib_init);

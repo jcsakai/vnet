@@ -28,17 +28,69 @@
 #ifndef __included_ixgbe_vnet_h__
 #define __included_ixgbe_vnet_h__
 
-typedef struct {
+#include <vnet/devices/ixgbe/ixgbe.h>
+
+/* Legacy RX descriptor, TX descriptor */
+typedef struct ixgbe_descriptor_ {
+    u64 bufaddr;
+    u64 cs;
+} ixgbe_descriptor_t;
+
+#define IXGBE_TX_RINGSIZE           768
+#define IXGBE_RX_RINGSIZE	    512
+
+/* Legacy RX, TX descriptor */
+#define IXGBE_B_DONE           ((u64) 1 << 32)
+#define IXGBE_B_EOP            ((u64) 1 << 33)
+#define IXGBE_RMD_ERR_SUMMARY  0x0000F700
+
+#define IXGBE_TMD_EOP          0x01000000      /* end of packet */
+#define IXGBE_TMD_IFCS         0x02000000      /* insert FCS */
+#define IXGBE_TMD_IC           0x04000000      /* insert TCP checksum */
+#define IXGBE_TMD_RS           0x08000000      /* report status */
+#define IXGBE_TMD_RSV1         0x10000000      /* reserved */
+#define IXGBE_TMD_DEXT         0x20000000      /* extended descriptor */
+#define IXGBE_TMD_VLE          0x40000000      /* VLAN enable */
+#define IXGBE_TMD_RSV2         0x80000000      /* reserved */
+
+struct ixgbe_main;
+
+typedef struct ixgbe_port {
     volatile u8 *regs;
     u32 hw_if_index;
     u32 sw_if_index;
+    struct adapter adapter;     /* bsd driver adapter structure */
+    struct ixgbe_main *im;
+    u16 pci_device_id;
+    u32 buffer_bytes;
+    u32 buffer_free_list_index;
+    ixgbe_descriptor_t *rx_ring;
+    u32 *rx_buffers;
+    ixgbe_descriptor_t *tx_ring;
+    u32 *tx_buffers;
 } ixgbe_port_t;
 
-typedef struct {
+typedef struct ixgbe_main {
     vlib_main_t *vm;
     ixgbe_port_t *ports;
 } ixgbe_main_t;
 
 ixgbe_main_t ixgbe_main;
+
+vlib_main_t *ixgbe_vlib_main;
+
+/*
+ * Prototypes from the vlib driver
+ */
+clib_error_t *ixgbe_vlib_init (vlib_main_t *vm);
+
+/* 
+ * Prototypes from the bsd driver
+ */
+int ixgbe_attach(ixgbe_port_t *ixp);
+void ixgbe_init(void *arg);
+void ixgbe_handle_link (ixgbe_port_t *ixp);
+void ixgbe_print_hw_stats(struct adapter * adapter);
+void ixgbe_print_debug_info(struct adapter *adapter);
 
 #endif /* __included_ixgbe_vnet_h__ */
