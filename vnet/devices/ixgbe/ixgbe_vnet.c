@@ -138,8 +138,7 @@ int ixgbe_ring_init (ixgbe_port_t * port,
     memset (ring, 0, n_descriptors * sizeof (ring[0]));
 
     if (rx_or_tx == VLIB_RX) {
-        /* $$$$$ Remember to set RCTL_BSIZE_512B = 0x00020000 */
-	port->buffer_bytes = 512;
+	port->buffer_bytes = 2048;
 	port->buffer_free_list_index = 
             vlib_buffer_get_or_create_free_list (vm, port->buffer_bytes);
 
@@ -302,6 +301,28 @@ ixgbe_vlib_init (vlib_main_t * vm)
 
 VLIB_INIT_FUNCTION (ixgbe_vlib_init);
 
+u8 *format_ixgbe_rx_descriptors (u8 * s, va_list * args)
+{
+    ixgbe_descriptor_t *ring = va_arg (*args, ixgbe_descriptor_t *);
+    int n = va_arg (*args, int);
+    int i;
+    u64 cs;
+
+    for (i = 0; i < n; i++) {
+        cs = ring[i].cs;
+        s = format (s, "[%d]: physaddr 0x%llx cs 0x%llx", i,
+                    ring[i].bufaddr, cs);
+        if (cs & IXGBE_B_DONE) {
+            s = format (s, " DONE");
+        }
+        if (cs & IXGBE_B_EOP) {
+            s = format (s, " EOP");
+        }
+        s = format (s, "\n");
+    }
+
+    return s;
+}
 
 static clib_error_t *
 ixgbe_cli_command (vlib_main_t * vm,
@@ -317,7 +338,21 @@ ixgbe_cli_command (vlib_main_t * vm,
             port = im->ports + i;
             vlib_cli_output (im->vm, "Port %d debug info:\n", i);
             ixgbe_print_debug_info (im->vm, &port->adapter);
+            vlib_cli_output (im->vm, "-----------------\n");
         }
+    } else if (unformat(input, "stats")){
+        for (i = 0; i < vec_len(im->ports); i++) {
+            port = im->ports + i;
+            vlib_cli_output (im->vm, "Port %d stats:\n", i);
+            ixgbe_print_hw_stats (im->vm, &port->adapter);
+            vlib_cli_output (im->vm, "-----------------\n");
+        }
+    } else if (unformat(input, "rxring")) {
+            port = im->ports + i;
+            vlib_cli_output (im->vm, "Port %d first 10 rx ring entries:\n", i);
+            vlib_cli_output (im->vm, "%U", format_ixgbe_rx_descriptors, 
+                             port->rx_ring, 10);
+            vlib_cli_output (im->vm, "-----------------\n");
     } else {
         clib_warning ("unknown ixgbe show command");
     }

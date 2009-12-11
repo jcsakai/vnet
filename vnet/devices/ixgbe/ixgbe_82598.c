@@ -617,7 +617,7 @@ static s32 ixgbe_check_mac_link_82598(struct ixgbe_hw *hw,
 	u32 i;
 	u16 link_reg, adapt_comp_reg;
 
-	DEBUGFUNC("ixgbe_check_mac_link_82598");
+	// DEBUGFUNC("ixgbe_check_mac_link_82598");
 
 	/*
 	 * SERDES PHY requires us to read link status from undocumented

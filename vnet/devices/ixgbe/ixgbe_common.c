@@ -2243,7 +2243,7 @@ s32 ixgbe_disable_pcie_master(struct ixgbe_hw *hw)
 	}
 
         /*$$$$$$$$$$ FIXME, hack, this is wrong */
-        status = IXGBE_SUCCESS;
+        // status = IXGBE_SUCCESS;
 	return status;
 }
 

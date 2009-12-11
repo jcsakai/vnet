@@ -100,15 +100,15 @@
 #define DEBUG_IOCTL 0
 #define DEBUG_HW    0
 
-#define INIT_DEBUGOUT(S)            if (DEBUG_INIT)  printf(S "\n")
-#define INIT_DEBUGOUT1(S, A)        if (DEBUG_INIT)  printf(S "\n", A)
-#define INIT_DEBUGOUT2(S, A, B)     if (DEBUG_INIT)  printf(S "\n", A, B)
-#define IOCTL_DEBUGOUT(S)           if (DEBUG_IOCTL) printf(S "\n")
-#define IOCTL_DEBUGOUT1(S, A)       if (DEBUG_IOCTL) printf(S "\n", A)
-#define IOCTL_DEBUGOUT2(S, A, B)    if (DEBUG_IOCTL) printf(S "\n", A, B)
-#define HW_DEBUGOUT(S)              if (DEBUG_HW) printf(S "\n")
-#define HW_DEBUGOUT1(S, A)          if (DEBUG_HW) printf(S "\n", A)
-#define HW_DEBUGOUT2(S, A, B)       if (DEBUG_HW) printf(S "\n", A, B)
+#define INIT_DEBUGOUT(S)            if (DEBUG_INIT)  clib_warning(S)
+#define INIT_DEBUGOUT1(S, A)        if (DEBUG_INIT)  clib_warning(S, A)
+#define INIT_DEBUGOUT2(S, A, B)     if (DEBUG_INIT)  clib_warning(S, A, B)
+#define IOCTL_DEBUGOUT(S)           if (DEBUG_IOCTL) clib_warning(S)
+#define IOCTL_DEBUGOUT1(S, A)       if (DEBUG_IOCTL) clib_warning(S, A)
+#define IOCTL_DEBUGOUT2(S, A, B)    if (DEBUG_IOCTL) clib_warning(S, A, B)
+#define HW_DEBUGOUT(S)              if (DEBUG_HW) clib_warning(S )
+#define HW_DEBUGOUT1(S, A)          if (DEBUG_HW) clib_warning(S, A)
+#define HW_DEBUGOUT2(S, A, B)       if (DEBUG_HW) clib_warning(S, A, B)
 
 #define MAX_NUM_MULTICAST_ADDRESSES     128
 #define IXGBE_82598_SCATTER		100

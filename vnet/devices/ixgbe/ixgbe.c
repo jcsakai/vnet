@@ -1310,7 +1310,8 @@ ixgbe_init_locked(struct adapter *adapter)
                 msec_delay(1);
         }
         wmb();
-        IXGBE_WRITE_REG(hw, IXGBE_RDT(i), vec_len(adapter->port->rx_ring) - 1);
+        IXGBE_WRITE_REG(hw, IXGBE_RDT(i), 
+                        vec_len(adapter->port->rx_buffers) - 1);
     }
 
     /* Set up VLAN offloads and filter */
@@ -3150,7 +3151,7 @@ ixgbe_initialize_transmit_units(struct adapter *adapter)
         IXGBE_WRITE_REG(hw, IXGBE_TDBAL(i),
                         (tdba & 0x00000000ffffffffULL));
         IXGBE_WRITE_REG(hw, IXGBE_TDBAH(i), (tdba >> 32));
-        IXGBE_WRITE_REG(hw, IXGBE_TDLEN(i), vec_len(port->tx_ring) *
+        IXGBE_WRITE_REG(hw, IXGBE_TDLEN(i), vec_len(port->tx_buffers) *
                         sizeof(ixgbe_descriptor_t));
 
         /* Setup the HW Tx Head and Tail descriptor pointers */
@@ -4075,8 +4076,9 @@ ixgbe_initialize_receive_units(struct adapter *adapter)
         IXGBE_WRITE_REG(hw, IXGBE_RDBAL(i),
                         (rdba & 0x00000000ffffffffULL));
         IXGBE_WRITE_REG(hw, IXGBE_RDBAH(i), (rdba >> 32));
+
         IXGBE_WRITE_REG(hw, IXGBE_RDLEN(i),
-                        vec_len(port->rx_ring) * sizeof(ixgbe_descriptor_t));
+                        vec_len(port->rx_buffers) * sizeof(ixgbe_descriptor_t));
 
         /* Set up the SRRCTL register */
         srrctl = IXGBE_READ_REG(hw, IXGBE_SRRCTL(i));
@@ -4098,12 +4100,20 @@ ixgbe_initialize_receive_units(struct adapter *adapter)
                 IXGBE_WRITE_REG(hw, IXGBE_PSRTYPE(0), psrtype);
             }
         } else
-            srrctl |= IXGBE_SRRCTL_DESCTYPE_ADV_ONEBUF;
+            srrctl |= IXGBE_SRRCTL_DESCTYPE_LEGACY;
         IXGBE_WRITE_REG(hw, IXGBE_SRRCTL(i), srrctl);
 
         /* Setup the HW Rx Head and Tail Descriptor Pointers */
         IXGBE_WRITE_REG(hw, IXGBE_RDH(i), 0);
         IXGBE_WRITE_REG(hw, IXGBE_RDT(i), 0);
+        clib_warning("rdh %d rdt %d rdlen %d", 
+                     IXGBE_READ_REG(hw, IXGBE_RDH(i)),
+                     IXGBE_READ_REG(hw, IXGBE_RDT(i)),
+                     IXGBE_READ_REG(hw, IXGBE_RDLEN(i)));
+        clib_warning("base lo %x hi %x",
+                     IXGBE_READ_REG(hw, IXGBE_RDBAL(i)),
+                     IXGBE_READ_REG(hw, IXGBE_RDBAH(i)));
+        clib_warning("srrctl 0x%08x", srrctl);
     }
 
     rxcsum = IXGBE_READ_REG(hw, IXGBE_RXCSUM);
@@ -5003,39 +5013,39 @@ ixgbe_update_stats_counters(struct adapter *adapter)
  *  maintained by the driver and hardware.
  *
  **********************************************************************/
-void ixgbe_print_hw_stats(struct adapter * adapter)
+void ixgbe_print_hw_stats(vlib_main_t *vm, struct adapter * adapter)
 {
 
-	fformat(stdout,"Std Mbuf Failed = %lu\n",
+	vlib_cli_output(vm,"Std Mbuf Failed = %lu\n",
 	       adapter->mbuf_defrag_failed);
-	fformat(stdout,"Missed Packets = %llu\n",
+	vlib_cli_output(vm,"Missed Packets = %llu\n",
 	       (long long)adapter->stats.mpc[0]);
-	fformat(stdout,"Receive length errors = %llu\n",
+	vlib_cli_output(vm,"Receive length errors = %llu\n",
 	       ((long long)adapter->stats.roc +
 	       (long long)adapter->stats.ruc));
-	fformat(stdout,"Crc errors = %llu\n",
+	vlib_cli_output(vm,"Crc errors = %llu\n",
 	       (long long)adapter->stats.crcerrs);
-	fformat(stdout,"Driver dropped packets = %lu\n",
+	vlib_cli_output(vm,"Driver dropped packets = %lu\n",
 	       adapter->dropped_pkts);
-	fformat(stdout, "watchdog timeouts = %ld\n",
+	vlib_cli_output(vm, "watchdog timeouts = %ld\n",
 	       adapter->watchdog_events);
 
-	fformat(stdout,"XON Rcvd = %llu\n",
+	vlib_cli_output(vm,"XON Rcvd = %llu\n",
 	       (long long)adapter->stats.lxonrxc);
-	fformat(stdout,"XON Xmtd = %llu\n",
+	vlib_cli_output(vm,"XON Xmtd = %llu\n",
 	       (long long)adapter->stats.lxontxc);
-	fformat(stdout,"XOFF Rcvd = %llu\n",
+	vlib_cli_output(vm,"XOFF Rcvd = %llu\n",
 	       (long long)adapter->stats.lxoffrxc);
-	fformat(stdout,"XOFF Xmtd = %llu\n",
+	vlib_cli_output(vm,"XOFF Xmtd = %llu\n",
 	       (long long)adapter->stats.lxofftxc);
 
-	fformat(stdout,"Total Packets Rcvd = %llu\n",
+	vlib_cli_output(vm,"Total Packets Rcvd = %llu\n",
 	       (long long)adapter->stats.tpr);
-	fformat(stdout,"Good Packets Rcvd = %llu\n",
+	vlib_cli_output(vm,"Good Packets Rcvd = %llu\n",
 	       (long long)adapter->stats.gprc);
-	fformat(stdout,"Good Packets Xmtd = %llu\n",
+	vlib_cli_output(vm,"Good Packets Xmtd = %llu\n",
 	       (long long)adapter->stats.gptc);
-	fformat(stdout,"TSO Transmissions = %lu\n",
+	vlib_cli_output(vm,"TSO Transmissions = %lu\n",
 	       adapter->tso_tx);
 
 	return;
@@ -5055,6 +5065,11 @@ void ixgbe_print_debug_info(vlib_main_t *vm, struct adapter *adapter)
     struct ixgbe_hw *hw = &adapter->hw;
     int i;
 
+    vlib_cli_output(vm,"CTRL = 0x%x\n", IXGBE_READ_REG(hw, IXGBE_CTRL));
+    vlib_cli_output(vm,"STATUS = 0x%x\n", IXGBE_READ_REG(hw, IXGBE_STATUS));
+    vlib_cli_output(vm,"CTRL_EXT = 0x%x\n", IXGBE_READ_REG(hw, IXGBE_CTRL_EXT));
+    vlib_cli_output(vm,"EICR = 0x%x\n", IXGBE_READ_REG(hw, IXGBE_EICR));
+
     vlib_cli_output(vm,"Error Byte Count = %u \n",
 	    IXGBE_READ_REG(hw, IXGBE_ERRBC));
 
@@ -5063,6 +5078,9 @@ void ixgbe_print_debug_info(vlib_main_t *vm, struct adapter *adapter)
         vlib_cli_output(vm,"Queue[%d]: rdh = %d, hw rdt = %d\n",
                 i, IXGBE_READ_REG(hw, IXGBE_RDH(i)),
                 IXGBE_READ_REG(hw, IXGBE_RDT(i)));
+        vlib_cli_output(vm, "rxdctl 0x%08x\n", 
+                        IXGBE_READ_REG(hw, IXGBE_RXDCTL(i)));
+
 #if 0
         vlib_cli_output(vm,"RX(%d) Packets Received: %lld\n",
                 rxr->me, (long long)rxr->rx_packets);
