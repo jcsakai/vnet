@@ -49,6 +49,7 @@ typedef struct {
     u32 mtu;
     i8 *tap_name;
     u8 mac_address[6];
+    int is_tun;
 } tuntap_main_t;
 
 tuntap_main_t *tuntap_main;
@@ -209,6 +210,18 @@ static clib_error_t * tuntap_read (unix_file_t * uf)
     }
 #endif
 
+    /* 
+     * If it's a TUN device, add (space for) dst + src MAC address, 
+     * to the left of the protocol number. Linux shim hdr: 
+     * (u16 flags, u16 protocol-id). Overwrite flags; use 10 octets of
+     * the pre-data area.
+     */
+    if (ttm->is_tun) {
+        b = vlib_get_buffer (vm, buffers[0]);
+        b->current_data -= 10;
+        b->current_length += 10;
+    }
+
     node_runtime = vlib_node_get_runtime (vm, ttm->punt_node_index);
 
     vlib_get_next_frame (vm, node_runtime, PUNT_INJECT, to_next, n_left);
@@ -339,9 +352,16 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
     unix_file_t template = {0};
     /* Suitable defaults for an Ethernet-like tun/tap device */
     int mtu = 4096 + 256;
+#ifdef USE_TAP
     char *tap_name = "tap9";
     int flags = IFF_TAP | IFF_NO_PI;
     u8 mac_address [6] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
+    int is_tun = 0;
+#else
+    char *tap_name = "tun9";
+    int flags = IFF_TUN;
+    int is_tun = 1;
+#endif
     tuntap_main_t *ttm;
 
     while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT) {
@@ -360,7 +380,11 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
     ttm = tuntap_main;
 
     ttm->tap_name = (i8 *)tap_name;
+#ifdef USE_TAP
     memcpy (ttm->mac_address, mac_address, sizeof (ttm->mac_address));
+#else
+    ttm->is_tun = 1;
+#endif
 
     memset (&ifr, 0, sizeof (ifr));
     sin = (struct sockaddr_in *)&ifr.ifr_addr;
