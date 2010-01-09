@@ -83,7 +83,6 @@ static always_inline u16 ip_csum_fold (ip_csum_t c)
   c = (c & 0xffff) + (c >> 16);
   c = (c & 0xffff) + (c >> 16);
 
-  ASSERT ((c >> 16) == 0);
   return c;
 }
 
