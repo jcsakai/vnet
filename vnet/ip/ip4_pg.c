@@ -323,7 +323,7 @@ unformat_pg_ip4_header (unformat_input_t * input, va_list * args)
 	&& group_index + 1 < vec_len (s->edit_groups))
       {
 	pg_edit_set_fixed (&p->length,
-			   pg_edit_group_n_bytes (s, group_index + 1));
+			   pg_edit_group_n_bytes (s, group_index));
       }
 
     /* Compute IP header checksum if all edits are fixed. */
