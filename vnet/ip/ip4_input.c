@@ -81,10 +81,10 @@ ip4_input_inline (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
-	  u32 pi0, sw_if_index0, ip_len0, l2_len0;
-	  u32 pi1, sw_if_index1, ip_len1, l2_len1;
+	  u32 pi0, sw_if_index0, ip_len0, cur_len0;
+	  u32 pi1, sw_if_index1, ip_len1, cur_len1;
 	  i32 len_diff0, len_diff1;
-	  u8 is_slow_path, error0, error1;
+	  u8 is_slow_path, next_present, error0, error1;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -158,21 +158,22 @@ ip4_input_inline (vlib_main_t * vm,
 
 	  /* Take slow path if current buffer length
 	     is not equal to packet length. */
-	  is_slow_path += (p0->flags | p1->flags) & VLIB_BUFFER_NEXT_PRESENT;
+	  next_present = (p0->flags | p1->flags) & VLIB_BUFFER_NEXT_PRESENT;
+	  is_slow_path += next_present;
 
-	  l2_len0 = p0->current_length;
-	  l2_len1 = p1->current_length;
+	  cur_len0 = p0->current_length;
+	  cur_len1 = p1->current_length;
 
-	  len_diff0 = l2_len0 - ip_len0;
-	  len_diff1 = l2_len1 - ip_len1;
+	  len_diff0 = cur_len0 - ip_len0;
+	  len_diff1 = cur_len1 - ip_len1;
 
 	  /* L2 length must be >= L3 length. */
-	  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
-	  error1 = len_diff1 < 0 ? IP4_ERROR_BAD_LENGTH : error1;
+	  error0 = len_diff0 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error0;
+	  error1 = len_diff1 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error1;
 
 	  /* Trim padding at end of packet. */
-	  p0->current_length = l2_len0 - len_diff0;
-	  p1->current_length = l2_len1 - len_diff1;
+	  p0->current_length = cur_len0 - len_diff0;
+	  p1->current_length = cur_len1 - len_diff1;
 
 	  is_slow_path += error0 != IP4_ERROR_NONE || error1 != IP4_ERROR_NONE;
 
@@ -183,20 +184,24 @@ ip4_input_inline (vlib_main_t * vm,
 	      to_next -= 2;
 	      n_left_to_next += 2;
 
+	      /* Restore lengths over-written in fast path. */
+	      p0->current_length = cur_len0;
+	      p1->current_length = cur_len1;
+
 	      /* Re-do length check for packets with multiple buffers. */
 	      if (p0->flags & VLIB_BUFFER_NEXT_PRESENT)
 		{
-		  l2_len0 = vlib_buffer_n_bytes_in_chain (vm, pi0);
+		  u32 l2_len0 = vlib_buffer_n_bytes_in_chain (vm, pi0);
 		  len_diff0 = l2_len0 - ip_len0;
 		  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
-		  p0->current_length = error0 ? l2_len0 : ip_len0;
+		  p0->current_length = cur_len0 - (error0 ? 0 : len_diff0);
 		}
 	      if (p1->flags & VLIB_BUFFER_NEXT_PRESENT)
 		{
-		  l2_len1 = vlib_buffer_n_bytes_in_chain (vm, pi1);
+		  u32 l2_len1 = vlib_buffer_n_bytes_in_chain (vm, pi1);
 		  len_diff1 = l2_len1 - ip_len1;
 		  error1 = len_diff1 < 0 ? IP4_ERROR_BAD_LENGTH : error1;
-		  p1->current_length = error1 ? l2_len1 : ip_len1;
+		  p1->current_length = cur_len1 - (error1 ? 0 : len_diff1);
 		}
 
 	      next0 = (error0 == IP4_ERROR_NONE
@@ -242,7 +247,7 @@ ip4_input_inline (vlib_main_t * vm,
 	  ip4_header_t * ip0;
 	  u32 pi0, sw_if_index0, ip_len0, l2_len0;
 	  i32 len_diff0;
-	  u8 error0, is_slow_path;
+	  u8 error0, is_slow_path, next_present;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -289,11 +294,12 @@ ip4_input_inline (vlib_main_t * vm,
 
 	  /* Take slow path if current buffer length
 	     is not equal to packet length. */
-	  is_slow_path += p0->flags & VLIB_BUFFER_NEXT_PRESENT;
+	  next_present = p0->flags & VLIB_BUFFER_NEXT_PRESENT;
+	  is_slow_path += next_present;
 
 	  l2_len0 = p0->current_length;
 	  len_diff0 = l2_len0 - ip_len0;
-	  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
+	  error0 = len_diff0 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error0;
 	  p0->current_length -= len_diff0;
 
 	  is_slow_path += error0 != IP4_ERROR_NONE;
@@ -306,12 +312,13 @@ ip4_input_inline (vlib_main_t * vm,
 	      n_left_to_next += 1;
 
 	      /* Re-do length check for packets with multiple buffers. */
+	      p0->current_length = l2_len0;
 	      if (p0->flags & VLIB_BUFFER_NEXT_PRESENT)
 		{
 		  l2_len0 = vlib_buffer_n_bytes_in_chain (vm, pi0);
 		  len_diff0 = l2_len0 - ip_len0;
 		  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
-		  p0->current_length = error0 ? l2_len0 : ip_len0;
+		  p0->current_length = cur_len0 - (error0 ? 0 : len_diff0);
 		}
 
 	      next0 = (error0 == IP4_ERROR_NONE
