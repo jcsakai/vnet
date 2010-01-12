@@ -28,6 +28,11 @@
 
 #include <vlib/vlib.h>
 
+/* Not worth using vector unit for unaligned stores for Altivec. */
+#if defined (__ALTIVEC__)
+#undef CLIB_HAVE_VEC128
+#endif
+
 /* Basic data type for painting rewrite strings. */
 #ifdef CLIB_HAVE_VEC128
 typedef u8x16 vnet_rewrite_data_t;
