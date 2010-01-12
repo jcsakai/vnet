@@ -245,7 +245,7 @@ ip4_input_inline (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
-	  u32 pi0, sw_if_index0, ip_len0, l2_len0;
+	  u32 pi0, sw_if_index0, ip_len0, cur_len0;
 	  i32 len_diff0;
 	  u8 error0, is_slow_path, next_present;
 
@@ -297,8 +297,8 @@ ip4_input_inline (vlib_main_t * vm,
 	  next_present = p0->flags & VLIB_BUFFER_NEXT_PRESENT;
 	  is_slow_path += next_present;
 
-	  l2_len0 = p0->current_length;
-	  len_diff0 = l2_len0 - ip_len0;
+	  cur_len0 = p0->current_length;
+	  len_diff0 = cur_len0 - ip_len0;
 	  error0 = len_diff0 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error0;
 	  p0->current_length -= len_diff0;
 
@@ -312,10 +312,10 @@ ip4_input_inline (vlib_main_t * vm,
 	      n_left_to_next += 1;
 
 	      /* Re-do length check for packets with multiple buffers. */
-	      p0->current_length = l2_len0;
+	      p0->current_length = cur_len0;
 	      if (p0->flags & VLIB_BUFFER_NEXT_PRESENT)
 		{
-		  l2_len0 = vlib_buffer_n_bytes_in_chain (vm, pi0);
+		  u32 l2_len0 = vlib_buffer_n_bytes_in_chain (vm, pi0);
 		  len_diff0 = l2_len0 - ip_len0;
 		  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
 		  p0->current_length = cur_len0 - (error0 ? 0 : len_diff0);
