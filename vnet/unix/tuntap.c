@@ -25,30 +25,30 @@
  *------------------------------------------------------------------
  */
 
-#include <sys/types.h> 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <linux/if_arp.h>
-#include <sys/ioctl.h>
-#include <linux/if_tun.h>
-
-#include <clib/byte_order.h>
-
 #include <fcntl.h>		/* for open */
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/types.h> 
 #include <sys/uio.h>		/* for iovec */
+#include <netinet/in.h>
+
+#include <linux/if_arp.h>
+#include <linux/if_tun.h>
 
 #include <vlib/vlib.h>
 #include <vlib/unix/unix.h>
 
 typedef struct {
-  u8 *input_buffer;
+  struct iovec * iovecs;
+
+  u32 * rx_buffers;
 
   /* File descriptors for /dev/net/tun and provisioning socket. */
   int dev_net_tun_fd, dev_tap_fd;
 
-  /* Interface MTU. */
-  u32 mtu;
+  /* Interface MTU in bytes and # of default sized buffers. */
+  u32 mtu_bytes, mtu_buffers;
 
   u32 read_ready;
 
@@ -65,7 +65,7 @@ static tuntap_main_t tuntap_main = {
   .tun_name = "fabric",
 
   /* Suitable defaults for an Ethernet-like tun/tap device */
-  .mtu = 4096 + 256,
+  .mtu_bytes = 4096 + 256,
   
   /* 192.168.1.1/16 */
   .ip4_address = 0xC0A80101,
@@ -84,48 +84,47 @@ tuntap_tx (vlib_main_t * vm,
 	   vlib_frame_t * frame)
 {
   u32 * buffers = vlib_frame_args (frame);
-  uword n_buffers = frame->n_vectors;
-  tuntap_main_t *ttm = &tuntap_main;
+  uword n_packets = frame->n_vectors;
+  tuntap_main_t * tm = &tuntap_main;
   int i;
-  vlib_buffer_t *b;
-  u8 *packet;
-  int length_of_packet;
 
-  for (i = 0; i < n_buffers; i++)
+  for (i = 0; i < n_packets; i++)
     {
-      u32 bi = buffers[i];
-      b = vlib_get_buffer (vm, bi);
+      struct iovec * iov;
+      vlib_buffer_t * b;
+      uword l;
 
-      length_of_packet = vlib_buffer_n_bytes_in_chain (vm, bi);
-      if (length_of_packet > ttm->mtu)
-	{
-	  clib_warning ("pkt length %d >  mtu %d, discarded",
-			b->current_length, ttm->mtu);
-	  continue;
-	}
+      b = vlib_get_buffer (vm, buffers[i]);
 
-      /* Manual scatter-gather. One write per pkt on tun/tap */
+      if (tm->iovecs)
+	_vec_len (tm->iovecs) = 0;
+
+      vec_add2 (tm->iovecs, iov, 1);
+
+      iov->iov_base = b->data + b->current_data;
+      iov->iov_len = l = b->current_length;
+
       if (PREDICT_FALSE (b->flags & VLIB_BUFFER_NEXT_PRESENT))
 	{
-	  ASSERT (vec_len (ttm->input_buffer) >= ttm->mtu);
-	  length_of_packet = vlib_buffer_contents (vm, bi, ttm->input_buffer);
-	  packet = ttm->input_buffer;
-	}
-      else
-	{
-	  /* small pkt, write directly from the buffer */
-	  length_of_packet = b->current_length;
-	  packet = (b->data + b->current_data);
+	  do {
+	    b = vlib_get_buffer (vm, b->next_buffer);
+
+	    vec_add2 (tm->iovecs, iov, 1);
+
+	    iov->iov_base = b->data + b->current_data;
+	    iov->iov_len = b->current_length;
+	    l += b->current_length;
+	  } while (b->flags & VLIB_BUFFER_NEXT_PRESENT);
 	}
 
-      if (write (ttm->dev_net_tun_fd, packet, length_of_packet) < length_of_packet)
-	clib_unix_warning ("write");
+      if (writev (tm->dev_net_tun_fd, tm->iovecs, vec_len (tm->iovecs)) < l)
+	clib_unix_warning ("writev");
     }
     
-  vlib_buffer_free (vm, buffers, /* next buffer stride */ 1, n_buffers,
+  vlib_buffer_free (vm, buffers, /* next buffer stride */ 1, n_packets,
 		    /* follow_buffer_next */ 1);
     
-  return n_buffers;
+  return n_packets;
 }
 
 static VLIB_REGISTER_NODE (tuntap_tx_node) = {
@@ -151,72 +150,84 @@ tuntap_rx (vlib_main_t * vm,
 	   vlib_node_runtime_t * node,
 	   vlib_frame_t * frame)
 {
-  int n;
   tuntap_main_t * tm = &tuntap_main;
-  static u32 *buffers = 0;
-  int this_buffer_index;
-  int nbytes_this_buffer;
-  int nbuffers;
-  int n_bytes_left;
-  u8 *icp;
-  vlib_buffer_t *b = 0;
-  u32 * to_next;
-  /* $$$$ this should be a #define, see also vlib_buffer_init() */
-  int default_buffer_size = 512;
+  vlib_buffer_t * b;
+  u32 bi;
+  const uword buffer_size = VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
 
   if (! tm->read_ready)
     return 0;
   tm->read_ready = 0;
 
-  n = read (tm->dev_net_tun_fd, tm->input_buffer, 
-	    vec_len(tm->input_buffer));
+  /* Make sure we have some RX buffers. */
+  {
+    uword n_left = vec_len (tm->rx_buffers);
+    uword n_alloc;
 
-  if (n <= 0) {
-    clib_unix_warning ("read returned %d", n);
-    return 0;
+    if (n_left < VLIB_FRAME_SIZE / 2)
+      {
+	if (! tm->rx_buffers)
+	  vec_alloc (tm->rx_buffers, VLIB_FRAME_SIZE);
+
+	n_alloc = vlib_buffer_alloc (vm, tm->rx_buffers + n_left, VLIB_FRAME_SIZE - n_left);
+
+	_vec_len (tm->rx_buffers) = n_left + n_alloc;
+      }
   }
 
-  nbuffers = (n + (default_buffer_size - 1)) / default_buffer_size;
-  vec_validate (buffers, nbuffers - 1);
+  {
+    uword i_rx = vec_len (tm->rx_buffers) - 1;
+    vlib_buffer_t * b;
+    word i, n_bytes_left;
 
-  if (vlib_buffer_alloc (vm, buffers, nbuffers) != nbuffers) {
-    clib_warning ("buffer allocation failure");
-    return 0;
-  }
+    /* We should have enough buffers left for an MTU sized packet. */
+    ASSERT (vec_len (tm->rx_buffers) >= tm->mtu_buffers);
 
-  icp = tm->input_buffer;
-  this_buffer_index = 0;
-  n_bytes_left = n;
+    vec_validate (tm->iovecs, tm->mtu_buffers - 1);
+    for (i = 0; i < tm->mtu_buffers; i++)
+      {
+	b = vlib_get_buffer (vm, tm->rx_buffers[i_rx - i]);
+	tm->iovecs[i].iov_base = b->data;
+	tm->iovecs[i].iov_len = buffer_size;
+      }
 
-  while (n_bytes_left > 0) {
-    nbytes_this_buffer = clib_min (n_bytes_left, default_buffer_size);
+    n_bytes_left = readv (tm->dev_net_tun_fd, tm->iovecs, tm->mtu_buffers);
+    if (n_bytes_left <= 0)
+      {
+	clib_unix_warning ("readv %d", n_bytes_left);
+	return 0;
+      }
 
-    b = vlib_get_buffer (vm, buffers[this_buffer_index]);
-	
-    memcpy (b->data + b->current_data, icp, nbytes_this_buffer);
-    n_bytes_left -= nbytes_this_buffer;
-    icp += nbytes_this_buffer;
+    bi = tm->rx_buffers[i_rx];
+    while (1)
+      {
+	b = vlib_get_buffer (vm, tm->rx_buffers[i_rx]);
 
-    b->current_length = nbytes_this_buffer;
+	b->flags = 0;
+	b->current_data = 0;
+	b->current_length = n_bytes_left < buffer_size ? n_bytes_left : buffer_size;
 
-    if (this_buffer_index < nbuffers - 1) {
-      b->flags |= VLIB_BUFFER_NEXT_PRESENT;
-      b->next_buffer = buffers[this_buffer_index+1];
-    } else {
-      b->flags &= ~VLIB_BUFFER_NEXT_PRESENT;
-      b->next_buffer = 0xdeadbeef; 
-    }
+	n_bytes_left -= buffer_size;
 
-    this_buffer_index++;
+	if (n_bytes_left <= 0)
+	  break;
+
+	i_rx--;
+	b->flags |= VLIB_BUFFER_NEXT_PRESENT;
+	b->next_buffer = tm->rx_buffers[i_rx];
+      }
+
+    _vec_len (tm->rx_buffers) = i_rx;
   }
 
   if (DEBUG > 0)
     {
-      u8 * msg = vlib_validate_buffer (vm, buffers[0],
-				       /* follow_buffer_next */ 1);
+      u8 * msg = vlib_validate_buffer (vm, bi, /* follow_buffer_next */ 1);
       if (msg)
 	clib_warning ("%v", msg);
     }
+
+  b = vlib_get_buffer (vm, bi);
 
   /* 
    * If it's a TUN device, add (space for) dst + src MAC address, 
@@ -224,14 +235,8 @@ tuntap_rx (vlib_main_t * vm,
    * (u16 flags, u16 protocol-id). Overwrite flags; use 10 octets of
    * the pre-data area.
    */
-  {
-    b = vlib_get_buffer (vm, buffers[0]);
-    b->current_data -= 10;
-    b->current_length += 10;
-  }
-
-  to_next = vlib_set_next_frame (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT);
-  to_next[0] = buffers[0];
+  b->current_data -= 10;
+  b->current_length += 10;
 
   {
     uword n_trace = vlib_get_trace_count (vm, node);
@@ -242,7 +247,11 @@ tuntap_rx (vlib_main_t * vm,
     }
   }
 
-  _vec_len (buffers) = 0;
+  /* Enqueue to ethernet-input. */
+  {
+    u32 * to_next = vlib_set_next_frame (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT);
+    to_next[0] = bi;
+  }
 
   return 1;
 }
@@ -404,7 +413,11 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
       goto done;
     }
 
-  ifr.ifr_mtu = tm->mtu;
+  tm->mtu_buffers = tm->mtu_bytes / VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
+  if (tm->mtu_bytes % VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES)
+    tm->mtu_buffers += 1;
+
+  ifr.ifr_mtu = tm->mtu_bytes;
   if (ioctl (tm->dev_tap_fd, SIOCSIFMTU, &ifr) < 0)
     {
       error = clib_error_return_unix (0, "ioctl SIOCSIFMTU");
@@ -425,9 +438,6 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
       error = clib_error_return_unix (0, "ioctl SIOCSIFFLAGS");
       goto done;
     }
-
-  /* Set up the unix_file object... */
-  vec_resize (tm->input_buffer, tm->mtu);
 
   {
     unix_file_t template = {0};
