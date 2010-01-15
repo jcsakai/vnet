@@ -39,9 +39,14 @@
 #include <vlib/vlib.h>
 #include <vlib/unix/unix.h>
 
+#include <vnet/ip/ip.h>		/* for unformat_ip4_address */
+
 typedef struct {
+  /* Vector of iovecs for readv/writev calls. */
   struct iovec * iovecs;
 
+  /* Vector of VLIB rx buffers to use.  We allocate them in blocks
+     of VLIB_FRAME_SIZE (256). */
   u32 * rx_buffers;
 
   /* File descriptors for /dev/net/tun and provisioning socket. */
@@ -50,11 +55,13 @@ typedef struct {
   /* Interface MTU in bytes and # of default sized buffers. */
   u32 mtu_bytes, mtu_buffers;
 
+  /* epoll call says we are ready to readv from socket. */
   u32 read_ready;
 
   /* Linux interface name for tun device. */
   char * tun_name;
 
+  /* Configurable ip address prefix length for interface. */
   u32 ip4_address;
   u32 ip4_address_length;
 
@@ -96,11 +103,12 @@ tuntap_tx (vlib_main_t * vm,
 
       b = vlib_get_buffer (vm, buffers[i]);
 
+      /* Re-set iovecs if present. */
       if (tm->iovecs)
 	_vec_len (tm->iovecs) = 0;
 
+      /* VLIB buffer chain -> Unix iovec(s). */
       vec_add2 (tm->iovecs, iov, 1);
-
       iov->iov_base = b->data + b->current_data;
       iov->iov_len = l = b->current_length;
 
@@ -138,6 +146,7 @@ enum {
   TUNTAP_PUNT_NEXT_ETHERNET_INPUT, 
 };
 
+/* Gets called when file descriptor is ready from epoll. */
 static clib_error_t * tuntap_read_ready (unix_file_t * uf)
 {
   tuntap_main_t * tm = &tuntap_main;
@@ -155,8 +164,10 @@ tuntap_rx (vlib_main_t * vm,
   u32 bi;
   const uword buffer_size = VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
 
+  /* Work to do? */
   if (! tm->read_ready)
     return 0;
+
   tm->read_ready = 0;
 
   /* Make sure we have some RX buffers. */
@@ -175,6 +186,8 @@ tuntap_rx (vlib_main_t * vm,
       }
   }
 
+  /* Allocate RX buffers from end of rx_buffers.
+     Turn them into iovecs to pass to readv. */
   {
     uword i_rx = vec_len (tm->rx_buffers) - 1;
     vlib_buffer_t * b;
@@ -322,7 +335,17 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
-      break;
+      if (unformat (input, "ip4 %U/%d",
+		    unformat_ip4_address, &tm->ip4_address,
+		    &tm->ip4_address_length))
+	;
+
+      else if (unformat (input, "mtu %d", &tm->mtu_bytes))
+	;
+
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
     }
 
   tm->dev_net_tun_fd = -1;
