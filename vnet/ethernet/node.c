@@ -289,7 +289,7 @@ ethernet_sw_interface_up_down (vlib_main_t * vm,
     goto done;
 
   m->vlan_to_sw_if_index[si->sub.id] =
-    ((flags & VLIB_SW_INTERFACE_FLAG_UP) ? sw_if_index : si->sup_sw_if_index);
+    ((flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) ? sw_if_index : si->sup_sw_if_index);
 
  done:
   return error;
@@ -323,7 +323,7 @@ VLIB_REGISTER_NODE (ethernet_input_node) = {
   .format_trace = format_ethernet_input_trace,
   .unformat_buffer = unformat_ethernet_header,
 
-  .sw_interface_up_down_function = ethernet_sw_interface_up_down,
+  .sw_interface_admin_up_down_function = ethernet_sw_interface_up_down,
 };
 
 static clib_error_t * ethernet_input_init (vlib_main_t * vm)

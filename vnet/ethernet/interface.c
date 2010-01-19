@@ -28,15 +28,15 @@
 #include <vnet/ethernet/ethernet.h>
 
 static clib_error_t *
-ethernet_interface_up_down (vlib_main_t * vm,
-			    u32 hw_if_index,
-			    u32 flags);
+ethernet_interface_link_up_down (vlib_main_t * vm,
+				 u32 hw_if_index,
+				 u32 flags);
 
 static vlib_hw_interface_class_t ethernet_interface_class = {
   .name = "Ethernet",
   .format_address = format_ethernet_address,
   .format_header = format_ethernet_header_with_length,
-  .up_down_function = ethernet_interface_up_down,
+  .link_up_down_function = ethernet_interface_link_up_down,
   .hw_address_len = 6,
   .unformat_hw_address = unformat_ethernet_address,
 };
@@ -136,9 +136,9 @@ ethernet_register_interface (vlib_main_t * vm,
 }
 			     
 static clib_error_t *
-ethernet_interface_up_down (vlib_main_t * vm,
-			    u32 hw_if_index,
-			    u32 flags)
+ethernet_interface_link_up_down (vlib_main_t * vm,
+				 u32 hw_if_index,
+				 u32 flags)
 {
   ethernet_main_t * em = ethernet_get_main (vm);
   vlib_hw_interface_t * hi;
