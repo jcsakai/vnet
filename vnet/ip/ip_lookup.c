@@ -71,6 +71,9 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
   adj->lookup_next_index = IP_LOOKUP_NEXT_MISS;
 
   lm->miss_adj_index = ai;
+
+  if (! lm->fib_result_n_bytes)
+    lm->fib_result_n_bytes = sizeof (uword);
 }
 
 u8 * format_ip_lookup_next (u8 * s, va_list * args)
@@ -176,7 +179,7 @@ static uword unformat_ip_lookup_next (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
+uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
   ip_adjacency_t * adj = va_arg (*args, ip_adjacency_t *);
@@ -259,7 +262,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
     adj = ip_get_adjacency (lm, ai);
 
     if (is_ip4)
-      ip4_route_add_del (im4, table_id, address, address_len, ai, /* is_del */ 0);
+      ip4_add_del_route (im4, table_id, address, address_len, ai, /* is_del */ 0);
   }
 
  done:
@@ -301,7 +304,7 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 {
   ip4_main_t * im4 = &ip4_main;
   ip4_route_t * routes, * r;
-  ip4_really_slow_fib_t * fib;
+  ip4_fib_t * fib;
   ip_lookup_main_t * lm = &im4->lookup_main;
   u32 i;
 

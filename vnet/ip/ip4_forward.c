@@ -31,7 +31,7 @@ static ip_lookup_next_t
 ip4_fib_lookup (ip4_main_t * im, u32 fib_index, ip4_address_t * dst, u32 * adj_index)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
-  ip4_really_slow_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
+  ip4_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
   ip_adjacency_t * adj;
   uword * p, * hash, key;
   i32 i, dst_address, ai;
@@ -60,10 +60,10 @@ ip4_fib_lookup (ip4_main_t * im, u32 fib_index, ip4_address_t * dst, u32 * adj_i
   return adj->lookup_next_index;
 }
 
-static ip4_really_slow_fib_t *
+static ip4_fib_t *
 find_fib_by_table_id (ip4_main_t * im, u32 table_id)
 {
-  ip4_really_slow_fib_t * fib;
+  ip4_fib_t * fib;
   uword * p = hash_get (im->fib_index_by_table_id, table_id);
   uword i;
 
@@ -91,19 +91,28 @@ find_fib_by_table_id (ip4_main_t * im, u32 table_id)
 }
 
 void
-ip4_route_add_del (ip4_main_t * im,
+ip4_add_del_route (ip4_main_t * im,
 		   u32 table_id,
 		   u8 * address,
 		   u32 address_length,
 		   u32 adj_index,
 		   u32 is_del)
 {
-  ip4_really_slow_fib_t * fib = find_fib_by_table_id (im, table_id);
+  ip4_fib_t * fib = find_fib_by_table_id (im, table_id);
   u32 dst_address = * (u32 *) address;
   uword * hash;
 
   ASSERT (address_length < ARRAY_LEN (fib->masks));
   dst_address &= fib->masks[address_length];
+
+  if (! fib->adj_index_by_dst_address[address_length])
+    {
+      ip_lookup_main_t * lm = &im->lookup_main;
+      ASSERT (lm->fib_result_n_bytes >= sizeof (uword));
+      fib->adj_index_by_dst_address[address_length] =
+	hash_create (32 /* elts */,
+		     /* value size */ round_pow2 (lm->fib_result_n_bytes, sizeof (uword)));
+    }
 
   hash = fib->adj_index_by_dst_address[address_length];
 
@@ -113,6 +122,24 @@ ip4_route_add_del (ip4_main_t * im,
     hash_set (hash, dst_address, adj_index);
 
   fib->adj_index_by_dst_address[address_length] = hash;
+}
+
+void *
+ip4_get_route (ip4_main_t * im,
+	       u32 table_id,
+	       u8 * address,
+	       u32 address_length)
+{
+  ip4_fib_t * fib = find_fib_by_table_id (im, table_id);
+  u32 dst_address = * (u32 *) address;
+  uword * hash, * p;
+
+  ASSERT (address_length < ARRAY_LEN (fib->masks));
+  dst_address &= fib->masks[address_length];
+
+  hash = fib->adj_index_by_dst_address[address_length];
+  p = hash_get (hash, dst_address);
+  return (void *) p;
 }
 
 static uword

@@ -103,6 +103,10 @@ typedef struct {
   /* Adjacency index for routing table misses. */
   u32 miss_adj_index;
 
+  /* Number of bytes in a fib result.  Must be at least
+     sizeof (uword).  First word is always adjacency index. */
+  u32 fib_result_n_bytes;
+
   /* Adjacency packet/byte counters indexed by adjacency index. */
   vlib_combined_counter_main_t adjacency_counters;
 

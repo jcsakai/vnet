@@ -33,17 +33,18 @@ typedef struct {
   u32 masks[33];
 
   u32 table_id;
-} ip4_really_slow_fib_t;
+} ip4_fib_t;
 
 typedef struct {
   ip_lookup_main_t lookup_main;
 
-  /* FIXME stupid fib. */
-  ip4_really_slow_fib_t * fibs;
+  /* Vector of FIBs. */
+  ip4_fib_t * fibs;
 
   /* Table id for default FIB (equal to zero). */
   u32 default_fib_table_id;
 
+  /* Hash table mapping table id to fib index. */
   uword * fib_index_by_table_id;
 } ip4_main_t;
 
@@ -56,11 +57,17 @@ extern vlib_node_registration_t ip4_rewrite_node;
 
 /* Add a route to the FIB. */
 void
-ip4_route_add_del (ip4_main_t * im,
+ip4_add_del_route (ip4_main_t * im,
 		   u32 table_id,
 		   u8 * address,
 		   u32 address_length,
 		   u32 adj_index,
 		   u32 is_del);
+
+void *
+ip4_get_route (ip4_main_t * im,
+	       u32 table_id,
+	       u8 * address,
+	       u32 address_length);
 
 #endif /* included_ip_ip4_h */
