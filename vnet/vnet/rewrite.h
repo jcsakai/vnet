@@ -100,6 +100,16 @@ vnet_rewrite_set_data_internal (vnet_rewrite_header_t * rw,
 				  (data),			\
 				  (data_bytes))
 
+static always_inline void *
+vnet_rewrite_get_data_internal (vnet_rewrite_header_t * rw, int max_size)
+{
+  ASSERT (rw->data_bytes <= max_size);
+  return rw->data + max_size - rw->data_bytes;
+}
+
+#define vnet_rewrite_get_data(rw) \
+  vnet_rewrite_get_data_internal (&((rw).rewrite_header), sizeof ((rw).rewrite_data))
+
 static always_inline void
 vnet_rewrite_copy_one (vnet_rewrite_data_t * p0, vnet_rewrite_data_t * rw0, int i)
 {
