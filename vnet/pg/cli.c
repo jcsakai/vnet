@@ -208,6 +208,7 @@ new_stream (vlib_main_t * vm,
   
   s.sw_if_index[VLIB_RX] = s.sw_if_index[VLIB_TX] = ~0;
   s.node_index = ~0;
+  s.max_packet_bytes = s.min_packet_bytes = 64;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "name %v", &tmp))

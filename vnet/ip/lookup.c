@@ -25,20 +25,27 @@
 
 #include <vnet/ip/ip.h>
 
+static always_inline void
+ip_poison_adjacencies (ip_adjacency_t * adj, uword n_adj)
+{
+  if (DEBUG > 0)
+    memset (adj, 0xfe, n_adj * sizeof (adj[0]));
+}
+
 /* Create new block of given number of contiguous adjacencies. */
-u32 ip_new_adjacency (ip_lookup_main_t * im,
-		      ip_adjacency_t * copy_adj,
-		      u32 n_adj)
+ip_adjacency_t *
+ip_add_adjacency (ip_lookup_main_t * lm,
+		  ip_adjacency_t * copy_adj,
+		  u32 n_adj,
+		  u32 * adj_index_return)
 {
   ip_adjacency_t * adj;
   u32 ai, i, handle;
 
-  ai = heap_alloc (im->adjacency_heap, n_adj, handle);
-  adj = heap_elt_at_index (im->adjacency_heap, ai);
+  ai = heap_alloc (lm->adjacency_heap, n_adj, handle);
+  adj = heap_elt_at_index (lm->adjacency_heap, ai);
 
-  /* Poison. */
-  if (DEBUG > 0)
-    memset (adj, 0xfe, n_adj * sizeof (adj[0]));
+  ip_poison_adjacencies (adj, n_adj);
 
   for (i = 0; i < n_adj; i++)
     {
@@ -49,13 +56,24 @@ u32 ip_new_adjacency (ip_lookup_main_t * im,
       adj[i].n_adj = n_adj;
 
       /* Validate adjacency counters. */
-      vlib_validate_counter (&im->adjacency_counters, ai + i);
+      vlib_validate_counter (&lm->adjacency_counters, ai + i);
 
       /* Zero possibly stale counters for re-used adjacencies. */
-      vlib_zero_combined_counter (&im->adjacency_counters, ai + i);
+      vlib_zero_combined_counter (&lm->adjacency_counters, ai + i);
     }
 
-  return ai;
+  *adj_index_return = ai;
+  return adj;
+}
+
+void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index)
+{
+  ip_adjacency_t * adj = ip_get_adjacency (lm, adj_index);
+  uword handle = adj->heap_handle;
+
+  ip_poison_adjacencies (adj, adj->n_adj);
+
+  heap_dealloc (lm->adjacency_heap, handle);
 }
 
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
@@ -65,8 +83,7 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
 
   /* Hand-craft special miss adjacency to use when nothing matches in the
      routing table. */
-  ai = ip_new_adjacency (lm, /* template */ 0, /* n-adj */ 1);
-  adj = ip_get_adjacency (lm, ai);
+  adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &ai);
 
   adj->lookup_next_index = IP_LOOKUP_NEXT_MISS;
 
@@ -258,11 +275,13 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
     ip_adjacency_t * adj;
     ip_lookup_main_t * lm = &im4->lookup_main;
 
-    ai = ip_new_adjacency (lm, add_adj, vec_len (add_adj));
-    adj = ip_get_adjacency (lm, ai);
+    adj = ip_add_adjacency (lm, add_adj, vec_len (add_adj), &ai);
 
     if (is_ip4)
-      ip4_add_del_route (im4, table_id, address, address_len, ai, /* is_del */ 0);
+      ip4_add_del_route (im4, table_id,
+			 IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
+			 address, address_len,
+			 ai);
   }
 
  done:

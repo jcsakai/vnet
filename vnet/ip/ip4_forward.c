@@ -27,10 +27,11 @@
 #include <vnet/ethernet/ethernet.h>	/* for ethernet_header_t */
 
 /* This is really, really simple but stupid fib. */
-static ip_lookup_next_t
-ip4_fib_lookup (ip4_main_t * im, u32 fib_index, ip4_address_t * dst, u32 * adj_index)
+ip_lookup_next_t
+ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst, u32 * adj_index)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
+  u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
   ip4_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
   ip_adjacency_t * adj;
   uword * p, * hash, key;
@@ -43,7 +44,7 @@ ip4_fib_lookup (ip4_main_t * im, u32 fib_index, ip4_address_t * dst, u32 * adj_i
       if (! hash)
 	continue;
 
-      key = dst_address & fib->masks[i];
+      key = dst_address & im->fib_masks[i];
       if ((p = hash_get (hash, key)) != 0)
 	{
 	  ai = p[0];
@@ -61,49 +62,44 @@ ip4_fib_lookup (ip4_main_t * im, u32 fib_index, ip4_address_t * dst, u32 * adj_i
 }
 
 static ip4_fib_t *
-find_fib_by_table_id (ip4_main_t * im, u32 table_id)
+create_fib_with_table_id (ip4_main_t * im, u32 table_id)
 {
   ip4_fib_t * fib;
-  uword * p = hash_get (im->fib_index_by_table_id, table_id);
-  uword i;
-
-  if (p)
-    return vec_elt_at_index (im->fibs, p[0]);
-
   hash_set (im->fib_index_by_table_id, table_id, vec_len (im->fibs));
   vec_add2 (im->fibs, fib, 1);
-
   fib->table_id = table_id;
-
-  /* Initialize masks on first call. */
-  for (i = 0; i < ARRAY_LEN (fib->masks); i++)
-    {
-      u32 m;
-
-      if (i < 32)
-	m = pow2_mask (i) << (32 - i);
-      else 
-	m = ~0;
-      fib->masks[i] = clib_host_to_net_u32 (m);
-    }
-
   return fib;
 }
 
-void
-ip4_add_del_route (ip4_main_t * im,
-		   u32 table_id,
-		   u8 * address,
-		   u32 address_length,
-		   u32 adj_index,
-		   u32 is_del)
+static ip4_fib_t *
+find_fib_by_table_index_or_id (ip4_main_t * im, u32 table_index_or_id, u32 flags)
 {
-  ip4_fib_t * fib = find_fib_by_table_id (im, table_id);
+  uword * p, fib_index;
+
+  fib_index = table_index_or_id;
+  if (! (flags & IP4_ROUTE_FLAG_FIB_INDEX))
+    {
+      p = hash_get (im->fib_index_by_table_id, table_index_or_id);
+      if (! p)
+	return create_fib_with_table_id (im, table_index_or_id);
+      fib_index = p[0];
+    }
+  return vec_elt_at_index (im->fibs, fib_index);
+}
+
+u32 ip4_add_del_route (ip4_main_t * im,
+		       u32 fib_index_or_table_id,
+		       u32 flags,
+		       u8 * address,
+		       u32 address_length,
+		       u32 adj_index)
+{
+  ip4_fib_t * fib = find_fib_by_table_index_or_id (im, fib_index_or_table_id, flags);
   u32 dst_address = * (u32 *) address;
   uword * hash;
 
-  ASSERT (address_length < ARRAY_LEN (fib->masks));
-  dst_address &= fib->masks[address_length];
+  ASSERT (address_length < ARRAY_LEN (im->fib_masks));
+  dst_address &= im->fib_masks[address_length];
 
   if (! fib->adj_index_by_dst_address[address_length])
     {
@@ -116,30 +112,103 @@ ip4_add_del_route (ip4_main_t * im,
 
   hash = fib->adj_index_by_dst_address[address_length];
 
-  if (is_del)
-    hash_unset (hash, dst_address);
+  if (flags & IP4_ROUTE_FLAG_DEL)
+    {
+      uword old_adj_index;
+      hash_unset3 (hash, dst_address, &old_adj_index);
+      adj_index = old_adj_index;
+    }
   else
     hash_set (hash, dst_address, adj_index);
 
   fib->adj_index_by_dst_address[address_length] = hash;
+
+  return adj_index;
 }
 
 void *
 ip4_get_route (ip4_main_t * im,
-	       u32 table_id,
+	       u32 table_index_or_table_id,
+	       u32 flags,
 	       u8 * address,
 	       u32 address_length)
 {
-  ip4_fib_t * fib = find_fib_by_table_id (im, table_id);
+  ip4_fib_t * fib = find_fib_by_table_index_or_id (im, table_index_or_table_id, flags);
   u32 dst_address = * (u32 *) address;
   uword * hash, * p;
 
-  ASSERT (address_length < ARRAY_LEN (fib->masks));
-  dst_address &= fib->masks[address_length];
+  ASSERT (address_length < ARRAY_LEN (im->fib_masks));
+  dst_address &= im->fib_masks[address_length];
 
   hash = fib->adj_index_by_dst_address[address_length];
   p = hash_get (hash, dst_address);
   return (void *) p;
+}
+
+ip4_address_t *
+ip4_foreach_matching_route (ip4_main_t * im,
+			    u32 table_index_or_table_id,
+			    u32 flags,
+			    u8 * address,
+			    u32 address_length,
+			    u32 * result_length,
+			    ip4_address_t * results)
+{
+  ip4_fib_t * fib = find_fib_by_table_index_or_id (im, table_index_or_table_id, flags);
+  u32 dst_address = * (u32 *) address;
+  u32 this_length = *result_length;
+  
+  if (results)
+    _vec_len (results) = 0;
+  while (this_length <= 32 && vec_len (results) == 0)
+    {
+      uword k, v;
+      hash_foreach (k, v, fib->adj_index_by_dst_address[this_length], ({
+        if (0 == ((k ^ dst_address) & im->fib_masks[address_length]))
+	  {
+	    ip4_address_t a;
+	    a.data_u32 = k;
+	    vec_add1 (results, a);
+	  }
+      }));
+
+      this_length++;
+    }
+  *result_length = this_length;
+  return results;
+}
+
+void ip4_delete_matching_routes (ip4_main_t * im,
+				 u32 table_index_or_table_id,
+				 u32 flags,
+				 u8 * address,
+				 u32 address_length)
+{
+  static ip4_address_t * matching_addresses;
+  u32 l, i, adj_index;
+
+  for (l = address_length + 1; l <= 32; )
+    {
+      matching_addresses
+	= ip4_foreach_matching_route (im, table_index_or_table_id, flags,
+				      address,
+				      l,
+				      &l,
+				      matching_addresses);
+      for (i = 0; i < vec_len (matching_addresses); i++)
+	{
+	  adj_index =
+	    ip4_add_del_route
+	    (im,
+	     table_index_or_table_id,
+	     IP4_ROUTE_FLAG_DEL | flags,
+	     matching_addresses[i].data,
+	     l - 1,
+	     /* adj_index */ ~0);
+
+	  ip_del_adjacency (&im->lookup_main, adj_index);
+	}
+    }
 }
 
 static uword
@@ -189,8 +258,8 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  next0 = ip4_fib_lookup (im, im->default_fib_table_id, &ip0->dst_address, &adj_index0);
-	  next1 = ip4_fib_lookup (im, im->default_fib_table_id, &ip1->dst_address, &adj_index1);
+	  next0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, &adj_index0);
+	  next1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, &adj_index1);
 
 	  to_next[0].buffer = pi0;
 	  to_next[0].adj_index = adj_index0;
@@ -267,7 +336,7 @@ ip4_lookup (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 
 	  ip0 = vlib_buffer_get_current (p0);
-	  next0 = ip4_fib_lookup (im, im->default_fib_table_id, &ip0->dst_address, &adj_index0);
+	  next0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, &adj_index0);
 
 	  to_next[0].buffer = pi0;
 	  to_next[0].adj_index = adj_index0;
@@ -298,6 +367,28 @@ ip4_lookup (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
+static clib_error_t *
+ip4_sw_interface_admin_up_down (vlib_main_t * vm,
+				u32 sw_if_index,
+				u32 flags)
+{
+  ip4_main_t * im = &ip4_main;
+
+  /* Fill in lookup tables with default table (0). */
+  vec_validate (im->fib_index_by_sw_if_index, sw_if_index);
+
+  /* Validate interface address/length table. */
+  {
+    ip4_address_t null;
+
+    null.data_u32 = ~0;
+    vec_validate_init_empty (im->ip4_address_by_sw_if_index, sw_if_index, null);
+    vec_validate_init_empty (im->ip4_address_length_by_sw_if_index, sw_if_index, ~0);
+  }
+
+  return 0;
+}
+
 static VLIB_REGISTER_NODE (ip4_lookup_node) = {
   .function = ip4_lookup,
   .name = "ip4-lookup",
@@ -313,6 +404,8 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
     [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
     [IP_LOOKUP_NEXT_MULTIPATH] = "ip4-multipath",
   },
+
+  .sw_interface_admin_up_down_function = ip4_sw_interface_admin_up_down,
 };
 
 /* Global IP4 main. */
@@ -322,10 +415,21 @@ static clib_error_t *
 ip4_lookup_init (vlib_main_t * vm)
 {
   ip4_main_t * im = &ip4_main;
+  uword i;
 
-  /* Create FIB with table id of 0. */
-  im->default_fib_table_id = 0;
-  (void) find_fib_by_table_id (im, im->default_fib_table_id);
+  for (i = 0; i < ARRAY_LEN (im->fib_masks); i++)
+    {
+      u32 m;
+
+      if (i < 32)
+	m = pow2_mask (i) << (32 - i);
+      else 
+	m = ~0;
+      im->fib_masks[i] = clib_host_to_net_u32 (m);
+    }
+
+  /* Create FIB with index 0 and table id of 0. */
+  find_fib_by_table_index_or_id (im, /* table id */ 0, IP4_ROUTE_FLAG_TABLE_ID);
 
   ip_lookup_init (&im->lookup_main, ip4_lookup_node.index);
 

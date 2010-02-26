@@ -136,8 +136,14 @@ do {								\
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index);
 
 /* Create new block of given number of contiguous adjacencies. */
-u32 ip_new_adjacency (ip_lookup_main_t * lm,
-		      ip_adjacency_t * adj,
-		      u32 n_adj);
+ip_adjacency_t *
+ip_add_adjacency (ip_lookup_main_t * lm,
+		  ip_adjacency_t * adj,
+		  u32 n_adj,
+		  u32 * adj_index_result);
+
+void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index);
+
+extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
 
 #endif /* included_ip_lookup_h */

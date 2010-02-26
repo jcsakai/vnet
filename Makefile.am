@@ -23,6 +23,7 @@ nobase_include_HEADERS += \
 # Layer 2 protocol: Ethernet
 ########################################
 libvnet_la_SOURCES +=				\
+ vnet/ethernet/arp.c				\
  vnet/ethernet/cli.c				\
  vnet/ethernet/format.c				\
  vnet/ethernet/init.c				\
@@ -64,7 +65,7 @@ libvnet_la_SOURCES +=				\
  vnet/ip/ip_checksum.c				\
  vnet/ip/ip.h					\
  vnet/ip/ip_init.c				\
- vnet/ip/ip_lookup.c				\
+ vnet/ip/lookup.c				\
  vnet/ip/tcp_format.c				\
  vnet/ip/tcp_init.c				\
  vnet/ip/tcp_pg.c				\

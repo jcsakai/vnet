@@ -77,7 +77,7 @@ ip4_input_inline (vlib_main_t * vm,
       vlib_get_next_frame (vm, node, next_index,
 			   to_next, n_left_to_next);
 
-      while (n_left_from >= 4 && n_left_to_next >= 2)
+      while (0 && n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
@@ -172,8 +172,8 @@ ip4_input_inline (vlib_main_t * vm,
 	  error1 = len_diff1 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error1;
 
 	  /* Trim padding at end of packet. */
-	  p0->current_length = cur_len0 - len_diff0;
-	  p1->current_length = cur_len1 - len_diff1;
+	  p0->current_length = ip_len0;
+	  p1->current_length = ip_len1;
 
 	  is_slow_path += error0 != IP4_ERROR_NONE || error1 != IP4_ERROR_NONE;
 
@@ -241,6 +241,7 @@ ip4_input_inline (vlib_main_t * vm,
 	    }
 	}
     
+      /* FIXME transpose errors. */
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
@@ -300,7 +301,7 @@ ip4_input_inline (vlib_main_t * vm,
 	  cur_len0 = p0->current_length;
 	  len_diff0 = cur_len0 - ip_len0;
 	  error0 = len_diff0 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error0;
-	  p0->current_length -= len_diff0;
+	  p0->current_length = ip_len0;
 
 	  is_slow_path += error0 != IP4_ERROR_NONE;
 
@@ -406,6 +407,8 @@ static VLIB_REGISTER_NODE (ip4_input_no_checksum_node) = {
 
 static clib_error_t * ip4_init (vlib_main_t * vm)
 {
+  clib_error_t * error;
+
   ethernet_register_input_type (vm, ETHERNET_TYPE_IP,
 				ip4_input_node.index);
 
@@ -417,7 +420,10 @@ static clib_error_t * ip4_init (vlib_main_t * vm)
     pn->unformat_edit = unformat_pg_ip4_header;
   }
 
-  return 0;
+  if ((error = vlib_call_init_function (vm, ip4_cli_init)))
+    return error;
+
+  return error;
 }
 
 VLIB_INIT_FUNCTION (ip4_init);

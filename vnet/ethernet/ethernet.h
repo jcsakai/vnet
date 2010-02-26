@@ -57,6 +57,8 @@ typedef struct {
   u32 driver_instance;
 
   ethernet_phy_t phy;
+
+  u8 address[6];
 } ethernet_interface_t;
 
 extern vlib_hw_interface_class_t ethernet_hw_interface_class;
@@ -86,6 +88,11 @@ typedef struct {
   i32 * vlan_to_sw_if_index;
 } ethernet_vlan_mapping_t;
 
+/* Per VLAN state. */
+typedef struct {
+  /* ARP table. */
+} ethernet_vlan_t;
+
 typedef struct {
   vlib_main_t * vlib_main;
 
@@ -97,7 +104,20 @@ typedef struct {
   /* Hash tables mapping name/type to type info index. */
   uword * type_info_by_name, * type_info_by_type;
 
+  /* Each software interface gets a VLAN mapping table which maps VLAN
+     id to sw_if_index.  Normally only sw ifs corresponding to hw ifs
+     get tables.  But, when 2 VLAN tags are present it is valid to
+     have 2 levels of tables. */
   ethernet_vlan_mapping_t * vlan_mapping_by_sw_if_index;
+
+  /* Per VLAN state. */
+  ethernet_vlan_t * vlans;
+
+  /* Hash indexed by VLAN ID. */
+  uword * vlan_index_by_1_vlan_id;
+
+  /* Hash indexed by 24 bits of (inner << 12) | outer VLAN IDs. */
+  uword * vlan_index_by_2_vlan_id;
 } ethernet_main_t;
 
 static inline ethernet_type_info_t *
@@ -111,7 +131,9 @@ static inline ethernet_interface_t *
 ethernet_get_interface (ethernet_main_t * em, u32 hw_if_index)
 {
   vlib_hw_interface_t * i = vlib_get_hw_interface (em->vlib_main, hw_if_index);
-  return pool_elt_at_index (em->interfaces, i->hw_instance);
+  return (i->hw_class == &ethernet_hw_interface_class
+	  ? pool_elt_at_index (em->interfaces, i->hw_instance)
+	  : 0);
 }
 
 static always_inline u32
@@ -133,6 +155,7 @@ clib_error_t *
 ethernet_register_interface (vlib_main_t * vm,
 			     vlib_device_class_t * dev_class,
 			     u32 dev_instance,
+			     u8 * address,
 			     ethernet_phy_t * phy,
 			     u32 * hw_if_index_return);
 

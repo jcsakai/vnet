@@ -52,6 +52,11 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
 				? VLIB_HW_INTERFACE_FLAG_LINK_UP
 				: 0));
 
+  vlib_sw_interface_set_flags (pg->vlib_main, pi->sw_if_index,
+			       (want_enabled
+				? VLIB_SW_INTERFACE_FLAG_ADMIN_UP
+				: 0));
+			       
   vlib_node_enable_disable (pg->vlib_main,
 			    pg_input_node.index,
 			    ! clib_bitmap_is_zero (pg->enabled_streams));
