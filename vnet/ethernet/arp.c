@@ -56,7 +56,7 @@ static uword hashvec_key_equal (hash_t * h, uword key1, uword key2)
   hashvec_t * hv = uword_to_pointer (h->user, hashvec_t *);
   void * k1 = hashvec_key_to_mem (hv, key1);
   void * k2 = hashvec_key_to_mem (hv, key2);
-  return memcmp (k1, k2, hv->n_key_bytes);
+  return 0 == memcmp (k1, k2, hv->n_key_bytes);
 }
 
 uword * hashvec_get (hashvec_t * h, void * key)
@@ -64,20 +64,22 @@ uword * hashvec_get (hashvec_t * h, void * key)
 
 void hashvec_set (hashvec_t * h, void * key, uword new_value, uword * old_value)
 {
-  uword ikey, i, l;
+  u8 * k;
+  uword ikey, i, l, old_n_elts, key_alloc_from_free_list;
 
-  if ((l = vec_len (h->key_vector_free_indices)) > 0)
+  key_alloc_from_free_list = (l = vec_len (h->key_vector_free_indices)) > 0;
+  if (key_alloc_from_free_list)
     {
       i = h->key_vector_free_indices[l - 1];
+      k = vec_elt_at_index (h->key_vector, i);
       _vec_len (h->key_vector_free_indices) = l - 1;
     }
   else
     {
-      u8 * k;
       vec_add2 (h->key_vector, k, h->n_key_bytes);
-      memcpy (k, key, h->n_key_bytes);
       i = k - h->key_vector;
     }
+  memcpy (k, key, h->n_key_bytes);
   ikey = 1 + 2*i;
 
   if (! h->hash)
@@ -89,15 +91,20 @@ void hashvec_set (hashvec_t * h, void * key, uword new_value, uword * old_value)
 			    /* format pair/arg */
 			    0, 0);
 
-  l = hash_elts (h->hash);
+  old_n_elts = hash_elts (h->hash);
   hash_set3 (h->hash, ikey, new_value, old_value);
 
   /* If element already existed remove duplicate key. */
-  if (hash_elts (h->hash) == l)
+  if (hash_elts (h->hash) == old_n_elts)
     {
       /* Remove duplicate key. */
-      _vec_len (h->key_vector) -= h->n_key_bytes;
-      vec_add1 (h->key_vector_free_indices, i);
+      if (key_alloc_from_free_list)
+	{
+	  h->key_vector_free_indices[l] = i;
+	  _vec_len (h->key_vector_free_indices) = l + 1;
+	}
+      else
+	_vec_len (h->key_vector) -= h->n_key_bytes;
     }
 }
 
@@ -372,10 +379,11 @@ static u8 * format_ethernet_arp_ip4_entry (u8 * s, va_list * va)
   vlib_sw_interface_t * si;
 
   if (! e)
-    return format (s, "%=20s%=20s%=40s", "IP4", "Ethernet", "Interface");
+    return format (s, "%=12s%=20s%=20s%=40s", "Time", "IP4", "Ethernet", "Interface");
 
   si = vlib_get_sw_interface (vm, e->key.sw_if_index);
-  s = format (s, "%=20U%=20U%=20U",
+  s = format (s, "%=12U%=20U%=20U%=20U",
+	      format_vlib_cpu_time, vm, e->cpu_time_last_updated,
 	      format_ip4_address, &e->key.ip4_address,
 	      format_ethernet_address, e->ethernet_address,
 	      format_vlib_sw_interface_name, vm, si);
@@ -407,25 +415,21 @@ arp_set_ip4_over_ethernet (ethernet_arp_main_t * am,
 {
   ethernet_arp_ip4_key_t k;
   ethernet_arp_ip4_entry_t * e;
-  uword old_index, new_index;
+  uword * p;
 
   k.sw_if_index = sw_if_index;
   k.ip4_address = a->ip4;
-  new_index = vec_len (am->ip4_entries);
-  old_index = ~0;
 
-  hashvec_set (&am->ip4_entry_by_key, &k, new_index, &old_index);
-
-  if (old_index < vec_len (am->ip4_entries))
-    {
-      e = vec_elt_at_index (am->ip4_entries, old_index);
-    }
+  p = hashvec_get (&am->ip4_entry_by_key, &k);
+  if (p)
+    e = vec_elt_at_index (am->ip4_entries, p[0]);
   else
     {
-      vec_validate (am->ip4_entries, new_index);
-      e = vec_elt_at_index (am->ip4_entries, new_index);
+      hashvec_set (&am->ip4_entry_by_key, &k, vec_len (am->ip4_entries), 0);
+      vec_add2 (am->ip4_entries, e, 1);
       e->key = k;
     }
+
   /* Update time stamp and ethernet address. */
   memcpy (e->ethernet_address, a->ethernet, sizeof (e->ethernet_address));
   e->cpu_time_last_updated = clib_cpu_time_now ();
@@ -634,9 +638,6 @@ ethernet_arp_hw_interface_link_up_down (vlib_main_t * vm,
   return 0;
 }
 
-int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2)
-{ return clib_net_to_host_u32 (a1->data_u32) - clib_net_to_host_u32 (a2->data_u32); }
-
 static int
 ip4_arp_entry_sort (vlib_main_t * vm,
 		    ethernet_arp_ip4_entry_t * e1, ethernet_arp_ip4_entry_t * e2)
@@ -670,6 +671,7 @@ show_ip4_arp (vlib_main_t * vm,
       continue;
     vlib_cli_output (vm, "%U", format_ethernet_arp_ip4_entry, vm, e);
   }
+  vec_free (es);
 
   return error;
 }

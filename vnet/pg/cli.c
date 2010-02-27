@@ -242,6 +242,9 @@ new_stream (vlib_main_t * vm,
       else if (unformat_user (input, unformat_pg_stream_parameter, &s))
 	;
 
+      else if (unformat (input, "no-recycle"))
+	s.flags |= PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE;
+
       else
 	{
 	  error = clib_error_create ("unknown input `%U'",

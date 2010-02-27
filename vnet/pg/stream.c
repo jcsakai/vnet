@@ -148,7 +148,7 @@ static void do_edit (pg_stream_t * stream,
 	}
 
       if (want_commit)
-	vec_add1 (stream->non_fixed_edits, e[0]);
+	vec_add1 (g->non_fixed_edits, e[0]);
       return;
     }
 
@@ -240,7 +240,7 @@ static void perform_fixed_edits (pg_stream_t * s)
 	do_edit (s, g, e, /* want_commit */ 1);
 
       /* All edits have either been performed or added to
-	 stream->non_fixed_edits.  So, we can delete the vector. */
+	 g->non_fixed_edits.  So, we can delete the vector. */
       vec_free (g->edits);
     }
 
@@ -249,6 +249,15 @@ static void perform_fixed_edits (pg_stream_t * s)
   vec_foreach (g, s->edit_groups)
     {
       g->start_byte_offset = vec_len (s->fixed_packet_data);
+
+      /* Relocate and copy non-fixed edits from group to stream. */
+      vec_foreach (e, g->non_fixed_edits)
+	e->lsb_bit_offset += g->start_byte_offset * BITS (u8);
+      vec_add (s->non_fixed_edits,
+	       g->non_fixed_edits,
+	       vec_len (g->non_fixed_edits));
+      vec_free (g->non_fixed_edits);
+
       vec_add (s->fixed_packet_data,
 	       g->fixed_packet_data,
 	       vec_len (g->fixed_packet_data));

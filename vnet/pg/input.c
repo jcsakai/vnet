@@ -1218,14 +1218,14 @@ pg_stream_fill_helper (pg_main_t * pg,
     return 0;
       
   /* No need to do anything with already used buffers unless debugging. */
-  if (DEBUG > 0)
+  if (DEBUG > 0 || (s->flags & PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE))
     init_buffers_inline
       (vm, s,
        buffers,
        n_alloc,
        /* data_offset */ (bi - s->buffer_indices) * s->buffer_bytes,
        s->buffer_bytes,
-       /* set data */ 0);
+       /* set data */ (s->flags & PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE) != 0);
 
   if (next_buffers)
     pg_set_next_buffer_pointers (pg, s, buffers, next_buffers, n_alloc);

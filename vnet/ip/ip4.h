@@ -92,6 +92,8 @@ void
 ip4_set_interface_address (ip4_main_t * im, u32 sw_if_index,
 			   ip4_address_t * to_set, uword to_set_length);
 
+int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
+
 /* Add/del a route to the FIB. */
 
 #define IP4_ROUTE_FLAG_ADD (0 << 0)

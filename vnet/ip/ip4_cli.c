@@ -25,6 +25,9 @@
 
 #include <vnet/ip/ip.h>
 
+int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2)
+{ return clib_net_to_host_u32 (a1->data_u32) - clib_net_to_host_u32 (a2->data_u32); }
+
 static VLIB_CLI_COMMAND (set_interface_ip4_command) = {
   .name = "ip4",
   .short_help = "IP4 commands",

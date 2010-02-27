@@ -37,6 +37,9 @@ typedef struct pg_edit_group_t {
   /* Edits in this group. */
   pg_edit_t * edits;
 
+  /* Vector of non-fixed edits for this group. */
+  pg_edit_t * non_fixed_edits;
+
   /* Fixed edits for this group. */
   u8 * fixed_packet_data;
   u8 * fixed_packet_data_mask;
@@ -79,6 +82,7 @@ typedef struct pg_stream_t {
 
   /* Stream is currently enabled. */
 #define PG_STREAM_FLAGS_IS_ENABLED (1 << 0)
+#define PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE (1 << 1)
 
   /* Edit groups are created by each protocol level (e.g. ethernet,
      ip4, tcp, ...). */
