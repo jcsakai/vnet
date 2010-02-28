@@ -23,108 +23,9 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <clib/hash.h>
-
-typedef struct {
-  u8 * key_vector;
-
-  u32 n_key_bytes;
-
-  u32 * key_vector_free_indices;
-
-  uword * hash;
-} hashvec_t;
-
-static always_inline void *
-hashvec_key_to_mem (hashvec_t * h, uword key)
-{
-  return ((key & 1)
-	  ? h->key_vector + (key / 2)
-	  : uword_to_pointer (key, void *));
-}
-
-static uword hashvec_key_sum (hash_t * h, uword key)
-{
-  hashvec_t * hv = uword_to_pointer (h->user, hashvec_t *);
-  return hash_memory (hashvec_key_to_mem (hv, key),
-		      hv->n_key_bytes,
-		      /* state */ 0);
-}
-
-static uword hashvec_key_equal (hash_t * h, uword key1, uword key2)
-{
-  hashvec_t * hv = uword_to_pointer (h->user, hashvec_t *);
-  void * k1 = hashvec_key_to_mem (hv, key1);
-  void * k2 = hashvec_key_to_mem (hv, key2);
-  return 0 == memcmp (k1, k2, hv->n_key_bytes);
-}
-
-uword * hashvec_get (hashvec_t * h, void * key)
-{ return hash_get_mem (h->hash, key); }
-
-void hashvec_set (hashvec_t * h, void * key, uword new_value, uword * old_value)
-{
-  u8 * k;
-  uword ikey, i, l, old_n_elts, key_alloc_from_free_list;
-
-  key_alloc_from_free_list = (l = vec_len (h->key_vector_free_indices)) > 0;
-  if (key_alloc_from_free_list)
-    {
-      i = h->key_vector_free_indices[l - 1];
-      k = vec_elt_at_index (h->key_vector, i);
-      _vec_len (h->key_vector_free_indices) = l - 1;
-    }
-  else
-    {
-      vec_add2 (h->key_vector, k, h->n_key_bytes);
-      i = k - h->key_vector;
-    }
-  memcpy (k, key, h->n_key_bytes);
-  ikey = 1 + 2*i;
-
-  if (! h->hash)
-    h->hash = hash_create2 (/* elts */ 0,
-			    /* user */ pointer_to_uword (h),
-			    /* value_bytes */ sizeof (uword),
-			    hashvec_key_sum,
-			    hashvec_key_equal,
-			    /* format pair/arg */
-			    0, 0);
-
-  old_n_elts = hash_elts (h->hash);
-  hash_set3 (h->hash, ikey, new_value, old_value);
-
-  /* If element already existed remove duplicate key. */
-  if (hash_elts (h->hash) == old_n_elts)
-    {
-      /* Remove duplicate key. */
-      if (key_alloc_from_free_list)
-	{
-	  h->key_vector_free_indices[l] = i;
-	  _vec_len (h->key_vector_free_indices) = l + 1;
-	}
-      else
-	_vec_len (h->key_vector) -= h->n_key_bytes;
-    }
-}
-
-uword hashvec_unset (hashvec_t * h, void * key, uword * old_value)
-{
-  hash_pair_t * p;
-
-  p = hash_get_pair_mem (h->hash, key);
-  if (p)
-    {
-      vec_add1 (h->key_vector_free_indices, p->key / 2);
-      hash_unset3 (h->hash, key, old_value);
-      return 1;
-    }
-  else
-    return 0;
-}
-
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h>
+#include <clib/mhash.h>
 
 #define foreach_ethernet_arp_hardware_type	\
   _ (0, reserved)				\
@@ -246,7 +147,7 @@ typedef struct {
 
   ethernet_arp_ip4_entry_t * ip4_entries;
 
-  hashvec_t ip4_entry_by_key;
+  mhash_t ip4_entry_by_key;
 } ethernet_arp_main_t;
 
 static ethernet_arp_main_t ethernet_arp_main;
@@ -420,12 +321,12 @@ arp_set_ip4_over_ethernet (ethernet_arp_main_t * am,
   k.sw_if_index = sw_if_index;
   k.ip4_address = a->ip4;
 
-  p = hashvec_get (&am->ip4_entry_by_key, &k);
+  p = mhash_get (&am->ip4_entry_by_key, &k);
   if (p)
     e = vec_elt_at_index (am->ip4_entries, p[0]);
   else
     {
-      hashvec_set (&am->ip4_entry_by_key, &k, vec_len (am->ip4_entries), 0);
+      mhash_set (&am->ip4_entry_by_key, &k, vec_len (am->ip4_entries), 0);
       vec_add2 (am->ip4_entries, e, 1);
       e->key = k;
     }
@@ -729,15 +630,15 @@ unformat_pg_arp_header (unformat_input_t * input, va_list * args)
 
   if (! unformat (input, "%U: %U/%U -> %U/%U",
 		  unformat_pg_edit,
-		    unformat_ethernet_arp_opcode_net_byte_order, &p->opcode,
+		  unformat_ethernet_arp_opcode_net_byte_order, &p->opcode,
 		  unformat_pg_edit,
-		    unformat_ethernet_address, &p->ip4_over_ethernet[0].ethernet,
+		  unformat_ethernet_address, &p->ip4_over_ethernet[0].ethernet,
 		  unformat_pg_edit,
-		    unformat_ip4_address, &p->ip4_over_ethernet[0].ip4,
+		  unformat_ip4_address, &p->ip4_over_ethernet[0].ip4,
 		  unformat_pg_edit,
-		    unformat_ethernet_address, &p->ip4_over_ethernet[1].ethernet,
+		  unformat_ethernet_address, &p->ip4_over_ethernet[1].ethernet,
 		  unformat_pg_edit,
-		    unformat_ip4_address, &p->ip4_over_ethernet[1].ip4))
+		  unformat_ip4_address, &p->ip4_over_ethernet[1].ip4))
     {
       /* Free up any edits we may have added. */
       pg_free_edit_group (s);
@@ -761,7 +662,9 @@ static clib_error_t * ethernet_arp_init (vlib_main_t * vm)
   foreach_ethernet_arp_opcode;
 #undef _
 
-  am->ip4_entry_by_key.n_key_bytes = sizeof (ethernet_arp_ip4_key_t);
+  mhash_init (&am->ip4_entry_by_key,
+	      /* value size */ sizeof (uword),
+	      /* key size */ sizeof (ethernet_arp_ip4_key_t));
 
   return 0;
 }
