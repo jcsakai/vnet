@@ -1185,8 +1185,8 @@ static void pg_buffer_init (vlib_main_t * vm,
   pg_stream_t * s;
   uword bi, si;
 
-  si = fl->opaque & pow2_mask (24);
-  bi = fl->opaque >> 24;
+  si = fl->buffer_init_function_opaque & pow2_mask (24);
+  bi = fl->buffer_init_function_opaque >> 24;
 
   s = pool_elt_at_index (pg->streams, si);
 
@@ -1209,7 +1209,7 @@ pg_stream_fill_helper (pg_main_t * pg,
 
   f = vlib_buffer_get_free_list (vm, bi->free_list_index);
   f->buffer_init_function = pg_buffer_init;
-  f->opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
+  f->buffer_init_function_opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
 
   if (! vlib_buffer_alloc_from_free_list (vm,
 					  buffers,
