@@ -184,7 +184,7 @@ static u8 * format_ethernet_arp_ip4_entry (u8 * s, va_list * va)
     return format (s, "%=12s%=20s%=20s%=40s", "Time", "IP4", "Ethernet", "Interface");
 
   si = vlib_get_sw_interface (vm, e->key.sw_if_index);
-  s = format (s, "%=12U%=20U%=20U%=20U",
+  s = format (s, "%=12U%=20U%=20U%=40U",
 	      format_vlib_cpu_time, vm, e->cpu_time_last_updated,
 	      format_ip4_address, &e->key.ip4_address,
 	      format_ethernet_address, e->ethernet_address,
