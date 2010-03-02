@@ -141,7 +141,7 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
 
     default:
       s = format (s, "%U", format_ip_lookup_next, adj->lookup_next_index);
-      if (adj->lookup_next_index = IP_LOOKUP_NEXT_ARP)
+      if (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP)
 	s = format (s, " %U",
 		    format_vlib_sw_interface_name,
 		      vm,
