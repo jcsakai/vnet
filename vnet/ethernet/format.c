@@ -172,7 +172,7 @@ uword
 unformat_ethernet_type_host_byte_order (unformat_input_t * input,
 					va_list * args)
 {
-  int * result = va_arg (*args, int *);
+  u16 * result = va_arg (*args, u16 *);
   ethernet_main_t * em = &ethernet_main;
   int type, i;
 
@@ -202,7 +202,7 @@ uword
 unformat_ethernet_type_net_byte_order (unformat_input_t * input,
 				       va_list * args)
 {
-  int * result = va_arg (*args, int *);
+  u16 * result = va_arg (*args, u16 *);
   if (! unformat_user (input, unformat_ethernet_type_host_byte_order, result))
     return 0;
 
@@ -216,7 +216,8 @@ unformat_ethernet_header (unformat_input_t * input, va_list * args)
   u8 ** result = va_arg (*args, u8 **);
   ethernet_max_header_t _m, * m = &_m;
   ethernet_header_t * e = &m->ethernet;
-  u32 type, n_vlan;
+  u16 type;
+  u32 n_vlan;
 
   if (! unformat (input, "%U: %U -> %U",
 		  unformat_ethernet_type_host_byte_order, &type,
