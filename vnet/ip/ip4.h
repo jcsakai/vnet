@@ -53,6 +53,9 @@ typedef struct {
      Address of ~0 means interface has no IP4 address. */
   ip4_address_t * ip4_address_by_sw_if_index;
   u8 * ip4_address_length_by_sw_if_index;
+
+  /* Template used to generate IP4 ARP packets. */
+  vlib_packet_template_t ip4_arp_request_packet_template;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
@@ -61,6 +64,7 @@ extern ip4_main_t ip4_main;
 /* Global ip4 input node.  Errors get attached to ip4 input node. */
 extern vlib_node_registration_t ip4_input_node;
 extern vlib_node_registration_t ip4_rewrite_node;
+extern vlib_node_registration_t ip4_arp_node;
 
 ip_lookup_next_t
 ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst, u32 * adj_index);
@@ -89,7 +93,7 @@ ip4_unaligned_destination_matches_route (ip4_main_t * im,
 { return 0 == ((clib_mem_unaligned (&key->data_u32, u32) ^ dest->data_u32) & im->fib_masks[dest_length]); }
 
 void
-ip4_set_interface_address (ip4_main_t * im, u32 sw_if_index,
+ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
 			   ip4_address_t * to_set, uword to_set_length);
 
 int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);

@@ -25,6 +25,7 @@
 
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h>	/* for ethernet_header_t */
+#include <vnet/ethernet/arp_packet.h>	/* for ethernet_arp_header_t */
 
 /* This is really, really simple but stupid fib. */
 ip_lookup_next_t
@@ -400,7 +401,7 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
     [IP_LOOKUP_NEXT_DROP] = "ip4-drop",
     [IP_LOOKUP_NEXT_PUNT] = "ip4-punt",
     [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
-    [IP_LOOKUP_NEXT_GLEAN] = "ip4-glean",
+    [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
     [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
     [IP_LOOKUP_NEXT_MULTIPATH] = "ip4-multipath",
   },
@@ -433,6 +434,38 @@ ip4_lookup_init (vlib_main_t * vm)
 
   ip_lookup_init (&im->lookup_main, ip4_lookup_node.index);
 
+  {
+    ethernet_and_arp_header_t h[2];
+
+    memset (&h, 0, sizeof (h));
+
+    /* Send to broadcast address ffff.ffff.ffff */
+    memset (h[0].ethernet.dst_address, ~0, sizeof (h[0].ethernet.dst_address));
+    memset (h[1].ethernet.dst_address, ~0, sizeof (h[1].ethernet.dst_address));
+
+    /* Set target ethernet address to all zeros. */
+    memset (h[0].arp.ip4_over_ethernet[1].ethernet, 0, sizeof (h[0].arp.ip4_over_ethernet[1].ethernet));
+    memset (h[1].arp.ip4_over_ethernet[1].ethernet, ~0, sizeof (h[1].arp.ip4_over_ethernet[1].ethernet));
+
+#define _16(f,v) h[0].f = clib_host_to_net_u16 (v); h[1].f = ~0
+#define _8(f,v) h[0].f = v; h[1].f = ~0
+    _16 (ethernet.type, ETHERNET_TYPE_ARP);
+    _16 (arp.l2_type, ETHERNET_ARP_HARDWARE_TYPE_ethernet);
+    _16 (arp.l3_type, ETHERNET_TYPE_IP);
+    _8 (arp.n_l2_address_bytes, 6);
+    _8 (arp.n_l3_address_bytes, 4);
+    _16 (arp.opcode, ETHERNET_ARP_OPCODE_request);
+#undef _16
+#undef _8
+
+    vlib_packet_template_init (vm,
+			       &im->ip4_arp_request_packet_template,
+			       /* data */ &h[0],
+			       /* mask */ &h[1],
+			       sizeof (h[0]),
+			       /* alloc chunk size */ 8);
+  }
+
   return 0;
 }
 
@@ -456,7 +489,7 @@ static u8 * format_ip4_forward_next_trace (u8 * s, va_list * args)
   uword indent = format_get_indent (s);
 
   adj = ip_get_adjacency (&im->lookup_main, t->adj_index);
-  s = format (s, "%U",
+  s = format (s, "adjacency: %U",
 	      format_ip_adjacency,
 	        vm, &im->lookup_main, t->adj_index);
   switch (adj->lookup_next_index)
@@ -1013,17 +1046,40 @@ static VLIB_REGISTER_NODE (ip4_local_node) = {
   },
 };
 
-#if 0
-/* Outline of glean code. */
+typedef enum {
+  IP4_ARP_NEXT_DROP,
+  IP4_ARP_N_NEXT,
+} ip4_arp_next_t;
+
+typedef enum {
+  IP4_ARP_ERROR_DROP,
+  IP4_ARP_ERROR_REQUEST_SENT,
+} ip4_arp_error_t;
+
+static uword
+ip4_arp (vlib_main_t * vm,
+	 vlib_node_runtime_t * node,
+	 vlib_frame_t * frame)
 {
+  ip4_main_t * im = &ip4_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip_buffer_and_adjacency_t * from;
+  u32 * to_next_drop;
+  uword n_left_from, n_left_to_next_drop, next_index;
   static f64 time_last_seed_change = -1e100;
   static u32 hash_seeds[3];
   static uword hash_bitmap[256 / BITS (uword)]; 
   f64 time_now;
+  vlib_error_t * to_next_drop_error;
+  vlib_error_t arp_drop_error_no_code = vlib_error_set (node->node_index, 0);
+
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    ip4_forward_next_trace (vm, node, frame);
 
   time_now = vlib_time_now (vm);
   if (time_now - time_last_seed_change > 1e-3)
     {
+      uword i;
       u32 * r = clib_random_buffer_get_data (&vm->random_buffer,
 					     sizeof (hash_seeds));
       for (i = 0; i < ARRAY_LEN (hash_seeds); i++)
@@ -1036,67 +1092,129 @@ static VLIB_REGISTER_NODE (ip4_local_node) = {
       time_last_seed_change = time_now;
     }
 
-  for each packet {
-    a = hash_seeds[0];
-    b = hash_seeds[1];
-    c = hash_seeds[2];
+  from = vlib_frame_vector_args (frame);
+  n_left_from = frame->n_vectors;
+  next_index = node->cached_next_index;
+  if (next_index == IP4_ARP_NEXT_DROP)
+    next_index = IP4_ARP_N_NEXT; /* point to first interface */
 
-    a ^= ip-header->dst_address;
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame_transpose (vm, node, IP4_ARP_NEXT_DROP,
+				     to_next_drop, n_left_to_next_drop);
+      to_next_drop_error = vlib_error_for_transpose_buffer_pointer (to_next_drop);
 
-    /* Include interface in hash? */
-    b ^= buffer-header->sw_if_index[VLIB_RX];
+      while (0 && n_left_from >= 4 && n_left_to_next_drop >= 2)
+	{
+	}
+    
+      while (n_left_from > 0 && n_left_to_next_drop > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip4_header_t * ip0;
+	  u32 pi0, adj_index0, a0, b0, c0, m0, sw_if_index0, drop0;
+	  uword bm0;
+	  ip_adjacency_t * adj0;
+	  u32 next0;
 
-    hash_mix32 (a, b, c);
+	  pi0 = from[0].buffer;
+	  adj_index0 = from[0].adj_index;
 
-    c &= BITS (hash_bitmap) - 1;
-    c0 = c / BITS (uword);
-    c1 = (uword) 1 << (c % BITS (uword));
+	  p0 = vlib_get_buffer (vm, pi0);
+	  ip0 = vlib_buffer_get_current (p0);
 
-    bm = hash_bitmap[c0];
-    seen_already = (bm & c1) != 0;
+	  adj0 = ip_get_adjacency (lm, adj_index0);
 
-    /* Mark it as seen. */
-    hash_bitmap[c0] = bm | c1;
+	  a0 = hash_seeds[0];
+	  b0 = hash_seeds[1];
+	  c0 = hash_seeds[2];
 
-    next_index = seen_already ? IP4_GLEAN_NEXT_DROP : IP4_GLEAN_NEXT_PUNT;
+	  sw_if_index0 = adj0->rewrite_header.sw_if_index;
+	  p0->sw_if_index[VLIB_TX] = sw_if_index0;
 
-    ...;
-  }
+	  a0 ^= ip0->dst_address.data_u32;
+	  b0 ^= sw_if_index0;
+
+	  hash_v3_finalize32 (a0, b0, c0);
+
+	  c0 &= BITS (hash_bitmap) - 1;
+	  c0 = c0 / BITS (uword);
+	  m0 = (uword) 1 << (c0 % BITS (uword));
+
+	  bm0 = hash_bitmap[c0];
+	  drop0 = (bm0 & m0) != 0;
+	  next0 = drop0 ? IP4_ARP_NEXT_DROP : adj0->rewrite_header.next_index;
+
+	  /* Mark it as seen. */
+	  hash_bitmap[c0] = bm0 | m0;
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next_drop[0] = pi0;
+	  to_next_drop_error[0]
+	    = vlib_error_set_code (arp_drop_error_no_code,
+				   drop0 ? IP4_ARP_ERROR_DROP : IP4_ARP_ERROR_REQUEST_SENT);
+	  to_next_drop += 1;
+	  to_next_drop_error += 1;
+	  n_left_to_next_drop -= 1;
+
+	  if (drop0)
+	    continue;
+
+	  {
+	    u32 bi0, * to_next_request;
+	    ethernet_and_arp_header_t * h0;
+	    vlib_sw_interface_t * swif0;
+	    ethernet_interface_t * eif0;
+	    ip4_address_t * swif_ip0;
+	    u8 * eth_addr0, dummy[6] = { 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, };
+
+	    h0 = vlib_packet_template_get_packet (vm, &im->ip4_arp_request_packet_template, &bi0);
+
+	    swif0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
+	    ASSERT (swif0->type == VLIB_SW_INTERFACE_TYPE_HARDWARE);
+	    eif0 = ethernet_get_interface (&ethernet_main, swif0->hw_if_index);
+	    eth_addr0 = eif0 ? eif0->address : dummy;
+	    memcpy (h0->ethernet.src_address, eth_addr0, sizeof (h0->ethernet.src_address));
+	    memcpy (h0->arp.ip4_over_ethernet[0].ethernet, eth_addr0, sizeof (h0->arp.ip4_over_ethernet[0].ethernet));
+
+	    swif_ip0 = ip4_get_interface_address (im, sw_if_index0);
+	    h0->arp.ip4_over_ethernet[0].ip4.data_u32 = swif_ip0->data_u32;
+
+	    /* Copy in destination address we are requesting. */
+	    h0->arp.ip4_over_ethernet[1].ip4.data_u32 = ip0->dst_address.data_u32;
+
+	    vlib_buffer_copy_trace_flag (vm, p0, bi0);
+
+	    to_next_request = vlib_set_next_frame (vm, node, next0);
+	    to_next_request[0] = bi0;
+	  }
+	}
+
+      vlib_put_next_frame (vm, node, IP4_ARP_NEXT_DROP, n_left_to_next_drop);
+    }
+
+  return frame->n_vectors;
 }
-#endif
 
-static uword
-ip4_glean (vlib_main_t * vm,
-	   vlib_node_runtime_t * node,
-	   vlib_frame_t * frame)
-{
-  ip_buffer_and_adjacency_t * v = vlib_frame_vector_args (frame);
-  uword n_packets = frame->n_vectors;
+static char * ip4_arp_error_strings[] = {
+  [IP4_ARP_ERROR_DROP] = "address overflow drops",
+  [IP4_ARP_ERROR_REQUEST_SENT] = "arp requests sent",
+};
 
-  vlib_error_drop_buffers (vm, node,
-			   &v[0].buffer,
-			   /* stride */ &v[1].buffer - &v[0].buffer,
-			   n_packets,
-			   /* next */ 0,
-			   ip4_input_node.index,
-			   IP4_ERROR_ADJACENCY_DROP);
-
-  if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip4_forward_next_trace (vm, node, frame);
-
-  return n_packets;
-}
-
-static VLIB_REGISTER_NODE (ip4_glean_node) = {
-  .function = ip4_glean,
-  .name = "ip4-glean",
+VLIB_REGISTER_NODE (ip4_arp_node) = {
+  .function = ip4_arp,
+  .name = "ip4-arp",
   .vector_size = sizeof (ip_buffer_and_adjacency_t),
 
   .format_trace = format_ip4_forward_next_trace,
 
-  .n_next_nodes = 1,
+  .n_errors = ARRAY_LEN (ip4_arp_error_strings),
+  .error_strings = ip4_arp_error_strings,
+
+  .n_next_nodes = IP4_ARP_N_NEXT,
   .next_nodes = {
-    [0] = "error-drop",
+    [IP4_ARP_NEXT_DROP] = "error-drop-transpose",
   },
 };
 

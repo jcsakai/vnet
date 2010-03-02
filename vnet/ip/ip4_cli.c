@@ -35,9 +35,10 @@ static VLIB_CLI_COMMAND (set_interface_ip4_command) = {
 };
 
 void
-ip4_set_interface_address (ip4_main_t * im, u32 sw_if_index,
+ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
 			   ip4_address_t * new_address, uword new_length)
 {
+  ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   ip_adjacency_t * adj;
   ip4_address_t old_address;
@@ -83,7 +84,7 @@ ip4_set_interface_address (ip4_main_t * im, u32 sw_if_index,
 
   adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			  &new_adj_indices[0]);
-  adj->lookup_next_index = IP_LOOKUP_NEXT_GLEAN;
+  ip_adjacency_set_arp (vm, adj, sw_if_index);
 
   ip4_add_del_route (im, fib_index,
 		     IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_FIB_INDEX,
@@ -107,7 +108,6 @@ set_ip4_address (vlib_main_t * vm,
 		 unformat_input_t * input,
 		 vlib_cli_command_t * cmd)
 {
-  ip4_main_t * im4 = &ip4_main;
   ip4_address_t a;
   clib_error_t * error = 0;
   u32 sw_if_index, length;
@@ -127,7 +127,7 @@ set_ip4_address (vlib_main_t * vm,
       goto done;
     }
 
-  ip4_set_interface_address (im4, sw_if_index, &a, length);
+  ip4_set_interface_address (vm, sw_if_index, &a, length);
 
  done:
   return error;

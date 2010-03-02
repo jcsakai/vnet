@@ -108,7 +108,7 @@ u8 * format_ip_lookup_next (u8 * s, va_list * args)
     case IP_LOOKUP_NEXT_DROP: t = "drop"; break;
     case IP_LOOKUP_NEXT_PUNT: t = "punt"; break;
     case IP_LOOKUP_NEXT_LOCAL: t = "local"; break;
-    case IP_LOOKUP_NEXT_GLEAN: t = "glean"; break;
+    case IP_LOOKUP_NEXT_ARP: t = "arp"; break;
 
     case IP_LOOKUP_NEXT_REWRITE:
     case IP_LOOKUP_NEXT_MULTIPATH:
@@ -141,6 +141,11 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
 
     default:
       s = format (s, "%U", format_ip_lookup_next, adj->lookup_next_index);
+      if (adj->lookup_next_index = IP_LOOKUP_NEXT_ARP)
+	s = format (s, " %U",
+		    format_vlib_sw_interface_name,
+		      vm,
+		      vlib_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
       break;
     }
 
@@ -186,8 +191,8 @@ static uword unformat_ip_lookup_next (unformat_input_t * input, va_list * args)
   else if (unformat (input, "local"))
     n = IP_LOOKUP_NEXT_LOCAL;
 
-  else if (unformat (input, "glean"))
-    n = IP_LOOKUP_NEXT_GLEAN;
+  else if (unformat (input, "arp"))
+    n = IP_LOOKUP_NEXT_ARP;
 
   else
     return 0;
@@ -196,16 +201,31 @@ static uword unformat_ip_lookup_next (unformat_input_t * input, va_list * args)
   return 1;
 }
 
+void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index)
+{
+  vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
+  adj->lookup_next_index = IP_LOOKUP_NEXT_ARP;
+  adj->rewrite_header.sw_if_index = sw_if_index;
+  adj->rewrite_header.next_index = vlib_node_add_next (vm, ip4_arp_node.index, hw->output_node_index);
+}
+
 uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
   ip_adjacency_t * adj = va_arg (*args, ip_adjacency_t *);
   u32 node_index = va_arg (*args, u32);
+  u32 sw_if_index;
   ip_lookup_next_t next;
 
   adj->rewrite_header.node_index = node_index;
 
-  if (unformat_user (input, unformat_ip_lookup_next, &next))
+  if (unformat (input, "arp %U",
+		unformat_vlib_sw_interface, vm, &sw_if_index))
+    {
+      ip_adjacency_set_arp (vm, adj, sw_if_index);
+    }
+
+  else if (unformat_user (input, unformat_ip_lookup_next, &next))
     {
       adj->lookup_next_index = next;
 

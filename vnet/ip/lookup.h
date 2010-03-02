@@ -43,7 +43,7 @@ typedef enum {
   /* This packet matches an "interface route" and packets
      need to be passed to ARP to find rewrite string for
      this destination. */
-  IP_LOOKUP_NEXT_GLEAN,
+  IP_LOOKUP_NEXT_ARP,
 
   /* This packet is to be rewritten and forwarded to the next
      processing node.  This is typically the output interface but
@@ -143,6 +143,8 @@ ip_add_adjacency (ip_lookup_main_t * lm,
 		  u32 * adj_index_result);
 
 void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index);
+
+void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index);
 
 extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
 
