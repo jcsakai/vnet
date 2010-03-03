@@ -56,9 +56,10 @@ typedef struct {
 
   u32 driver_instance;
 
-  ethernet_phy_t phy;
-
+  /* Ethernet (MAC) address for this interface. */
   u8 address[6];
+
+  ethernet_phy_t phy;
 } ethernet_interface_t;
 
 extern vlib_hw_interface_class_t ethernet_hw_interface_class;

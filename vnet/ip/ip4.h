@@ -32,10 +32,30 @@ typedef struct {
   /* Hash table for each prefix length mapping. */
   uword * adj_index_by_dst_address[33];
 
+  /* Table ID (hash key) for this FIB. */
   u32 table_id;
+
+  /* Index into FIB vector. */
+  u32 index;
 } ip4_fib_t;
 
+struct ip4_main_t;
+
+typedef void (ip4_add_del_route_function_t)
+  (struct ip4_main_t * im,
+   uword opaque,
+   ip4_fib_t * fib,
+   u32 flags,
+   u8 * address,
+   u32 address_length,
+   void * lookup_result);
+
 typedef struct {
+  ip4_add_del_route_function_t * function;
+  uword function_opaque;
+} ip4_add_del_route_callback_t;
+
+typedef struct ip4_main_t {
   ip_lookup_main_t lookup_main;
 
   /* Vector of FIBs. */
@@ -56,6 +76,9 @@ typedef struct {
 
   /* Template used to generate IP4 ARP packets. */
   vlib_packet_template_t ip4_arp_request_packet_template;
+
+  /* Vector of functions to call when routes are added/deleted. */
+  ip4_add_del_route_callback_t * add_del_route_callbacks;
 } ip4_main_t;
 
 /* Global ip4 main structure. */

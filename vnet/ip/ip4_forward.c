@@ -69,6 +69,7 @@ create_fib_with_table_id (ip4_main_t * im, u32 table_id)
   hash_set (im->fib_index_by_table_id, table_id, vec_len (im->fibs));
   vec_add2 (im->fibs, fib, 1);
   fib->table_id = table_id;
+  fib->index = fib - im->fibs;
   return fib;
 }
 
@@ -97,7 +98,8 @@ u32 ip4_add_del_route (ip4_main_t * im,
 {
   ip4_fib_t * fib = find_fib_by_table_index_or_id (im, fib_index_or_table_id, flags);
   u32 dst_address = * (u32 *) address;
-  uword * hash;
+  uword * hash, * p, old_adj_index, is_del;
+  ip4_add_del_route_callback_t * cb;
 
   ASSERT (address_length < ARRAY_LEN (im->fib_masks));
   dst_address &= im->fib_masks[address_length];
@@ -113,16 +115,41 @@ u32 ip4_add_del_route (ip4_main_t * im,
 
   hash = fib->adj_index_by_dst_address[address_length];
 
-  if (flags & IP4_ROUTE_FLAG_DEL)
+  is_del = (flags & IP4_ROUTE_FLAG_DEL) != 0;
+
+  /* For deletes callbacks are done before route is inserted. */
+  if (is_del)
     {
-      uword old_adj_index;
+      if (vec_len (im->add_del_route_callbacks) > 0)
+	{
+	  p = hash_get (hash, dst_address);
+	  vec_foreach (cb, im->add_del_route_callbacks)
+	    cb->function (im, cb->function_opaque,
+			  fib, flags,
+			  address, address_length,
+			  p);
+	}
+
       hash_unset3 (hash, dst_address, &old_adj_index);
+      fib->adj_index_by_dst_address[address_length] = hash;
       adj_index = old_adj_index;
     }
   else
-    hash_set (hash, dst_address, adj_index);
+    {
+      hash_set (hash, dst_address, adj_index);
+      fib->adj_index_by_dst_address[address_length] = hash;
 
-  fib->adj_index_by_dst_address[address_length] = hash;
+      /* For adds callbacks are done after route is inserted. */
+      if (vec_len (im->add_del_route_callbacks) > 0)
+	{
+	  p = hash_get (hash, dst_address);
+	  vec_foreach (cb, im->add_del_route_callbacks)
+	    cb->function (im, cb->function_opaque,
+			  fib, flags,
+			  address, address_length,
+			  p);
+	}
+    }
 
   return adj_index;
 }
