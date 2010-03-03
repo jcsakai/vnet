@@ -211,13 +211,18 @@ static u8 * format_ethernet_arp_input_trace (u8 * s, va_list * va)
 }
 
 static void
-arp_set_ip4_over_ethernet (ethernet_arp_main_t * am,
+arp_set_ip4_over_ethernet (vlib_main_t * vm,
+			   ethernet_arp_main_t * am,
 			   u32 sw_if_index,
 			   ethernet_arp_ip4_over_ethernet_address_t * a)
 {
   ethernet_arp_ip4_key_t k;
   ethernet_arp_ip4_entry_t * e;
-  uword * p;
+  ip4_main_t * im = &ip4_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
+  uword * p, fib_index;
+
+  fib_index = im->fib_index_by_sw_if_index[sw_if_index];
 
   k.sw_if_index = sw_if_index;
   k.ip4_address = a->ip4;
@@ -227,6 +232,36 @@ arp_set_ip4_over_ethernet (ethernet_arp_main_t * am,
     e = vec_elt_at_index (am->ip4_entries, p[0]);
   else
     {
+      u32 adj_index;
+      ip_adjacency_t * adj;
+      vnet_rewrite_header_t * rw;
+      vlib_sw_interface_t * sw = vlib_get_sup_sw_interface (vm, sw_if_index);
+      vlib_hw_interface_t * hw = vlib_get_hw_interface (vm, sw->hw_if_index);
+      ethernet_interface_t * ethif = ethernet_get_interface (&ethernet_main, sw->hw_if_index);
+      ethernet_header_t eth_rw;
+
+      adj = ip_add_adjacency (lm, /* template */ 0, /* block_size */ 1,
+			      &adj_index);
+
+      adj->lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
+
+      rw = &adj->rewrite_header;
+      rw->sw_if_index = sw_if_index;
+      rw->max_packet_bytes = hw->max_packet_bytes[VLIB_TX];
+      rw->node_index = ip4_rewrite_node.index;
+      rw->next_index = vlib_node_add_next (vm, rw->node_index, hw->output_node_index);
+
+      if (ethif)
+	memcpy (&eth_rw.src_address, ethif->address, sizeof (eth_rw.src_address));
+      memcpy (&eth_rw.dst_address, a->ethernet, sizeof (eth_rw.dst_address));
+      eth_rw.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP);
+
+      vnet_rewrite_set_data (adj[0], &eth_rw, sizeof (eth_rw));
+
+      ip4_add_del_route (im, fib_index, IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD,
+			 a->ip4.data,
+			 /* address_length */ 32,
+			 adj_index);
       mhash_set (&am->ip4_entry_by_key, &k, vec_len (am->ip4_entries),
 		 /* old value */ 0);
       vec_add2 (am->ip4_entries, e, 1);
@@ -291,6 +326,7 @@ arp_input (vlib_main_t * vm,
 	  vlib_buffer_t * p0;
 	  vlib_sw_interface_t * sw_if0;
 	  ethernet_arp_header_t * arp0;
+	  ethernet_header_t * eth0;
 	  ethernet_interface_t * eth_if0;
 	  ip4_address_t * if_addr0;
 	  u32 pi0, error0, next0, sw_if_index0, if_addr_length0;
@@ -336,7 +372,7 @@ arp_input (vlib_main_t * vm,
 	    }
 
 	  /* Learn or update sender's mapping. */
-	  arp_set_ip4_over_ethernet (am, sw_if_index0, &arp0->ip4_over_ethernet[0]);
+	  arp_set_ip4_over_ethernet (vm, am, sw_if_index0, &arp0->ip4_over_ethernet[0]);
 
 	  if (arp0->opcode != clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_request))
 	    {
@@ -356,13 +392,22 @@ arp_input (vlib_main_t * vm,
 	      eth_if0 = &dummy;
 	    }
 
+	  arp0->opcode = clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply);
+
 	  arp0->ip4_over_ethernet[1] = arp0->ip4_over_ethernet[0];
 
 	  memcpy (arp0->ip4_over_ethernet[0].ethernet, eth_if0->address, 6);
 	  clib_mem_unaligned (&arp0->ip4_over_ethernet[0].ip4.data_u32, u32)
 	    = if_addr0->data_u32;
 
-	  vlib_buffer_reset (p0);
+	  /* Fill in ethernet header. */
+	  eth0 = (void *) arp0 - sizeof (eth0[0]);
+
+	  p0->current_data -= sizeof (eth0[0]);
+	  p0->current_length += sizeof (eth0[0]);
+
+	  memcpy (eth0->dst_address, eth0->src_address, 6);
+	  memcpy (eth0->src_address, eth_if0->address, 6);
 
 	  if (next0 != next_index)
 	    {
