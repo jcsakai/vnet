@@ -249,60 +249,90 @@ static clib_error_t *
 ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 {
   ip4_main_t * im4 = &ip4_main;
+  ip_lookup_main_t * lm = &im4->lookup_main;
   clib_error_t * error = 0;
-  u32 address_len, is_ip4;
-  u8 address[32];
+  u32 address_len, is_ip4, table_id, is_del;
+  ip4_address_t address;
   ip_adjacency_t * add_adj = 0;
-  u32 table_id = 0;
-
-  if (unformat (input, "table %d", &table_id))
-    ;
 
   is_ip4 = 0;
-  if (unformat (input, "%U/%d",
-		unformat_ip4_address, address,
-		&address_len))
-    is_ip4 = 1;
+  is_del = 0;
+  table_id = 0;
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "table %d", &table_id))
+	;
+      else if (unformat (input, "del"))
+	is_del = 1;
+      else if (unformat (input, "add"))
+	is_del = 0;
+      else if (unformat (input, "%U/%d",
+			 unformat_ip4_address, &address,
+			 &address_len))
+	{
+	  is_ip4 = 1;
+	  break;
+	}
+      else
+	return unformat_parse_error (input);
+    }
     
-  else
+  if (! is_del)
     {
-      error = clib_error_return (0, "expected destination: %U",
-				 format_unformat_error, input);
-      goto done;
-    }
+      while (1)
+	{
+	  ip_adjacency_t parse_adj;
 
-  while (1)
-    {
-      ip_adjacency_t parse_adj;
+	  if (! unformat_user (input, unformat_ip_adjacency, vm, &parse_adj,
+			       is_ip4 ? ip4_rewrite_node.index : ~0))
+	    break;
 
-      if (! unformat_user (input, unformat_ip_adjacency, vm, &parse_adj,
-			   is_ip4 ? ip4_rewrite_node.index : ~0))
-	break;
+	  vec_add1 (add_adj, parse_adj);
+	}
 
-      vec_add1 (add_adj, parse_adj);
-    }
-
-  if (vec_len (add_adj) == 0)
-    {
-      error = clib_error_return (0, "expected adjacencies");
-      goto done;
+      if (vec_len (add_adj) == 0)
+	{
+	  error = clib_error_return (0, "expected adjacencies");
+	  goto done;
+	}
     }
 
   ASSERT (is_ip4);
 
-  {
-    u32 ai;
-    ip_adjacency_t * adj;
-    ip_lookup_main_t * lm = &im4->lookup_main;
+  if (is_del)
+    {
+      u32 adj_index;
 
-    adj = ip_add_adjacency (lm, add_adj, vec_len (add_adj), &ai);
+      if (is_ip4)
+	{
+	  adj_index = ip4_add_del_route (im4, table_id,
+					 IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
+					 &address, address_len,
+					 /* adj index */ ~0);
+	  if (adj_index == ~0)
+	    {
+	      error = clib_error_return
+		(0, "no such route %U",
+		 format_ip4_address_and_length, &address, address_len);
+	      goto done;
+	    }
+	}
 
-    if (is_ip4)
-      ip4_add_del_route (im4, table_id,
-			 IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
-			 address, address_len,
-			 ai);
-  }
+      ip_del_adjacency (lm, adj_index);
+    }
+  else
+    {
+      u32 ai;
+      ip_adjacency_t * adj;
+
+      adj = ip_add_adjacency (lm, add_adj, vec_len (add_adj), &ai);
+
+      if (is_ip4)
+	ip4_add_del_route (im4, table_id,
+			   IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
+			   &address, address_len,
+			   ai);
+    }
 
  done:
   vec_free (add_adj);
@@ -328,14 +358,11 @@ static VLIB_CLI_COMMAND (ip_route_command) = {
 };
 
 typedef struct {
-  union {
-    u8 address[4];
-    u32 address32;
-  };
+  ip4_address_t address;
 
   PACKED (u32 address_length : 6);
 
-  PACKED (u32 adj_index : 26);
+  PACKED (u32 index : 26);
 } ip4_route_t;
 
 static clib_error_t *
@@ -345,46 +372,79 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   ip4_route_t * routes, * r;
   ip4_fib_t * fib;
   ip_lookup_main_t * lm = &im4->lookup_main;
-  u32 i;
+  uword * results, n_words_per_result, i;
+
+  routes = 0;
+  results = 0;
+  ASSERT (lm->fib_result_n_bytes % sizeof (uword) == 0);
+  n_words_per_result = lm->fib_result_n_bytes / sizeof (uword);
 
   vec_foreach (fib, im4->fibs)
     {
       vlib_cli_output (vm, "Table %d", fib->table_id);
 
-      routes = 0;
+      if (routes)
+	_vec_len (routes) = 0;
+      if (results)
+	_vec_len (results) = 0;
       for (i = 0; i < ARRAY_LEN (fib->adj_index_by_dst_address); i++)
 	{
 	  uword * hash = fib->adj_index_by_dst_address[i];
-	  uword dst, adj_index;
-	  hash_foreach (dst, adj_index, hash, ({
+	  hash_pair_t * p;
+	  hash_foreach_pair (p, hash, ({
 	    ip4_route_t x;
-	    x.address32 = dst;
+	    x.address.data_u32 = p->key;
 	    x.address_length = i;
-	    x.adj_index = adj_index;
+	    if (n_words_per_result > 1)
+	      {
+		x.index = vec_len (results);
+		vec_add (results, p->value, n_words_per_result);
+	      }
+	    else
+	      x.index = p->value[0];
+
 	    vec_add1 (routes, x);
 	  }));
 	}
 
       vec_sort (routes, r1, r2,
-		(word) clib_net_to_host_u32 (r1->address32)
-		- (word) clib_net_to_host_u32 (r2->address32));
+		({ int cmp = ip4_address_compare (&r1->address, &r2->address);
+		  cmp ? cmp : ((int) r1->address_length - (int) r2->address_length); }));
 
       vlib_cli_output (vm, "%=20s%=16s%=16s%=16s",
 		       "Destination", "Packets", "Bytes", "Adjacency");
       vec_foreach (r, routes)
 	{
 	  vlib_counter_t c;
-	  vlib_get_combined_counter (&lm->adjacency_counters, r->adj_index, &c);
+	  uword adj_index, * result = 0;
+	  ip_adjacency_t * adj;
+
+	  adj_index = r->index;
+	  if (n_words_per_result > 1)
+	    {
+	      result = vec_elt_at_index (results, adj_index);
+	      adj_index = result[0];
+	    }
+
+	  vlib_get_combined_counter (&lm->adjacency_counters, adj_index, &c);
 	  vlib_cli_output (vm, "%-20U%16Ld%16Ld %U",
 			   format_ip4_address_and_length,
 			   r->address, r->address_length,
 			   c.packets, c.bytes,
 			   format_ip_adjacency,
-			   vm, lm, r->adj_index);
-	}
+			   vm, lm, adj_index);
 
-      vec_free (routes);
+	  if (result && lm->format_fib_result)
+	    vlib_cli_output (vm, "%20s%U", "", lm->format_fib_result, vm, lm, result, 0);
+
+	  adj = ip_get_adjacency (lm, adj_index);
+	  if (adj->n_adj > 1)
+	    ASSERT (0);
+	}
     }
+
+  vec_free (routes);
+  vec_free (results);
 
   return 0;
 }

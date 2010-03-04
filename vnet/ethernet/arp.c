@@ -356,7 +356,7 @@ arp_input (vlib_main_t * vm,
 	  /* Check that IP address is local and matches incoming interface. */
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 	  if_addr0 = ip4_get_interface_address (im4, sw_if_index0);
-	  if (if_addr0->data_u32 == ~0
+	  if (! ip4_interface_address_is_valid (if_addr0)
 	      || if_addr0->data_u32 != clib_mem_unaligned (&arp0->ip4_over_ethernet[1].ip4.data_u32, u32))
 	    {
 	      error0 = ETHERNET_ARP_ERROR_l3_dst_address_not_local;

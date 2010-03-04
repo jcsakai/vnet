@@ -107,6 +107,8 @@ typedef struct {
      sizeof (uword).  First word is always adjacency index. */
   u32 fib_result_n_bytes;
 
+  format_function_t * format_fib_result;
+
   /* Adjacency packet/byte counters indexed by adjacency index. */
   vlib_combined_counter_main_t adjacency_counters;
 

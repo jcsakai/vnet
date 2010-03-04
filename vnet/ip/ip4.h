@@ -46,7 +46,7 @@ typedef void (ip4_add_del_route_function_t)
    uword opaque,
    ip4_fib_t * fib,
    u32 flags,
-   u8 * address,
+   ip4_address_t * address,
    u32 address_length,
    void * lookup_result);
 
@@ -54,6 +54,18 @@ typedef struct {
   ip4_add_del_route_function_t * function;
   uword function_opaque;
 } ip4_add_del_route_callback_t;
+
+typedef void (ip4_set_interface_address_function_t)
+  (struct ip4_main_t * im,
+   uword opaque,
+   u32 sw_if_index,
+   ip4_address_t * address,
+   u32 address_length);
+
+typedef struct {
+  ip4_set_interface_address_function_t * function;
+  uword function_opaque;
+} ip4_set_interface_address_callback_t;
 
 typedef struct ip4_main_t {
   ip_lookup_main_t lookup_main;
@@ -79,6 +91,9 @@ typedef struct ip4_main_t {
 
   /* Vector of functions to call when routes are added/deleted. */
   ip4_add_del_route_callback_t * add_del_route_callbacks;
+
+  /* Functions to call when interface address changes. */
+  ip4_set_interface_address_callback_t * set_interface_address_callbacks;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
@@ -99,6 +114,10 @@ ip4_get_interface_address (ip4_main_t * im, u32 sw_if_index)
 static always_inline uword
 ip4_get_interface_address_length (ip4_main_t * im, u32 sw_if_index)
 { return vec_elt (im->ip4_address_length_by_sw_if_index, sw_if_index); }
+
+static always_inline uword
+ip4_interface_address_is_valid (ip4_address_t * a)
+{ return a->data_u32 != ~0; }
 
 static always_inline uword
 ip4_destination_matches_route (ip4_main_t * im,
@@ -131,7 +150,7 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 u32 ip4_add_del_route (ip4_main_t * im,
 		       u32 fib_index_or_table_id,
 		       u32 flags,
-		       u8 * address,
+		       ip4_address_t * address,
 		       u32 address_length,
 		       u32 adj_index);
 

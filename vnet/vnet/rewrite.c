@@ -32,8 +32,11 @@ u8 * format_vnet_rewrite (u8 * s, va_list * args)
   vlib_sw_interface_t * si = vlib_get_sw_interface (vm, rw->sw_if_index);
   u32 max_data_bytes = va_arg (*args, u32);
   vlib_node_t * next;
+  uword indent;
 
   next = vlib_get_next_node (vm, rw->node_index, rw->next_index);
+
+  indent = format_get_indent (s);
 
   if (rw->sw_if_index != ~0)
     s = format (s, "%U", format_vlib_sw_interface_name, vm, si);
@@ -41,10 +44,12 @@ u8 * format_vnet_rewrite (u8 * s, va_list * args)
     s = format (s, "%v", next->name);
 
   /* Format rewrite string. */
-  s = format (s, ", %U",
-	      next->format_buffer ? next->format_buffer : format_hex_bytes,
-	      rw->data + max_data_bytes - rw->data_bytes,
-	      rw->data_bytes);
+  if (rw->data_bytes > 0)
+    s = format (s, "\n%U%U",
+		format_white_space, indent,
+		next->format_buffer ? next->format_buffer : format_hex_bytes,
+		rw->data + max_data_bytes - rw->data_bytes,
+		rw->data_bytes);
 
   return s;
 }

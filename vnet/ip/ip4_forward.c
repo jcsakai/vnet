@@ -92,12 +92,12 @@ find_fib_by_table_index_or_id (ip4_main_t * im, u32 table_index_or_id, u32 flags
 u32 ip4_add_del_route (ip4_main_t * im,
 		       u32 fib_index_or_table_id,
 		       u32 flags,
-		       u8 * address,
+		       ip4_address_t * address,
 		       u32 address_length,
 		       u32 adj_index)
 {
   ip4_fib_t * fib = find_fib_by_table_index_or_id (im, fib_index_or_table_id, flags);
-  u32 dst_address = * (u32 *) address;
+  u32 dst_address = address->data_u32;
   uword * hash, * p, old_adj_index, is_del;
   ip4_add_del_route_callback_t * cb;
 
@@ -123,13 +123,15 @@ u32 ip4_add_del_route (ip4_main_t * im,
       if (vec_len (im->add_del_route_callbacks) > 0)
 	{
 	  p = hash_get (hash, dst_address);
-	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, flags,
-			  address, address_length,
-			  p);
+	  if (p != 0)
+	    vec_foreach (cb, im->add_del_route_callbacks)
+	      cb->function (im, cb->function_opaque,
+			    fib, flags,
+			    address, address_length,
+			    p);
 	}
 
+      old_adj_index = ~0;
       hash_unset3 (hash, dst_address, &old_adj_index);
       fib->adj_index_by_dst_address[address_length] = hash;
       adj_index = old_adj_index;
@@ -230,7 +232,7 @@ void ip4_delete_matching_routes (ip4_main_t * im,
 	    (im,
 	     table_index_or_table_id,
 	     IP4_ROUTE_FLAG_DEL | flags,
-	     matching_addresses[i].data,
+	     &matching_addresses[i],
 	     l - 1,
 	     /* adj_index */ ~0);
 
@@ -395,12 +397,122 @@ ip4_lookup (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
+static void
+ip4_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
+			  ip4_main_t * im, u32 fib_index,
+			  ip4_address_t * address, u32 address_length)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip_adjacency_t * adj;
+  u32 adj_index;
+
+  if (address_length < 32)
+    {
+      adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
+			      &adj_index);
+      ip_adjacency_set_arp (vm, adj, sw_if_index);
+
+      ip4_add_del_route (im, fib_index,
+			 IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_FIB_INDEX,
+			 address,
+			 address_length,
+			 adj_index);
+    }
+
+  adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
+			  &adj_index);
+  adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
+
+  ip4_add_del_route (im, fib_index,
+		     IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_FIB_INDEX,
+		     address,
+		     32,
+		     adj_index);
+}
+
+static void
+ip4_del_interface_routes (ip4_main_t * im, u32 fib_index,
+			  ip4_address_t * address, u32 address_length)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  u32 adj_index;
+
+  ASSERT (ip4_interface_address_is_valid (address));
+
+  if (address_length < 32)
+    {
+      adj_index = ip4_add_del_route (im, fib_index,
+				     IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_FIB_INDEX,
+				     address,
+				     address_length,
+				     /* adj_index */ ~0);
+
+      ip_del_adjacency (lm, adj_index);
+    }
+
+  adj_index
+    = ip4_add_del_route (im, fib_index,
+			 IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_FIB_INDEX,
+			 address,
+			 32,
+			 /* adj_index */ ~0);
+
+  ip_del_adjacency (lm, adj_index);
+
+  ip4_delete_matching_routes (im, fib_index, IP4_ROUTE_FLAG_FIB_INDEX,
+			      address->data,
+			      address_length);
+}
+
+void
+ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
+			   ip4_address_t * new_address, uword new_length)
+{
+  ip4_main_t * im = &ip4_main;
+  ip4_address_t old_address;
+  uword old_length;
+
+  ASSERT (sw_if_index < vec_len (im->ip4_address_by_sw_if_index));
+  ASSERT (sw_if_index < vec_len (im->ip4_address_length_by_sw_if_index));
+
+  old_address = im->ip4_address_by_sw_if_index[sw_if_index];
+  old_length = im->ip4_address_length_by_sw_if_index[sw_if_index];
+
+  if (new_address->data_u32 == old_address.data_u32
+      && old_length == new_length)
+    return;
+
+  im->ip4_address_by_sw_if_index[sw_if_index] = new_address[0];
+  im->ip4_address_length_by_sw_if_index[sw_if_index] = new_length;
+
+  if (vlib_sw_interface_is_admin_up (vm, sw_if_index))
+    {
+      u32 fib_index = im->fib_index_by_sw_if_index[sw_if_index];
+
+      if (ip4_interface_address_is_valid (&old_address))
+	ip4_del_interface_routes (im, fib_index, &old_address, old_length);
+
+      if (new_address->data_u32 != ~0)
+	ip4_add_interface_routes (vm, sw_if_index,
+				  im, fib_index, new_address, new_length);
+    }
+
+  {
+    ip4_set_interface_address_callback_t * cb;
+    vec_foreach (cb, im->set_interface_address_callbacks)
+      cb->function (im, cb->function_opaque, sw_if_index,
+		    new_address, new_length);
+  }
+}
+
 static clib_error_t *
 ip4_sw_interface_admin_up_down (vlib_main_t * vm,
 				u32 sw_if_index,
 				u32 flags)
 {
   ip4_main_t * im = &ip4_main;
+  ip4_address_t * a;
+  uword is_admin_up;
 
   /* Fill in lookup tables with default table (0). */
   vec_validate (im->fib_index_by_sw_if_index, sw_if_index);
@@ -410,9 +522,26 @@ ip4_sw_interface_admin_up_down (vlib_main_t * vm,
     ip4_address_t null;
 
     null.data_u32 = ~0;
+    ASSERT (! ip4_interface_address_is_valid (&null));
     vec_validate_init_empty (im->ip4_address_by_sw_if_index, sw_if_index, null);
     vec_validate_init_empty (im->ip4_address_length_by_sw_if_index, sw_if_index, ~0);
   }
+
+  is_admin_up = (flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
+  a = ip4_get_interface_address (im, sw_if_index);
+  if (ip4_interface_address_is_valid (a))
+    {
+      u32 fib_index = im->fib_index_by_sw_if_index[sw_if_index];
+      u32 length = ip4_get_interface_address_length (im, sw_if_index);
+
+      if (is_admin_up)
+	ip4_add_interface_routes (vm, sw_if_index,
+				  im, fib_index,
+				  a, length);
+      else
+	ip4_del_interface_routes (im, fib_index,
+				  a, length);
+    }
 
   return 0;
 }
@@ -778,7 +907,7 @@ ip4_local (vlib_main_t * vm,
   if (node->flags & VLIB_NODE_FLAG_TRACE)
     ip4_forward_next_trace (vm, node, frame, from_adj_indices, n_packets);
 
-while (n_left_from > 0)
+  while (n_left_from > 0)
     {
       to_next_meta =
 	vlib_get_next_frame_meta (vm, node, next, &n_left_to_next, &to_next,
@@ -1399,6 +1528,15 @@ ip4_rewrite (vlib_main_t * vm,
 	  rw_len0 = adj0[0].rewrite_header.data_bytes;
 	  rw_len1 = adj1[0].rewrite_header.data_bytes;
 
+	  vlib_increment_combined_counter (&lm->adjacency_counters,
+					   adj_index0,
+					   /* packet increment */ 0,
+					   /* byte increment */ rw_len0);
+	  vlib_increment_combined_counter (&lm->adjacency_counters,
+					   adj_index1,
+					   /* packet increment */ 0,
+					   /* byte increment */ rw_len1);
+
 	  p0->current_data -= rw_len0;
 	  p1->current_data -= rw_len1;
 
@@ -1451,9 +1589,10 @@ ip4_rewrite (vlib_main_t * vm,
 	  ip4_header_t * ip0;
 	  u32 pi0, rw_len0, len0;
 	  u8 is_slow_path;
-	  u32 next0, checksum0;
+	  u32 adj_index0, next0, checksum0;
       
-	  adj0 = ip_get_adjacency (lm, from[0].adj_index);
+	  adj_index0 = from[0].adj_index;
+	  adj0 = ip_get_adjacency (lm, adj_index0);
       
 	  /* Multi-path should go elsewhere. */
 	  ASSERT (adj0[0].n_adj == 1);
@@ -1488,6 +1627,12 @@ ip4_rewrite (vlib_main_t * vm,
       
 	  /* Update packet buffer attributes/set output interface. */
 	  rw_len0 = adj0[0].rewrite_header.data_bytes;
+
+	  vlib_increment_combined_counter (&lm->adjacency_counters,
+					   adj_index0,
+					   /* packet increment */ 0,
+					   /* byte increment */ rw_len0);
+
 	  p0->current_data -= rw_len0;
 	  len0 = p0->current_length += rw_len0;
 	  p0->sw_if_index[VLIB_TX] = adj0[0].rewrite_header.sw_if_index;

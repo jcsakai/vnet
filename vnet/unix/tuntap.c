@@ -39,7 +39,7 @@
 #include <vlib/vlib.h>
 #include <vlib/unix/unix.h>
 
-#include <vnet/ip/ip.h>		/* for unformat_ip4_address */
+#include <vnet/ip/ip.h>
 
 typedef struct {
   /* Vector of iovecs for readv/writev calls. */
@@ -61,10 +61,6 @@ typedef struct {
   /* Linux interface name for tun device. */
   char * tun_name;
 
-  /* Configurable ip address prefix length for interface. */
-  u32 ip4_address;
-  u32 ip4_address_length;
-
   u32 unix_file_index;
 } tuntap_main_t;
 
@@ -73,10 +69,6 @@ static tuntap_main_t tuntap_main = {
 
   /* Suitable defaults for an Ethernet-like tun/tap device */
   .mtu_bytes = 4096 + 256,
-  
-  /* 192.168.1.1/16 */
-  .ip4_address = 0xC0A80101,
-  .ip4_address_length = 16,
 };
 
 /*
@@ -335,12 +327,7 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
-      if (unformat (input, "ip4 %U/%d",
-		    unformat_ip4_address, &tm->ip4_address,
-		    &tm->ip4_address_length))
-	;
-
-      else if (unformat (input, "mtu %d", &tm->mtu_bytes))
+      if (unformat (input, "mtu %d", &tm->mtu_bytes))
 	;
 
       else
@@ -418,24 +405,6 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
       }
   }
 
-  /* Set ipv4 address, netmask, bring it up */
-  memset (&ifr, 0, sizeof (ifr));
-  strcpy (ifr.ifr_name, tm->tun_name);
-  sin->sin_family = AF_INET;
-  sin->sin_addr.s_addr = htonl (tm->ip4_address);
-  if (ioctl (tm->dev_tap_fd, SIOCSIFADDR, &ifr) < 0)
-    {
-      error = clib_error_return_unix (0, "ioctl SIOCSIFADDR");
-      goto done;
-    }
-    
-  sin->sin_addr.s_addr = htonl (~ pow2_mask (tm->ip4_address_length));
-  if (ioctl (tm->dev_tap_fd, SIOCSIFNETMASK, &ifr) < 0)
-    {
-      error = clib_error_return_unix (0, "ioctl SIOCSIFNETMASK");
-      goto done;
-    }
-
   tm->mtu_buffers = tm->mtu_bytes / VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
   if (tm->mtu_bytes % VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES)
     tm->mtu_buffers += 1;
@@ -483,10 +452,68 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 
 VLIB_CONFIG_FUNCTION (tuntap_config, "tuntap");
 
-/* call in main() to force the linker to load this module... */
+static void
+tuntap_ip4_set_interface_address (ip4_main_t * im,
+				  uword opaque,
+				  u32 sw_if_index,
+				  ip4_address_t * address,
+				  u32 address_length)
+{
+  tuntap_main_t * tm = &tuntap_main;
+  uword is_delete;
+  struct ifreq ifr;
+
+  is_delete = ! ip4_interface_address_is_valid (address);
+
+  /* Use VLIB sw_if_index to select alias device. */
+  memset (&ifr, 0, sizeof (ifr));
+  sprintf (ifr.ifr_name, "%s:%d", tm->tun_name, sw_if_index);
+
+  if (! is_delete)
+    {
+      struct sockaddr_in * sin;
+
+      sin = (struct sockaddr_in *)&ifr.ifr_addr;
+
+      /* Set ipv4 address, netmask. */
+      sin->sin_family = AF_INET;
+      memcpy (&sin->sin_addr.s_addr, address, 4);
+      if (ioctl (tm->dev_tap_fd, SIOCSIFADDR, &ifr) < 0)
+	clib_unix_warning ("ioctl SIOCSIFADDR");
+    
+      sin->sin_addr.s_addr = im->fib_masks[address_length];
+      if (ioctl (tm->dev_tap_fd, SIOCSIFNETMASK, &ifr) < 0)
+	clib_unix_warning ("ioctl SIOCSIFNETMASK");
+    }
+
+  /* get flags, modify to bring up interface... */
+  if (ioctl (tm->dev_tap_fd, SIOCGIFFLAGS, &ifr) < 0)
+    clib_unix_warning ("ioctl SIOCGIFFLAGS");
+
+  if (is_delete)
+    ifr.ifr_flags &= ~(IFF_UP | IFF_RUNNING);
+  else
+    ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
+
+  if (ioctl (tm->dev_tap_fd, SIOCSIFFLAGS, &ifr) < 0)
+    clib_unix_warning ("ioctl SIOCSIFFLAGS");
+}
+
 static clib_error_t *
 tuntap_init (vlib_main_t * vm)
 {
+  clib_error_t * error;
+  ip4_main_t * im = &ip4_main;
+  ip4_set_interface_address_callback_t cb;
+
+  error = vlib_call_init_function (vm, ip4_init);
+  if (error)
+    return error;
+
+  cb.function = tuntap_ip4_set_interface_address;
+  cb.function_opaque = 0;
+  vec_add1 (im->set_interface_address_callbacks, cb);
+
   return 0;
 }
 
