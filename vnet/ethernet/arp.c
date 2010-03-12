@@ -259,7 +259,7 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
       vnet_rewrite_set_data (adj[0], &eth_rw, sizeof (eth_rw));
 
       ip4_add_del_route (im, fib_index, IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD,
-			 a->ip4.data,
+			 &a->ip4,
 			 /* address_length */ 32,
 			 adj_index);
       mhash_set (&am->ip4_entry_by_key, &k, vec_len (am->ip4_entries),
