@@ -137,7 +137,7 @@ typedef enum {
 #define _(n,f) PPP_PROTOCOL_##f = n,
   foreach_ppp_protocol
 #undef _
-} ppe_protocol_type_t;
+} ppp_protocol_t;
 
 /* PPP Link Control Protocol (LCP) and Internet Protocol Control Protocol (IPCP) Codes
 
@@ -163,5 +163,13 @@ _ (12, identification)				\
 _ (13, time_remaining)				\
 _ (14, reset_request)				\
 _ (15, reset_reply)
+
+typedef struct {
+  /* Set to 0xff 0x03 */
+  u8 address, control;
+
+  /* Layer 3 protocol for this packet. */
+  u16 protocol;
+} ppp_header_t;
 
 #endif /* included_vnet_ppp_packet_h */

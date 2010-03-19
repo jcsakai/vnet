@@ -43,9 +43,11 @@ nobase_include_HEADERS +=			\
 ########################################
 # Layer 2 protocol: PPP
 ########################################
-# libvnet_la_SOURCES +=
+libvnet_la_SOURCES +=				\
+  vnet/ppp/ppp.c
 
 nobase_include_HEADERS +=			\
+ vnet/ppp/ppp.h					\
  vnet/ppp/packet.h
 
 ########################################
