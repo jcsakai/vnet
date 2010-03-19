@@ -24,6 +24,8 @@
  */
 
 #include <vnet/ip/ip.h>
+#include <vnet/ethernet/ethernet.h>
+#include <vnet/ppp/ppp.h>
 
 static always_inline void
 ip_poison_adjacencies (ip_adjacency_t * adj, uword n_adj)
@@ -204,9 +206,33 @@ static uword unformat_ip_lookup_next (unformat_input_t * input, va_list * args)
 void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index)
 {
   vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
-  adj->lookup_next_index = IP_LOOKUP_NEXT_ARP;
+  ip_lookup_next_t n;
+  u32 node_index;
+
+  if (hw->hw_class == &ethernet_hw_interface_class)
+    {
+      n = IP_LOOKUP_NEXT_ARP;
+      node_index = ip4_arp_node.index;
+    }
+  else
+    {
+      n = IP_LOOKUP_NEXT_REWRITE;
+      node_index = ip4_rewrite_node.index;
+    }
+
+  adj->lookup_next_index = n;
   adj->rewrite_header.sw_if_index = sw_if_index;
-  adj->rewrite_header.next_index = vlib_node_add_next (vm, ip4_arp_node.index, hw->output_node_index);
+  adj->rewrite_header.node_index = node_index;
+  adj->rewrite_header.next_index = vlib_node_add_next (vm, node_index, hw->output_node_index);
+
+  if (n == IP_LOOKUP_NEXT_REWRITE)
+    {
+      if (hw->hw_class == &ppp_hw_interface_class)
+	ppp_set_adjacency (&adj->rewrite_header, sizeof (adj->rewrite_data),
+			   PPP_PROTOCOL_ip4);
+      else
+	ASSERT (0);
+    }
 }
 
 uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
