@@ -39,6 +39,7 @@ vlib_hw_interface_class_t ethernet_hw_interface_class = {
   .link_up_down_function = ethernet_interface_link_up_down,
   .hw_address_len = 6,
   .unformat_hw_address = unformat_ethernet_address,
+  .unformat_header = unformat_ethernet_header,
 };
 
 uword unformat_ethernet_interface (unformat_input_t * input, va_list * args)
