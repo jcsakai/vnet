@@ -209,7 +209,7 @@ void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_ind
   ip_lookup_next_t n;
   u32 node_index;
 
-  if (hw->hw_class == &ethernet_hw_interface_class)
+  if (is_ethernet_interface (hw->hw_if_index))
     {
       n = IP_LOOKUP_NEXT_ARP;
       node_index = ip4_arp_node.index;
@@ -227,7 +227,7 @@ void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_ind
 
   if (n == IP_LOOKUP_NEXT_REWRITE)
     {
-      if (hw->hw_class == &ppp_hw_interface_class)
+      if (is_ppp_interface (vm, hw->hw_if_index))
 	ppp_set_adjacency (&adj->rewrite_header, sizeof (adj->rewrite_data),
 			   PPP_PROTOCOL_ip4);
       else

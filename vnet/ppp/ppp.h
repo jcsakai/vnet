@@ -98,4 +98,12 @@ ppp_setup_node (vlib_main_t * vm, u32 node_index)
   pn->unformat_edit = unformat_pg_ppp_header;
 }
 
+static always_inline uword
+is_ppp_interface (vlib_main_t * vm, u32 hw_if_index)
+{
+  vlib_hw_interface_t * hi = vlib_get_hw_interface (vm, hw_if_index);
+  vlib_hw_interface_class_t * c = vlib_get_hw_interface_class (vm, hi->hw_class_index);
+  return ! strcmp (c->name, ppp_hw_interface_class.name);
+}
+
 #endif /* included_ppp_h */

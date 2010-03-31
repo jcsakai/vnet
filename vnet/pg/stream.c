@@ -71,24 +71,19 @@ static u8 * format_pg_interface_name (u8 * s, va_list * args)
   u32 if_index = va_arg (*args, u32);
   pg_interface_t * pi;
 
-  s = format (s, "pg/stream");
   pi = vec_elt_at_index (pg->interfaces, if_index);
-  if (pi->stream_index != ~0)
-    {
-      pg_stream_t * st = vec_elt_at_index (pg->streams, pi->stream_index);
-      s = format (s, "-%v", st->name);
-    }
+  s = format (s, "pg/stream-%d", pi->stream_index);
 
   return s;
 }
 
-static vlib_device_class_t pg_dev_class = {
+static VLIB_DEVICE_CLASS (pg_dev_class) = {
   .name = "pg",
   .tx_function = pg_output,
   .format_device_name = format_pg_interface_name,
 };
 
-static vlib_hw_interface_class_t pg_interface_class = {
+static VLIB_HW_INTERFACE_CLASS (pg_interface_class) = {
   .name = "Packet generator",
 };
 
@@ -103,6 +98,8 @@ u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
     {
       i = pg->free_interfaces[l - 1];
       _vec_len (pg->free_interfaces) = l - 1;
+      pi = vec_elt_at_index (pg->interfaces, i);
+      pi->stream_index = stream_index;
     }    
   else
     {
@@ -111,8 +108,8 @@ u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
 
       pi->stream_index = stream_index;
       pi->hw_if_index = vlib_register_interface (vm,
-						 &pg_dev_class, i,
-						 &pg_interface_class, 0);
+						 pg_dev_class.index, i,
+						 pg_interface_class.index, stream_index);
       hi = vlib_get_hw_interface (vm, pi->hw_if_index);
       pi->sw_if_index = hi->sw_if_index;
     }

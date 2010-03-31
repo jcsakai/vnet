@@ -32,7 +32,7 @@ ethernet_interface_link_up_down (vlib_main_t * vm,
 				 u32 hw_if_index,
 				 u32 flags);
 
-vlib_hw_interface_class_t ethernet_hw_interface_class = {
+VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
   .name = "Ethernet",
   .format_address = format_ethernet_address,
   .format_header = format_ethernet_header_with_length,
@@ -47,13 +47,14 @@ uword unformat_ethernet_interface (unformat_input_t * input, va_list * args)
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
   u32 * result = va_arg (*args, u32 *);
   u32 hw_if_index;
-  vlib_hw_interface_t * hw_if;
+  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_interface_t * eif;
 
   if (! unformat_user (input, unformat_vlib_hw_interface, vm, &hw_if_index))
     return 0;
 
-  hw_if = vlib_get_hw_interface (vm, hw_if_index);
-  if (hw_if->hw_class == &ethernet_hw_interface_class)
+  eif = ethernet_get_interface (em, hw_if_index);
+  if (eif)
     {
       *result =  hw_if_index;
       return 1;
@@ -87,7 +88,7 @@ static void ethernet_interface_update_media (ethernet_interface_t * ei,
 
 clib_error_t *
 ethernet_register_interface (vlib_main_t * vm,
-			     vlib_device_class_t * dev_class,
+			     u32 dev_class_index,
 			     u32 dev_instance,
 			     u8 * address,
 			     ethernet_phy_t * phy,
@@ -113,8 +114,8 @@ ethernet_register_interface (vlib_main_t * vm,
     }
 
   hw_if_index = vlib_register_interface (vm,
-					 dev_class, dev_instance,
-					 &ethernet_hw_interface_class,
+					 dev_class_index, dev_instance,
+					 ethernet_hw_interface_class.index,
 					 ei - em->interfaces);
   *hw_if_index_return = hw_if_index;
 
