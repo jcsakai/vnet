@@ -25,6 +25,7 @@
 
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ppp/ppp.h>
 
 typedef struct {
   u8 packet_data[64];
@@ -411,6 +412,8 @@ static clib_error_t * ip4_init (vlib_main_t * vm)
 
   ethernet_register_input_type (vm, ETHERNET_TYPE_IP,
 				ip4_input_node.index);
+  ppp_register_input_protocol (vm, PPP_PROTOCOL_ip4,
+			       ip4_input_node.index);
 
   {
     pg_node_t * pn;

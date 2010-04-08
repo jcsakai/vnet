@@ -32,6 +32,13 @@
 
 extern vlib_hw_interface_class_t ppp_hw_interface_class;
 
+typedef enum {
+#define ppp_error(n,s) PPP_ERROR_##n,
+#include <vnet/ppp/error.def>
+#undef ppp_error
+  PPP_N_ERROR,
+} ppp_error_t;
+
 typedef struct {
   /* Name (a c string). */
   char * name;
@@ -97,5 +104,10 @@ ppp_setup_node (vlib_main_t * vm, u32 node_index)
   n->unformat_buffer = unformat_ppp_header;
   pn->unformat_edit = unformat_pg_ppp_header;
 }
+
+void
+ppp_register_input_protocol (vlib_main_t * vm,
+			     ppp_protocol_t protocol,
+			     u32 node_index);
 
 #endif /* included_ppp_h */

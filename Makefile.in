@@ -63,11 +63,11 @@ am_libvnet_la_OBJECTS = vnet/vnet/rewrite.lo vnet/ethernet/arp.lo \
 	vnet/ethernet/cli.lo vnet/ethernet/format.lo \
 	vnet/ethernet/init.lo vnet/ethernet/interface.lo \
 	vnet/ethernet/node.lo vnet/ethernet/pg.lo vnet/ethernet/phy.lo \
-	vnet/ppp/ppp.lo vnet/ip/format.lo vnet/ip/ip4_cli.lo \
-	vnet/ip/ip4_format.lo vnet/ip/ip4_forward.lo \
-	vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo vnet/ip/ip_checksum.lo \
-	vnet/ip/ip_init.lo vnet/ip/lookup.lo vnet/ip/tcp_format.lo \
-	vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
+	vnet/ppp/node.lo vnet/ppp/pg.lo vnet/ppp/ppp.lo \
+	vnet/ip/format.lo vnet/ip/ip4_cli.lo vnet/ip/ip4_format.lo \
+	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
+	vnet/ip/ip_checksum.lo vnet/ip/ip_init.lo vnet/ip/lookup.lo \
+	vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
 	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
 	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
 	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
@@ -262,20 +262,21 @@ libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/arp.c \
 	vnet/ethernet/cli.c vnet/ethernet/format.c \
 	vnet/ethernet/init.c vnet/ethernet/interface.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
-	vnet/ppp/ppp.c vnet/ip/format.c vnet/ip/ip4_cli.c \
-	vnet/ip/ip4_format.c vnet/ip/ip4_forward.c vnet/ip/ip4_input.c \
-	vnet/ip/ip4_pg.c vnet/ip/ip_checksum.c vnet/ip/ip.h \
-	vnet/ip/ip_init.c vnet/ip/lookup.c vnet/ip/tcp_format.c \
-	vnet/ip/tcp_init.c vnet/ip/tcp_pg.c vnet/ip/tcp_udp_lookup.c \
-	vnet/ip/udp_format.c vnet/ip/udp_init.c vnet/ip/udp_pg.c \
-	vnet/pg/cli.c vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c \
-	vnet/pg/output.c vnet/pg/stream.c \
-	vnet/devices/ethernet_phy_bcm.c vnet/unix/tuntap.c
+	vnet/ppp/node.c vnet/ppp/pg.c vnet/ppp/ppp.c vnet/ip/format.c \
+	vnet/ip/ip4_cli.c vnet/ip/ip4_format.c vnet/ip/ip4_forward.c \
+	vnet/ip/ip4_input.c vnet/ip/ip4_pg.c vnet/ip/ip_checksum.c \
+	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c \
+	vnet/ip/tcp_format.c vnet/ip/tcp_init.c vnet/ip/tcp_pg.c \
+	vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
+	vnet/ip/udp_init.c vnet/ip/udp_pg.c vnet/pg/cli.c \
+	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
+	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
+	vnet/unix/tuntap.c
 nobase_include_HEADERS = vnet/vnet/rewrite.h vnet/ethernet/error.def \
 	vnet/ethernet/ethernet.h vnet/ethernet/packet.h \
 	vnet/ethernet/phy.h vnet/ethernet/phy_reg.h \
-	vnet/ethernet/types.def vnet/ppp/ppp.h vnet/ppp/packet.h \
-	vnet/ip/format.h vnet/ip/ip.h vnet/ip/ip4.h \
+	vnet/ethernet/types.def vnet/ppp/error.def vnet/ppp/ppp.h \
+	vnet/ppp/packet.h vnet/ip/format.h vnet/ip/ip.h vnet/ip/ip4.h \
 	vnet/ip/ip4_error.h vnet/ip/ip4_packet.h vnet/ip/ip6_packet.h \
 	vnet/ip/lookup.h vnet/ip/ip_packet.h vnet/ip/ports.def \
 	vnet/ip/protocols.def vnet/ip/tcp_packet.h \
@@ -385,6 +386,10 @@ vnet/ppp/$(am__dirstamp):
 vnet/ppp/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/ppp/$(DEPDIR)
 	@: > vnet/ppp/$(DEPDIR)/$(am__dirstamp)
+vnet/ppp/node.lo: vnet/ppp/$(am__dirstamp) \
+	vnet/ppp/$(DEPDIR)/$(am__dirstamp)
+vnet/ppp/pg.lo: vnet/ppp/$(am__dirstamp) \
+	vnet/ppp/$(DEPDIR)/$(am__dirstamp)
 vnet/ppp/ppp.lo: vnet/ppp/$(am__dirstamp) \
 	vnet/ppp/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/$(am__dirstamp):
@@ -545,6 +550,10 @@ mostlyclean-compile:
 	-rm -f vnet/pg/output.lo
 	-rm -f vnet/pg/stream.$(OBJEXT)
 	-rm -f vnet/pg/stream.lo
+	-rm -f vnet/ppp/node.$(OBJEXT)
+	-rm -f vnet/ppp/node.lo
+	-rm -f vnet/ppp/pg.$(OBJEXT)
+	-rm -f vnet/ppp/pg.lo
 	-rm -f vnet/ppp/ppp.$(OBJEXT)
 	-rm -f vnet/ppp/ppp.lo
 	-rm -f vnet/unix/tuntap.$(OBJEXT)
@@ -587,6 +596,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/input.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/output.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/stream.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/node.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/ppp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/tuntap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/rewrite.Plo@am__quote@
