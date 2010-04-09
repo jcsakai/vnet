@@ -32,6 +32,13 @@
 
 extern vlib_hw_interface_class_t ppp_hw_interface_class;
 
+typedef enum {
+#define ppp_error(n,s) PPP_ERROR_##n,
+#include <vnet/ppp/error.def>
+#undef ppp_error
+  PPP_N_ERROR,
+} ppp_error_t;
+
 typedef struct {
   /* Name (a c string). */
   char * name;
@@ -105,5 +112,10 @@ is_ppp_interface (vlib_main_t * vm, u32 hw_if_index)
   vlib_hw_interface_class_t * c = vlib_get_hw_interface_class (vm, hi->hw_class_index);
   return ! strcmp (c->name, ppp_hw_interface_class.name);
 }
+
+void
+ppp_register_input_protocol (vlib_main_t * vm,
+			     ppp_protocol_t protocol,
+			     u32 node_index);
 
 #endif /* included_ppp_h */
