@@ -327,7 +327,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 
   if (is_del)
     {
-      u32 adj_index;
+      u32 adj_index = 0;
 
       if (is_ip4)
 	{
