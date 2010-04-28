@@ -52,9 +52,9 @@ u8 * format_tcp_header (u8 * s, va_list * args)
   indent = format_get_indent (s);
   indent += 2;
 
-  s = format (s, "TCP: %U -> %U",
-	      format_tcp_udp_port, tcp->ports.src,
-	      format_tcp_udp_port, tcp->ports.dst);
+  s = format (s, "TCP: %d -> %d",
+	      clib_net_to_host_u16 (tcp->ports.src),
+	      clib_net_to_host_u16 (tcp->ports.dst));
 
   data_offset_and_flags = clib_net_to_host_u16 (tcp->data_offset_and_flags);
   s = format (s, "\n%Useq. tx 0x%08x rx 0x%08x",
