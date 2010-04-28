@@ -248,8 +248,7 @@ ip4_lookup (vlib_main_t * vm,
 {
   ip4_main_t * im = &ip4_main;
   vlib_combined_counter_main_t * cm = &im->lookup_main.adjacency_counters;
-  u32 n_left_from, n_left_to_next, * from;
-  ip_buffer_and_adjacency_t * to_next;
+  u32 n_left_from, n_left_to_next, * from, * to_next;
   ip_lookup_next_t next;
 
   from = vlib_frame_vector_args (frame);
@@ -266,6 +265,7 @@ ip4_lookup (vlib_main_t * vm,
 	  vlib_buffer_t * p0, * p1;
 	  u32 pi0, pi1, adj_index0, adj_index1, wrong_next;
 	  ip_lookup_next_t next0, next1;
+	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_header_t * ip0, * ip1;
 
 	  /* Prefetch next iteration. */
@@ -279,8 +279,8 @@ ip4_lookup (vlib_main_t * vm,
 	    vlib_prefetch_buffer_header (p3, LOAD);
 	  }
 
-	  pi0 = from[0];
-	  pi1 = from[1];
+	  pi0 = to_next[0] = from[0];
+	  pi1 = to_next[1] = from[1];
 
 	  p0 = vlib_get_buffer (vm, pi0);
 	  p1 = vlib_get_buffer (vm, pi1);
@@ -291,15 +291,15 @@ ip4_lookup (vlib_main_t * vm,
 	  next0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, &adj_index0);
 	  next1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, &adj_index1);
 
-	  to_next[0].buffer = pi0;
-	  to_next[0].adj_index = adj_index0;
-	  to_next[1].buffer = pi1;
-	  to_next[1].adj_index = adj_index1;
+	  i0 = vlib_buffer_get_opaque (p0);
+	  i1 = vlib_buffer_get_opaque (p1);
+
+	  i0->dst_adj_index = adj_index0;
+	  i1->dst_adj_index = adj_index1;
 
 	  vlib_buffer_increment_two_counters (vm, cm,
 					      adj_index0, adj_index1,
 					      p0, p1);
-
 	  from += 2;
 	  to_next += 2;
 	  n_left_to_next -= 2;
@@ -308,41 +308,29 @@ ip4_lookup (vlib_main_t * vm,
 	  wrong_next = (next0 != next) + 2*(next1 != next);
 	  if (PREDICT_FALSE (wrong_next != 0))
 	    {
-	      ip_buffer_and_adjacency_t * a;
-
 	      switch (wrong_next)
 		{
 		case 1:
 		  /* A B A */
-		  to_next[-2].buffer = pi1;
-		  to_next[-2].adj_index = adj_index1;
+		  to_next[-2] = pi1;
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  a = vlib_set_next_frame (vm, node, next0);
-		  a[0].buffer = pi0;
-		  a[0].adj_index = adj_index0;
+		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
 		  break;
 
 		case 2:
 		  /* A A B */
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  a = vlib_set_next_frame (vm, node, next1);
-		  a[0].buffer = pi1;
-		  a[0].adj_index = adj_index1;
+		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
 		  break;
 
 		case 3:
 		  /* A B C */
 		  to_next -= 2;
 		  n_left_to_next += 2;
-		  a = vlib_set_next_frame (vm, node, next0);
-		  a[0].buffer = pi0;
-		  a[0].adj_index = adj_index0;
-		  a = vlib_set_next_frame (vm, node, next1);
-		  a[0].buffer = pi1;
-		  a[0].adj_index = adj_index1;
-
+		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
+		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
 		  if (next0 == next1)
 		    {
 		      /* A B B */
@@ -358,6 +346,7 @@ ip4_lookup (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
+	  ip_buffer_opaque_t * i0;
 	  u32 pi0, adj_index0;
 	  ip_lookup_next_t next0;
 
@@ -368,8 +357,11 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  next0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, &adj_index0);
 
-	  to_next[0].buffer = pi0;
-	  to_next[0].adj_index = adj_index0;
+	  to_next[0] = pi0;
+
+	  i0 = vlib_buffer_get_opaque (p0);
+
+	  i0->dst_adj_index = adj_index0;
 
 	  vlib_buffer_increment_counter (vm, cm, adj_index0, p0);
 	  from += 1;
@@ -384,8 +376,7 @@ ip4_lookup (vlib_main_t * vm,
 	      next = next0;
 	      vlib_get_next_frame (vm, node, next,
 				   to_next, n_left_to_next);
-	      to_next[0].buffer = pi0;
-	      to_next[0].adj_index = adj_index0;
+	      to_next[0] = pi0;
 	      to_next += 1;
 	      n_left_to_next -= 1;
 	    }
@@ -672,8 +663,7 @@ ip4_forward_next_trace (vlib_main_t * vm,
 			vlib_node_runtime_t * node,
 			vlib_frame_t * frame)
 {
-  ip_buffer_and_adjacency_t * from;
-  u32 n_left;
+  u32 * from, n_left;
 
   n_left = frame->n_vectors;
   from = vlib_frame_vector_args (frame);
@@ -682,22 +672,26 @@ ip4_forward_next_trace (vlib_main_t * vm,
     {
       u32 bi0, bi1;
       vlib_buffer_t * b0, * b1;
+      ip_buffer_opaque_t * i0, * i1;
       ip4_forward_next_trace_t * t0, * t1;
 
       /* Prefetch next iteration. */
-      vlib_prefetch_buffer_with_index (vm, from[2].buffer, LOAD);
-      vlib_prefetch_buffer_with_index (vm, from[3].buffer, LOAD);
+      vlib_prefetch_buffer_with_index (vm, from[2], LOAD);
+      vlib_prefetch_buffer_with_index (vm, from[3], LOAD);
 
-      bi0 = from[0].buffer;
-      bi1 = from[1].buffer;
+      bi0 = from[0];
+      bi1 = from[1];
 
       b0 = vlib_get_buffer (vm, bi0);
       b1 = vlib_get_buffer (vm, bi1);
 
+      i0 = vlib_buffer_get_opaque (b0);
+      i1 = vlib_buffer_get_opaque (b1);
+
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
-	  t0->adj_index = from[0].adj_index;
+	  t0->adj_index = i0->dst_adj_index;
 	  memcpy (t0->packet_data,
 		  vlib_buffer_get_current (b0),
 		  sizeof (t0->packet_data));
@@ -705,7 +699,7 @@ ip4_forward_next_trace (vlib_main_t * vm,
       if (b1->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t1 = vlib_add_trace (vm, node, b1, sizeof (t1[0]));
-	  t1->adj_index = from[1].adj_index;
+	  t1->adj_index = i1->dst_adj_index;
 	  memcpy (t1->packet_data,
 		  vlib_buffer_get_current (b1),
 		  sizeof (t1->packet_data));
@@ -718,16 +712,18 @@ ip4_forward_next_trace (vlib_main_t * vm,
     {
       u32 bi0;
       vlib_buffer_t * b0;
+      ip_buffer_opaque_t * i0;
       ip4_forward_next_trace_t * t0;
 
-      bi0 = from[0].buffer;
+      bi0 = from[0];
 
       b0 = vlib_get_buffer (vm, bi0);
+      i0 = vlib_buffer_get_opaque (b0);
 
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
-	  t0->adj_index = from[0].adj_index;
+	  t0->adj_index = i0->dst_adj_index;
 	  memcpy (t0->packet_data,
 		  vlib_buffer_get_current (b0),
 		  sizeof (t0->packet_data));
@@ -743,12 +739,12 @@ ip4_drop_or_punt (vlib_main_t * vm,
 		  vlib_frame_t * frame,
 		  ip4_error_t error_code)
 {
-  ip_buffer_and_adjacency_t * v = vlib_frame_vector_args (frame);
+  u32 * buffers = vlib_frame_vector_args (frame);
   uword n_packets = frame->n_vectors;
 
   vlib_error_drop_buffers (vm, node,
-			   &v[0].buffer,
-			   /* stride */ &v[1].buffer - &v[0].buffer,
+			   buffers,
+			   /* stride */ 1,
 			   n_packets,
 			   /* next */ 0,
 			   ip4_input_node.index,
@@ -781,7 +777,7 @@ ip4_miss (vlib_main_t * vm,
 static VLIB_REGISTER_NODE (ip4_drop_node) = {
   .function = ip4_drop,
   .name = "ip4-drop",
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
+  .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
 
@@ -794,7 +790,7 @@ static VLIB_REGISTER_NODE (ip4_drop_node) = {
 static VLIB_REGISTER_NODE (ip4_punt_node) = {
   .function = ip4_punt,
   .name = "ip4-punt",
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
+  .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
 
@@ -807,7 +803,7 @@ static VLIB_REGISTER_NODE (ip4_punt_node) = {
 static VLIB_REGISTER_NODE (ip4_miss_node) = {
   .function = ip4_miss,
   .name = "ip4-miss",
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
+  .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
 
@@ -881,45 +877,41 @@ ip4_local (vlib_main_t * vm,
 	   vlib_node_runtime_t * node,
 	   vlib_frame_t * frame)
 {
-#if 0
   ip_lookup_main_t * lm = &ip4_main.lookup_main;
-  ip_local_next_t next;
-  ip_buffer_and_adjacency_t * from, * to_next;
-  u32 n_left_from, n_left_to_next;
+  ip_local_next_t next_index;
+  u32 * from, * to_next, n_left_from, n_left_to_next;
   vlib_error_t unknown_protocol, tcp_checksum, udp_checksum, udp_length;
+  vlib_error_t * to_next_error, to_next_error_dummy[2];
 
   unknown_protocol = vlib_error_set (ip4_input_node.index, IP4_ERROR_UNKNOWN_PROTOCOL);
-  tcp_checksum = vlib_error_set (ip4_input_node.index, IP4_ERROR_UNKNOWN_PROTOCOL);
-  unknown_protocol = vlib_error_set (ip4_input_node.index, IP4_ERROR_UNKNOWN_PROTOCOL);
-  unknown_protocol = vlib_error_set (ip4_input_node.index, IP4_ERROR_UNKNOWN_PROTOCOL);
-
-  tcp_checksum.node = ip4_input_node.index;
-  tcp_checksum.code = IP4_ERROR_TCP_CHECKSUM;
-  udp_checksum.node = ip4_input_node.index;
-  udp_checksum.code = IP4_ERROR_UDP_CHECKSUM;
-  udp_length.node = ip4_input_node.index;
-  udp_length.code = IP4_ERROR_UDP_LENGTH;
+  tcp_checksum = vlib_error_set (ip4_input_node.index, IP4_ERROR_TCP_CHECKSUM);
+  udp_checksum = vlib_error_set (ip4_input_node.index, IP4_ERROR_UDP_CHECKSUM);
+  udp_length = vlib_error_set (ip4_input_node.index, IP4_ERROR_UDP_LENGTH);
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
-  next = node->cached_next_index;
+  next_index = node->cached_next_index;
   
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip4_forward_next_trace (vm, node, frame, from_adj_indices, n_packets);
+    ip4_forward_next_trace (vm, node, frame);
 
   while (n_left_from > 0)
     {
-      to_next_meta =
-	vlib_get_next_frame_meta (vm, node, next, &n_left_to_next, &to_next,
-				sizeof (to_next_meta[0]));
+      vlib_get_next_frame_transpose (vm, node, next_index,
+				     to_next, n_left_to_next);
+      to_next_error = (next_index < IP_LOCAL_N_NEXT
+		       ? vlib_error_for_transpose_buffer_pointer (to_next)
+		       : &to_next_error_dummy[0]);
 
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
+	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_header_t * ip0, * ip1;
 	  udp_header_t * udp0, * udp1;
-	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0, meta0;
-	  u32 pi1, ip_len1, udp_len1, flags1, adj_index1, next1, meta1;
+	  vlib_error_t error0, error1;
+	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
+	  u32 pi1, ip_len1, udp_len1, flags1, adj_index1, next1;
 	  i32 len_diff0, len_diff1;
 	  u8 is_error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
 	  u8 is_error1, is_udp1, is_tcp_udp1, good_tcp_udp1, proto1;
@@ -927,18 +919,22 @@ ip4_local (vlib_main_t * vm,
       
 	  pi0 = to_next[0] = from[0];
 	  pi1 = to_next[1] = from[1];
-	  adj_index0 = from_adj_indices[0];
-	  adj_index1 = from_adj_indices[1];
 	  from += 2;
-	  from_adj_indices += 2;
 	  n_left_from -= 2;
 	  to_next += 2;
 	  n_left_to_next -= 2;
       
 	  p0 = vlib_get_buffer (vm, pi0);
 	  p1 = vlib_get_buffer (vm, pi1);
+
+	  i0 = vlib_buffer_get_opaque (p0);
+	  i1 = vlib_buffer_get_opaque (p1);
+
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
+
+	  adj_index0 = i0->dst_adj_index;
+	  adj_index1 = i1->dst_adj_index;
 
 	  proto0 = ip0->protocol;
 	  proto1 = ip1->protocol;
@@ -972,9 +968,6 @@ ip4_local (vlib_main_t * vm,
 	  len_diff0 = is_udp0 ? len_diff0 : 0;
 	  len_diff1 = is_udp1 ? len_diff1 : 0;
 
-	  p0->data_end_pad_bytes += len_diff0;
-	  p1->data_end_pad_bytes += len_diff1;
-
 	  if (PREDICT_FALSE (! (is_tcp_udp0 & is_tcp_udp1
 				& good_tcp_udp0 & good_tcp_udp1)))
 	    {
@@ -999,87 +992,83 @@ ip4_local (vlib_main_t * vm,
 	  good_tcp_udp0 &= len_diff0 >= 0;
 	  good_tcp_udp1 &= len_diff1 >= 0;
 
-	  meta0 = meta1 = unknown_protocol.error32;
+	  error0 = error1 = unknown_protocol;
 
-	  meta0 = len_diff0 < 0 ? udp_length.error32 : meta0;
-	  meta1 = len_diff1 < 0 ? udp_length.error32 : meta1;
+	  error0 = len_diff0 < 0 ? udp_length : error0;
+	  error1 = len_diff1 < 0 ? udp_length : error1;
 
-	  ASSERT (tcp_checksum.error32 + 1 == udp_checksum.error32);
-	  meta0 = (is_tcp_udp0 && ! good_tcp_udp0
-		   ? tcp_checksum.error32 + is_udp0
-		   : meta0);
-	  meta1 = (is_tcp_udp1 && ! good_tcp_udp1
-		   ? tcp_checksum.error32 + is_udp1
-		   : meta1);
+	  ASSERT (tcp_checksum + 1 == udp_checksum);
+	  error0 = (is_tcp_udp0 && ! good_tcp_udp0
+		    ? tcp_checksum + is_udp0
+		    : error0);
+	  error1 = (is_tcp_udp1 && ! good_tcp_udp1
+		    ? tcp_checksum + is_udp1
+		    : error1);
 
-	  is_error0 = meta0 != unknown_protocol.error32;
-	  is_error1 = meta1 != unknown_protocol.error32;
+	  is_error0 = error0 != unknown_protocol;
+	  is_error1 = error1 != unknown_protocol;
 
 	  next0 = lm->local_next_by_ip_protocol[proto0];
 	  next1 = lm->local_next_by_ip_protocol[proto1];
 
- 	  meta0 = (is_error0 || next0 == IP_LOCAL_NEXT_PUNT
-		   ? meta0 : adj_index0);
- 	  meta1 = (is_error1 || next1 == IP_LOCAL_NEXT_PUNT
-		   ? meta1 : adj_index1);
-
 	  next0 = is_error0 ? IP_LOCAL_NEXT_DROP : next0;
 	  next1 = is_error1 ? IP_LOCAL_NEXT_DROP : next1;
 
-	  to_next_meta[0] = meta0;
-	  to_next_meta[1] = meta1;
-	  to_next_meta += 2;
+	  to_next_error[0] = error0;
+	  to_next_error[is_error0] = error1;
+	  to_next_error += is_error0 + is_error1;
 
-	  enqueue_code = (next0 != next) + 2*(next1 != next);
+	  enqueue_code = (next0 != next_index) + 2*(next1 != next_index);
 
 	  if (PREDICT_FALSE (enqueue_code != 0))
 	    {
-	      u32 * e;
+	      u32 * b;
 
 	      switch (enqueue_code)
 		{
 		case 1:
 		  /* A B A */
 		  to_next[-2] = pi1;
-		  to_next_meta[-2] = meta1;
 		  to_next -= 1;
-		  to_next_meta -= 1;
 		  n_left_to_next += 1;
-		  e = vlib_set_next_frame_meta (vm, node, next0, pi0,
-					      sizeof (e[0]));
-		  e[0] = meta0;
+		  b = vlib_set_next_frame (vm, node, next0);
+		  b[0] = pi0;
+		  if (is_error0)
+		    *vlib_error_for_transpose_buffer_pointer (b) = error0;
 		  break;
 
 		case 2:
 		  /* A A B */
 		  to_next -= 1;
-		  to_next_meta -= 1;
 		  n_left_to_next += 1;
-		  e = vlib_set_next_frame_meta (vm, node, next1, pi1,
-					      sizeof (e[0]));
-		  e[0] = meta1;
+		  b = vlib_set_next_frame (vm, node, next1);
+		  b[0] = pi1;
+		  if (is_error1)
+		    *vlib_error_for_transpose_buffer_pointer (b) = error1;
 		  break;
 
 		case 3:
+		  /* A B B or A B C */
 		  to_next -= 2;
-		  to_next_meta -= 2;
 		  n_left_to_next += 2;
-		  e = vlib_set_next_frame_meta (vm, node, next0, pi0,
-					      sizeof (e[0]));
-		  e[0] = meta0;
+		  b = vlib_set_next_frame (vm, node, next0);
+		  b[0] = pi0;
+		  if (is_error0)
+		    *vlib_error_for_transpose_buffer_pointer (b) = error0;
 
-		  e = vlib_set_next_frame_meta (vm, node, next1, pi1,
-					      sizeof (e[0]));
-		  e[0] = meta1;
+		  b = vlib_set_next_frame (vm, node, next1);
+		  b[0] = pi1;
+		  if (is_error1)
+		    *vlib_error_for_transpose_buffer_pointer (b) = error1;
 
 		  if (next0 == next1)
 		    {
-		      vlib_put_next_frame (vm, node, next, n_left_to_next);
-		      next = next1;
-		      to_next_meta
-			= vlib_get_next_frame_meta (vm, node, next,
-						  &n_left_to_next, &to_next,
-						  sizeof (to_next_meta[0]));
+		      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+		      next_index = next1;
+		      vlib_get_next_frame_transpose (vm, node, next_index, to_next, n_left_to_next);
+		      to_next_error = (next_index < IP_LOCAL_N_NEXT
+				       ? vlib_error_for_transpose_buffer_pointer (to_next)
+				       : &to_next_error_dummy[0]);
 		    }
 		  break;
 		}
@@ -1090,21 +1079,25 @@ ip4_local (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
+	  ip_buffer_opaque_t * i0;
 	  udp_header_t * udp0;
-	  u32 pi0, next0, ip_len0, udp_len0, flags0, adj_index0, meta0;
+	  vlib_error_t error0;
+	  u32 pi0, next0, ip_len0, udp_len0, flags0, adj_index0;
 	  i32 len_diff0;
 	  u8 is_error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
       
 	  pi0 = to_next[0] = from[0];
-	  adj_index0 = from_adj_indices[0];
 	  from += 1;
 	  n_left_from -= 1;
 	  to_next += 1;
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, pi0);
+	  i0 = vlib_buffer_get_opaque (p0);
+
+	  adj_index0 = i0->dst_adj_index;
+
 	  ip0 = vlib_buffer_get_current (p0);
-	  udp0 = ip4_next_header (ip0);
 
 	  proto0 = ip0->protocol;
 	  is_udp0 = proto0 == IP_PROTOCOL_UDP;
@@ -1113,90 +1106,87 @@ ip4_local (vlib_main_t * vm,
 
 	  flags0 = p0->flags;
 
+	  good_tcp_udp0 = (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+
+	  udp0 = ip4_next_header (ip0);
+
 	  /* Don't verify UDP checksum for packets with explicit zero checksum. */
-	  good_tcp_udp0 = (is_udp0 && udp0->checksum == 0);
-	  flags0 |= ((good_tcp_udp0 << LOG2_IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED)
-		     | (good_tcp_udp0 << LOG2_IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED));
-
-	  /* Compute TCP/UDP checksum only if hardware hasn't done it for us. */
-	  if (PREDICT_FALSE (is_tcp_udp0 &&
-			     ! (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED)))
-	    flags0 = ip4_tcp_udp_checksum (p0);
-
-	  is_slow_path0 = (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+	  good_tcp_udp0 |= (is_udp0 && udp0->checksum == 0);
 
 	  /* Verify UDP length. */
 	  ip_len0 = clib_net_to_host_u16 (ip0->length);
 	  udp_len0 = clib_net_to_host_u16 (udp0->length);
 
 	  len_diff0 = ip_len0 - udp_len0;
+
 	  len_diff0 = is_udp0 ? len_diff0 : 0;
-	  p0->current_length -= len_diff0;
-	  is_slow_path0 = p0->flags & VLIB_BUFFER_NEXT_PRESENT;
+
+	  if (PREDICT_FALSE (! (is_tcp_udp0 & good_tcp_udp0)))
+	    {
+	      if (! (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
+		flags0 = ip4_tcp_udp_checksum (p0);
+	      good_tcp_udp0 =
+		(flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+	      good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
+	    }
 
 	  good_tcp_udp0 &= len_diff0 >= 0;
 
-	  meta0 = unknown_protocol.error32;
+	  error0 = unknown_protocol;
 
-	  meta0 = len_diff0 < 0 ? udp_length.error32 : meta0;
+	  error0 = len_diff0 < 0 ? udp_length : error0;
 
-	  ASSERT (tcp_checksum.error32 + 1 == udp_checksum.error32);
-	  meta0 = (is_tcp_udp0 && ! good_tcp_udp0
-		   ? tcp_checksum.error32 + is_udp0
-		   : meta0);
+	  ASSERT (tcp_checksum + 1 == udp_checksum);
+	  error0 = (is_tcp_udp0 && ! good_tcp_udp0
+		    ? tcp_checksum + is_udp0
+		    : error0);
 
-	  is_error0 = meta0 != unknown_protocol.error32;
+	  is_error0 = error0 != unknown_protocol;
 
 	  next0 = lm->local_next_by_ip_protocol[proto0];
 
- 	  meta0 = (is_error0 || next0 == IP_LOCAL_NEXT_PUNT
-		   ? meta0 : adj_index0);
-
 	  next0 = is_error0 ? IP_LOCAL_NEXT_DROP : next0;
 
-	  to_next_meta[0] = meta0;
-	  to_next_meta += 1;
+	  to_next_error[0] = error0;
+	  to_next_error += is_error0;
 
-	  if (PREDICT_FALSE (next0 != next))
+	  if (PREDICT_FALSE (next0 != next_index))
 	    {
 	      n_left_to_next += 1;
-	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
 
-	      next = next0;
-	      to_next_meta =
-		vlib_get_next_frame_meta (vm, node, next,
-					&n_left_to_next, &to_next,
-					sizeof (to_next_meta[0]));
+	      next_index = next0;
+	      vlib_get_next_frame_transpose (vm, node, next_index,
+					     to_next, n_left_to_next);
+	      to_next_error = (next_index < IP_LOCAL_N_NEXT
+			       ? vlib_error_for_transpose_buffer_pointer (to_next)
+			       : &to_next_error_dummy[0]);
 
 	      to_next[0] = pi0;
-	      to_next_meta[0] = meta0;
+	      to_next_error[0] = error0;
 	      to_next += 1;
-	      to_next_meta += 1;
+	      to_next_error += is_error0;
 	      n_left_to_next -= 1;
 	    }
 	}
   
-      vlib_put_next_frame (vm, node, next, n_left_to_next);
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
- return n_packets;
-#else
- ASSERT (0);
- return 0;
-#endif
+  return frame->n_vectors;
 }
 
 static VLIB_REGISTER_NODE (ip4_local_node) = {
   .function = ip4_local,
   .name = "ip4-local",
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
+  .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
 
   .n_next_nodes = IP_LOCAL_N_NEXT,
   .next_nodes = {
-    [IP_LOCAL_NEXT_DROP] = "error-drop",
-    [IP_LOCAL_NEXT_PUNT] = "error-punt",
+    [IP_LOCAL_NEXT_DROP] = "error-drop-transpose",
+    [IP_LOCAL_NEXT_PUNT] = "error-punt-transpose",
     [IP_LOCAL_NEXT_TCP_LOOKUP] = "tcp4-lookup",
     [IP_LOCAL_NEXT_UDP_LOOKUP] = "udp4-lookup",
   },
@@ -1219,8 +1209,7 @@ ip4_arp (vlib_main_t * vm,
 {
   ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
-  ip_buffer_and_adjacency_t * from;
-  u32 * to_next_drop;
+  u32 * from, * to_next_drop;
   uword n_left_from, n_left_to_next_drop, next_index;
   static f64 time_last_seed_change = -1e100;
   static u32 hash_seeds[3];
@@ -1260,23 +1249,23 @@ ip4_arp (vlib_main_t * vm,
 				     to_next_drop, n_left_to_next_drop);
       to_next_drop_error = vlib_error_for_transpose_buffer_pointer (to_next_drop);
 
-      while (0 && n_left_from >= 4 && n_left_to_next_drop >= 2)
-	{
-	}
-    
       while (n_left_from > 0 && n_left_to_next_drop > 0)
 	{
 	  vlib_buffer_t * p0;
+	  ip_buffer_opaque_t * i0;
 	  ip4_header_t * ip0;
 	  u32 pi0, adj_index0, a0, b0, c0, m0, sw_if_index0, drop0;
 	  uword bm0;
 	  ip_adjacency_t * adj0;
 	  u32 next0;
 
-	  pi0 = from[0].buffer;
-	  adj_index0 = from[0].adj_index;
+	  pi0 = from[0];
 
 	  p0 = vlib_get_buffer (vm, pi0);
+	  i0 = vlib_buffer_get_opaque (p0);
+
+	  adj_index0 = i0->dst_adj_index;
+
 	  ip0 = vlib_buffer_get_current (p0);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
@@ -1361,7 +1350,7 @@ static char * ip4_arp_error_strings[] = {
 VLIB_REGISTER_NODE (ip4_arp_node) = {
   .function = ip4_arp,
   .name = "ip4-arp",
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
+  .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
 
@@ -1381,7 +1370,8 @@ typedef enum {
 static uword
 ip4_rewrite_slow_path (vlib_main_t * vm,
 		       vlib_node_runtime_t * node,
-		       ip_buffer_and_adjacency_t * from)
+		       u32 buffer_index,
+		       u32 adj_index)
 {
   ip_adjacency_t * adj0;
   ip_lookup_main_t * lm = &ip4_main.lookup_main;
@@ -1390,12 +1380,12 @@ ip4_rewrite_slow_path (vlib_main_t * vm,
   ip4_header_t * ip0;
   u32 pi0, next0, rw_len0, error_code0, adj_index0;
 
-  adj_index0 = from[0].adj_index;
+  adj_index0 = adj_index;
   adj0 = ip_get_adjacency (lm, adj_index0);
       
   ASSERT (adj0[0].n_adj == 1);
 
-  pi0 = from[0].buffer;
+  pi0 = buffer_index;
   p0 = vlib_get_buffer (vm, pi0);
 
   rw_len0 = adj0[0].rewrite_header.data_bytes;
@@ -1437,7 +1427,7 @@ ip4_rewrite (vlib_main_t * vm,
 	     vlib_frame_t * frame)
 {
   ip_lookup_main_t * lm = &ip4_main.lookup_main;
-  ip_buffer_and_adjacency_t * from = vlib_frame_vector_args (frame);
+  u32 * from = vlib_frame_vector_args (frame);
   u32 n_left_from, n_left_to_next, * to_next, next_index;
 
   n_left_from = frame->n_vectors;
@@ -1450,6 +1440,7 @@ ip4_rewrite (vlib_main_t * vm,
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  ip_adjacency_t * adj0, * adj1;
+	  ip_buffer_opaque_t * i0, * i1;
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
 	  u32 pi0, rw_len0, len0, next0, checksum0, adj_index0;
@@ -1460,8 +1451,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  {
 	    vlib_buffer_t * p2, * p3;
 
-	    p2 = vlib_get_buffer (vm, from[2].buffer);
-	    p3 = vlib_get_buffer (vm, from[3].buffer);
+	    p2 = vlib_get_buffer (vm, from[2]);
+	    p3 = vlib_get_buffer (vm, from[3]);
 
 	    vlib_prefetch_buffer_header (p2, LOAD);
 	    vlib_prefetch_buffer_header (p3, LOAD);
@@ -1473,10 +1464,8 @@ ip4_rewrite (vlib_main_t * vm,
 	    CLIB_PREFETCH (p3->data, sizeof (ip0[0]), STORE);
 	  }
 
-	  pi0 = to_next[0] = from[0].buffer;
-	  pi1 = to_next[1] = from[1].buffer;
-	  adj_index0 = from[0].adj_index;
-	  adj_index1 = from[1].adj_index;
+	  pi0 = to_next[0] = from[0];
+	  pi1 = to_next[1] = from[1];
 
 	  from += 2;
 	  n_left_from -= 2;
@@ -1485,6 +1474,12 @@ ip4_rewrite (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, pi0);
 	  p1 = vlib_get_buffer (vm, pi1);
+
+	  i0 = vlib_buffer_get_opaque (p0);
+	  i1 = vlib_buffer_get_opaque (p1);
+
+	  adj_index0 = i0->dst_adj_index;
+	  adj_index1 = i1->dst_adj_index;
 
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
@@ -1573,8 +1568,8 @@ ip4_rewrite (vlib_main_t * vm,
 
 	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
 
-	      ip4_rewrite_slow_path (vm, node, from - 2);
-	      ip4_rewrite_slow_path (vm, node, from - 1);
+	      ip4_rewrite_slow_path (vm, node, from[-2], adj_index0);
+	      ip4_rewrite_slow_path (vm, node, from[-1], adj_index1);
 
 	      next_index = next0 == next1 ? next1 : next_index;
 
@@ -1585,22 +1580,24 @@ ip4_rewrite (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  ip_adjacency_t * adj0;
+	  ip_buffer_opaque_t * i0;
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
 	  u32 pi0, rw_len0, len0;
 	  u8 is_slow_path;
 	  u32 adj_index0, next0, checksum0;
       
-	  adj_index0 = from[0].adj_index;
-	  adj0 = ip_get_adjacency (lm, adj_index0);
-      
 	  /* Multi-path should go elsewhere. */
 	  ASSERT (adj0[0].n_adj == 1);
 
-	  pi0 = to_next[0] = from[0].buffer;
+	  pi0 = to_next[0] = from[0];
 
 	  p0 = vlib_get_buffer (vm, pi0);
+	  i0 = vlib_buffer_get_opaque (p0);
 
+	  adj_index0 = i0->dst_adj_index;
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+      
 	  ip0 = vlib_buffer_get_current (p0);
 
 	  /* Decrement TTL & update checksum. */
@@ -1655,7 +1652,7 @@ ip4_rewrite (vlib_main_t * vm,
 	      n_left_to_next += 1;
 
 	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-	      ip4_rewrite_slow_path (vm, node, from - 1);
+	      ip4_rewrite_slow_path (vm, node, from[-1], adj_index0);
 	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 	    }
 	}
@@ -1673,7 +1670,7 @@ ip4_rewrite (vlib_main_t * vm,
 VLIB_REGISTER_NODE (ip4_rewrite_node) = {
   .function = ip4_rewrite,
   .name = "ip4-rewrite",
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
+  .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
 
@@ -1688,12 +1685,12 @@ ip4_multipath (vlib_main_t * vm,
 	       vlib_node_runtime_t * node,
 	       vlib_frame_t * frame)
 {
-  ip_buffer_and_adjacency_t * v = vlib_frame_vector_args (frame);
+  u32 * buffers = vlib_frame_vector_args (frame);
   uword n_packets = frame->n_vectors;
 
   vlib_error_drop_buffers (vm, node,
-			   &v[0].buffer,
-			   /* stride */ &v[1].buffer - &v[0].buffer,
+			   buffers,
+			   /* stride */ 1,
 			   n_packets,
 			   /* next */ 0,
 			   ip4_input_node.index,
@@ -1708,7 +1705,7 @@ ip4_multipath (vlib_main_t * vm,
 static VLIB_REGISTER_NODE (ip4_multipath_node) = {
   .function = ip4_multipath,
   .name = "ip4-multipath",
-  .vector_size = sizeof (ip_buffer_and_adjacency_t),
+  .vector_size = sizeof (u32),
 
   .n_next_nodes = 1,
   .next_nodes = {
