@@ -176,4 +176,13 @@ void ip4_delete_matching_routes (ip4_main_t * im,
 				 u8 * address,
 				 u32 address_length);
 
+uword
+ip4_tcp_register_listener (vlib_main_t * vm,
+			   u16 dst_port,
+			   u32 next_node_index);
+uword
+ip4_udp_register_listener (vlib_main_t * vm,
+			   u16 dst_port,
+			   u32 next_node_index);
+
 #endif /* included_ip_ip4_h */
