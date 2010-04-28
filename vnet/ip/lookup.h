@@ -83,10 +83,20 @@ typedef struct {
 /* Index into adjacency table. */
 typedef u32 ip_adjacency_index_t;
 
+/* Stored in 32 byte VLIB buffer opaque by ip lookup for benefit of
+   next nodes. */
 typedef struct {
-  u32 buffer;
-  u32 adj_index;
-} ip_buffer_and_adjacency_t;
+  /* Adjacency from destination IP address lookup. */
+  u32 dst_adj_index;
+} ip_buffer_opaque_t;
+
+typedef struct {
+  /* Must be first. */
+  ip_buffer_opaque_t non_local;
+
+  /* Adjacency from source IP address lookup. */
+  u32 src_adj_index;
+} ip_local_buffer_opaque_t;
 
 typedef enum {
   IP_LOCAL_NEXT_DROP,
