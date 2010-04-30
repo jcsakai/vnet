@@ -335,6 +335,12 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 				  format_unformat_error, input);
     }
 
+  if (geteuid()) 
+    {
+      clib_warning ("tuntap disabled: must be superuser");
+      return 0;
+    }    
+
   tm->dev_net_tun_fd = -1;
   tm->dev_tap_fd = -1;
 
