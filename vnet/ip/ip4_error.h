@@ -41,7 +41,8 @@
 							\
   /* Errors signalled by ip4-rewrite. */		\
   _ (MTU_EXCEEDED, "ip4 MTU exceeded and DF set")	\
-  _ (LOOKUP_MISS, "ip4 lookup miss")			\
+  _ (DST_LOOKUP_MISS, "ip4 destination lookup miss")	\
+  _ (SRC_LOOKUP_MISS, "ip4 source lookup miss")		\
   _ (ADJACENCY_DROP, "ip4 adjacency drop")		\
   _ (ADJACENCY_PUNT, "ip4 adjacency punt")		\
 							\

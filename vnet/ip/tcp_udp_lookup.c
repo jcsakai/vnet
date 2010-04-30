@@ -312,7 +312,7 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, bi0);
-	  pi0 = vlib_buffer_get_opaque (p0);
+	  pi0 = vlib_get_buffer_opaque (p0);
 
 	  adj0 = ip_get_adjacency (im, pi0->non_local.dst_adj_index);
 	  ASSERT (adj0->lookup_next_index == IP_LOOKUP_NEXT_LOCAL);
