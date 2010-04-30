@@ -1751,11 +1751,6 @@ typedef u32 (vlib_hash_key_function_t) (void * state, u32 vector_index, u32 key_
 typedef u32 (vlib_hash_result_function_t) (void * state, u32 buffer_index, u32 result_index);
 										 
 typedef union {
-  u32 data_u32[VLIB_FRAME_SIZE];
-  u32x data_u32x[VLIB_FRAME_SIZE / VECTOR_WORD_TYPE_LEN (u32)];
-} vlib_frame_u32_t;
-
-typedef union {
   u32x data_u32x;
   u32 data_u32[VECTOR_WORD_TYPE_LEN (u32)];
 } u32x_union_t;
@@ -1765,22 +1760,33 @@ typedef union {
   u32 data_u32[4];
 } u32x4_union_t;
 
+typedef union {
+  u32 data_u32[VLIB_FRAME_SIZE];
+  u32x data_u32x[VLIB_FRAME_SIZE / VECTOR_WORD_TYPE_LEN (u32)];
+} vlib_frame_u32_t;
+
 typedef struct {
   u32x_union_t hash[3];
 } vlib_hash_state_t;
 
 typedef struct {
-  u32x4_union_t * buckets;
+  u32x4_union_t * search_buckets;
 
-  /* Vector of free indices. */
+  /* Vector of bucket free indices. */
   u32 * free_indices;
 } vlib_hash_overflow_buckets_t;
 
 typedef struct {
   vlib_frame_u32_t * key_words;
 
+  /* 2^log2_n_keys keys grouped in groups of 4.
+     Each bucket contains 4 results plus 4 keys for a
+     total of (1 + n_key_u32) u32x4s. */
   u32x4_union_t * search_buckets;
 
+  /* When a bucket of 4 results/keys are full we search
+     the overflow.  hash_key is used to select which overflow
+     bucket. */
   vlib_hash_overflow_buckets_t overflow_buckets[16];
 
   /* Total count of entries in overflow buckets. */
@@ -1793,9 +1799,6 @@ typedef struct {
   /* table[i] = min_log2 (first_set (~i)). */
   u8 find_first_zero_table[16];
 
-  /* Buffers to perform hash on. */
-  u32 * buffer_indices;
-
   /* Hash seeds for Jenkins hash. */
   u32x hash_seeds[3];
 
@@ -1805,6 +1808,7 @@ typedef struct {
 static always_inline void
 vlib_hash_get_gather_key_stage (vlib_hash_main_t * h,
 				u32 vector_index,
+				u32 n_vectors,
 				vlib_hash_key_function_t key_function,
 				void * state,
 				u32 n_key_u32s)
@@ -1812,7 +1816,7 @@ vlib_hash_get_gather_key_stage (vlib_hash_main_t * h,
   u32 i, j;
 
   /* Gather keys for 4 packets (for 128 bit vector length e.g. u32x4). */
-  for (i = 0; i < VECTOR_WORD_TYPE_LEN (u32); i++)
+  for (i = 0; i < n_vectors; i++)
     {
       u32 vi = vector_index * VECTOR_WORD_TYPE_LEN (u32) + i;
       for (j = 0; j < n_key_u32s; j++)
@@ -1850,10 +1854,14 @@ vlib_hash_get_hash_mix_stage (vlib_hash_main_t * h,
   h->state[vector_index].hash[2].data_u32x = c;
 }
 
+static always_inline u32x4_union_t *
+get_search_bucket (vlib_hash_main_t * h, u32 index, u32 n_key_u32s)
+{ return vec_elt_at_index (h->search_buckets, index * (1 + n_key_u32s)); }
+
 static always_inline void
-vlib_hash_get_hash_finalize_stage (vlib_hash_main_t * h,
-				   u32 vector_index,
-				   u32 n_key_u32s)
+vlib_hash_finalize_stage (vlib_hash_main_t * h,
+			  u32 vector_index,
+			  u32 n_key_u32s)
 {
   i32 n_left;
   u32x a, b, c;
@@ -1884,12 +1892,22 @@ vlib_hash_get_hash_finalize_stage (vlib_hash_main_t * h,
 
   /* Only save away last 32 bits of hash code. */
   h->state[vector_index].hash[2].data_u32x = c;
+
+  /* Prefetch buckets. */
+  {
+    u32x_union_t cu;
+    u32x4_union_t * bucket;
+    uword i;
+
+    cu.data_u32x = c;
+    for (i = 0; i < VECTOR_WORD_TYPE_LEN (u32); i++)
+      {
+	bucket = get_search_bucket (h, cu.data_u32[i], n_key_u32s);
+	CLIB_PREFETCH (bucket, (1 + n_key_u32s) * sizeof (bucket[0]), READ);
+      }
+  }
 }
 				 
-static always_inline u32x4_union_t *
-get_search_bucket (vlib_hash_main_t * h, u32 index, u32 n_key_u32s)
-{ return vec_elt_at_index (h->search_buckets, index * (1 + n_key_u32s)); }
-
 static always_inline u32
 u32x4_get_lo32 (u32x4 x)
 {
@@ -1954,9 +1972,9 @@ get_overflow (vlib_hash_main_t * h,
   vlib_hash_overflow_buckets_t * ob = &h->overflow_buckets[key_index & 0xf];
   u32 i, j, result = 0;
 
-  for (i = 0; i < vec_len (ob->buckets); i += 1 + n_key_u32s)
+  for (i = 0; i < vec_len (ob->search_buckets); i += 1 + n_key_u32s)
     {
-      u32x4_union_t * b = ob->buckets + i;
+      u32x4_union_t * b = ob->search_buckets + i;
       u32x4 r = b[0].data_u32x4;
       
       for (j = 0; j < n_key_u32s; j++)
@@ -1973,13 +1991,14 @@ get_overflow (vlib_hash_main_t * h,
 static always_inline void
 vlib_hash_get_stage (vlib_hash_main_t * h,
 		     u32 vector_index,
+		     u32 n_vectors,
 		     vlib_hash_result_function_t result_function,
 		     void * state,
 		     u32 n_key_u32s)
 {
   u32 i, j;
 
-  for (i = 0; i < VECTOR_WORD_TYPE_LEN (u32); i++)
+  for (i = 0; i < n_vectors; i++)
     {
       u32 vi = vector_index * VECTOR_WORD_TYPE_LEN (u32) + i;
       u32 key_index = h->state[vector_index].hash[2].data_u32[i];
@@ -1998,9 +2017,7 @@ vlib_hash_get_stage (vlib_hash_main_t * h,
       if (! result && search_bucket_is_full (b0))
 	result = get_overflow (h, key_index, vi, n_key_u32s);
 
-      result_function (state,
-		       h->buffer_indices[vi],
-		       result);
+      result_function (state, vi, result);
     }
 }
 
@@ -2015,11 +2032,11 @@ set_overflow (vlib_hash_main_t * h,
   u32x4_union_t * b;
   u32 i_set, i, j, old_result;
 
-  for (i = 0; i < vec_len (ob->buckets); i += 1 + n_key_u32s)
+  for (i = 0; i < vec_len (ob->search_buckets); i += 1 + n_key_u32s)
     {
       u32x4 r;
 
-      b = ob->buckets + i;
+      b = ob->search_buckets + i;
       r = b[0].data_u32x4;
       for (j = 0; j < n_key_u32s; j++)
 	r &= bucket_compare (h, b, j, vi);
@@ -2038,8 +2055,8 @@ set_overflow (vlib_hash_main_t * h,
     {
       u32 * p;
       /* Out of free overflow buckets.  Resize. */
-      vec_resize (ob->buckets, 1 + n_key_u32s);
-      i = vec_len (ob->buckets) * 4;
+      vec_resize (ob->search_buckets, 1 + n_key_u32s);
+      i = vec_len (ob->search_buckets) * 4;
       vec_add2 (ob->free_indices, p, 4);
       for (j = 0; j < 4; j++)
 	p[j] = i + j;
@@ -2048,7 +2065,7 @@ set_overflow (vlib_hash_main_t * h,
   i = vec_pop (ob->free_indices);
 
   i_set = i & 3;
-  b = vec_elt_at_index (ob->buckets, i / 4);
+  b = vec_elt_at_index (ob->search_buckets, i / 4);
 
   /* Insert result. */
   b[0].data_u32[i_set] = new_result;
@@ -2065,13 +2082,14 @@ set_overflow (vlib_hash_main_t * h,
 static always_inline void
 vlib_hash_set_stage (vlib_hash_main_t * h,
 		     u32 vector_index,
+		     u32 n_vectors,
 		     vlib_hash_result_function_t result_function,
 		     void * state,
 		     u32 n_key_u32s)
 {
   u32 i, j;
 
-  for (i = 0; i < VECTOR_WORD_TYPE_LEN (u32); i++)
+  for (i = 0; i < n_vectors; i++)
     {
       u32 key_index = h->state[vector_index].hash[2].data_u32[i];
       u32 vi = vector_index * VECTOR_WORD_TYPE_LEN (u32) + i;
@@ -2094,7 +2112,7 @@ vlib_hash_set_stage (vlib_hash_main_t * h,
 	old_result = get_overflow (h, key_index, vi, n_key_u32s);
 
       /* Get new result; possibly do something with old result. */
-      new_result = result_function (state, h->buffer_indices[vi], old_result);
+      new_result = result_function (state, vi, old_result);
 
       /* Set over-writes existing result. */
       if (old_result)
@@ -2143,11 +2161,11 @@ unset_overflow (vlib_hash_main_t * h,
   u32x4_union_t * b;
   u32 i_set, i, j, old_result;
 
-  for (i = 0; i < vec_len (ob->buckets); i += 1 + n_key_u32s)
+  for (i = 0; i < vec_len (ob->search_buckets); i += 1 + n_key_u32s)
     {
       u32x4 r;
 
-      b = ob->buckets + i;
+      b = ob->search_buckets + i;
       r = b[0].data_u32x4;
       for (j = 0; j < n_key_u32s; j++)
 	r &= bucket_compare (h, b, j, vi);
@@ -2171,13 +2189,14 @@ unset_overflow (vlib_hash_main_t * h,
 static always_inline void
 vlib_hash_unset_stage (vlib_hash_main_t * h,
 		       u32 vector_index,
+		       u32 n_vectors,
 		       vlib_hash_result_function_t result_function,
 		       void * state,
 		       u32 n_key_u32s)
 {
   u32 i, j;
 
-  for (i = 0; i < VECTOR_WORD_TYPE_LEN (u32); i++)
+  for (i = 0; i < n_vectors; i++)
     {
       u32 vi = vector_index * VECTOR_WORD_TYPE_LEN (u32) + i;
       u32 key_index = h->state[vector_index].hash[2].data_u32[i];
@@ -2221,9 +2240,10 @@ void vlib_hash_init (vlib_main_t * vm,
     h->find_first_zero_table[i] = min_log2 (first_set (~i));
 
   {
-    u32 * r = clib_random_buffer_get_data (&vm->random_buffer,
-					   sizeof (h->hash_seeds));
-    memcpy (r, h->hash_seeds, sizeof (h->hash_seeds));
+    u32 * r = clib_random_buffer_get_data (&vm->random_buffer, 3 * sizeof (u32));
+    u32 i;
+    for (i = 0; i < 3; i++)
+      h->hash_seeds[i] = u32x_splat (r[i]);
   }
 }
 
@@ -2238,6 +2258,9 @@ typedef struct {
     u32x4_union_t * buffer_indices_u32x4;
     u32 * buffer_indices;
   };
+
+  u32 n_buffers_div_4;
+  u32 n_buffers_mod_4;
 } ip4_hash_get_state_t;
 
 static always_inline void
@@ -2274,33 +2297,64 @@ static always_inline void
 ip4_dst_address_lookup_gather_keys_stage (void * _s, u32 i)
 {
   ip4_hash_get_state_t * s = _s;
-  vlib_hash_get_gather_key_stage (s->hash, i,
-				  ip4_dst_address_vlib_hash_key_gather,
-				  s,
-				  /* n_key_u32s */ 1);
+  vlib_hash_get_gather_key_stage
+    (s->hash,
+     /* vector_index */ i,
+     /* n_vectors */ VECTOR_WORD_TYPE_LEN (u32),
+     ip4_dst_address_vlib_hash_key_gather,
+     s,
+     /* n_key_u32s */ 1);
 }
 
 static always_inline void
 ip4_src_address_lookup_gather_keys_stage (ip4_hash_get_state_t * s, u32 i)
 {
-  vlib_hash_get_gather_key_stage (s->hash, i,
-				  ip4_src_address_vlib_hash_key_gather,
-				  s,
-				  /* n_key_u32s */ 1);
+  vlib_hash_get_gather_key_stage
+    (s->hash,
+     /* vector_index */ i,
+     /* n_vectors */ VECTOR_WORD_TYPE_LEN (u32),
+     ip4_src_address_vlib_hash_key_gather,
+     s,
+     /* n_key_u32s */ 1);
+}
+
+static always_inline void
+ip4_dst_address_lookup_gather_keys_mod_stage (ip4_hash_get_state_t * s, u32 i)
+{
+  vlib_hash_get_gather_key_stage
+    (s->hash,
+     /* vector_index */ s->n_buffers_div_4,
+     /* n_vectors */ s->n_buffers_mod_4,
+     ip4_dst_address_vlib_hash_key_gather,
+     s,
+     /* n_key_u32s */ 1);
+}
+
+static always_inline void
+ip4_src_address_lookup_gather_keys_mod_stage (ip4_hash_get_state_t * s, u32 i)
+{
+  vlib_hash_get_gather_key_stage
+    (s->hash,
+     /* vector_index */ s->n_buffers_div_4,
+     /* n_vectors */ s->n_buffers_mod_4,
+     ip4_src_address_vlib_hash_key_gather,
+     s,
+     /* n_key_u32s */ 1);
 }
 
 /* Don't need hash mix for ip4 lookup since key is only 32 bits. */
 static always_inline void
 ip4_src_dst_address_lookup_hash_finalize_stage (ip4_hash_get_state_t * s, u32 i)
-{ vlib_hash_get_hash_finalize_stage (s->hash, i, /* n_key_u32s */ 1); }
+{ vlib_hash_finalize_stage (s->hash, i, /* n_key_u32s */ 1); }
 
 static always_inline u32
 ip4_src_dst_address_set_result (ip4_hash_get_state_t * s,
-				u32 buffer_index,
+				u32 vector_index,
 				u32 result_index,
 				u32 is_dst_address_lookup)
 {
   vlib_main_t * vm = s->vlib_main;
+  u32 buffer_index = s->buffer_indices[vector_index];
   vlib_buffer_t * b = vlib_get_buffer (vm, buffer_index);
   ip_buffer_opaque_t * o = vlib_get_buffer_opaque (b);
   u32 adj_index, next_index;
@@ -2327,30 +2381,36 @@ ip4_src_dst_address_set_result (ip4_hash_get_state_t * s,
 
 static always_inline u32
 ip4_dst_address_set_result (void * _s,
-			    u32 buffer_index,
+			    u32 vector_index,
 			    u32 result_index)
 {
   ip4_hash_get_state_t * s = _s;
-  return ip4_src_dst_address_set_result (s, buffer_index,
-					 result_index,
-					 /* is_dst_address_lookup */ 1);
+  return ip4_src_dst_address_set_result
+    (s,
+     vector_index,
+     result_index,
+     /* is_dst_address_lookup */ 1);
 }
 
 static always_inline u32
 ip4_src_address_set_result (void * _s,
-			    u32 buffer_index,
+			    u32 vector_index,
 			    u32 result_index)
 {
   ip4_hash_get_state_t * s = _s;
-  return ip4_src_dst_address_set_result (s, buffer_index,
-					 result_index,
-					 /* is_dst_address_lookup */ 0);
+  return ip4_src_dst_address_set_result
+    (s,
+     vector_index,
+     result_index,
+     /* is_dst_address_lookup */ 0);
 }
 
 static always_inline void
 ip4_dst_address_lookup_hash_get_stage (ip4_hash_get_state_t * s, u32 i)
 {
-  vlib_hash_get_stage (s->hash, i,
+  vlib_hash_get_stage (s->hash,
+		       /* vector_index */ i,
+		       /* n_vectors */ VECTOR_WORD_TYPE_LEN (u32),
 		       ip4_dst_address_set_result,
 		       s, /* n_key_u32s */ 1);
 }
@@ -2358,7 +2418,29 @@ ip4_dst_address_lookup_hash_get_stage (ip4_hash_get_state_t * s, u32 i)
 static always_inline void
 ip4_src_address_lookup_hash_get_stage (ip4_hash_get_state_t * s, u32 i)
 {
-  vlib_hash_get_stage (s->hash, i,
+  vlib_hash_get_stage (s->hash,
+		       /* vector_index */ i,
+		       /* n_vectors */ VECTOR_WORD_TYPE_LEN (u32),
+		       ip4_src_address_set_result,
+		       s, /* n_key_u32s */ 1);
+}
+
+static always_inline void
+ip4_dst_address_lookup_hash_get_mod_stage (ip4_hash_get_state_t * s, u32 i)
+{
+  vlib_hash_get_stage (s->hash,
+		       /* vector_index */ s->n_buffers_div_4,
+		       /* n_vectors */ s->n_buffers_mod_4,
+		       ip4_dst_address_set_result,
+		       s, /* n_key_u32s */ 1);
+}
+
+static always_inline void
+ip4_src_address_lookup_hash_get_mod_stage (ip4_hash_get_state_t * s, u32 i)
+{
+  vlib_hash_get_stage (s->hash,
+		       /* vector_index */ s->n_buffers_div_4,
+		       /* n_vectors */ s->n_buffers_mod_4,
 		       ip4_src_address_set_result,
 		       s, /* n_key_u32s */ 1);
 }
@@ -2369,27 +2451,27 @@ uword ip4_dst_address_lookup_with_hash (vlib_main_t * vm,
 					vlib_hash_main_t * hash)
 {
   uword n_buffers = frame->n_vectors;
-  uword n_buffers4;
   ip4_hash_get_state_t s;
 
   s.vlib_main = vm;
   s.node = node;
   s.hash = hash;
   s.buffer_indices = vlib_frame_args (frame);
+  s.n_buffers_div_4 = n_buffers / 4;
+  s.n_buffers_mod_4 = n_buffers % 4;
 
-  /* If not a multiple of 4 pad by repeating last buffer. */
-  n_buffers4 = n_buffers / 4;
+  if (s.n_buffers_div_4 > 0)
+    vlib_pipeline_run_4_stage (s.n_buffers_div_4, &s,
+			       ip4_lookup_prefetch_buffers_stage,
+			       ip4_dst_address_lookup_gather_keys_stage,
+			       ip4_src_dst_address_lookup_hash_finalize_stage,
+			       ip4_dst_address_lookup_hash_get_stage);
 
-  if (n_buffers % 4)
-    {
-      ASSERT (0);
-    }
-
-  vlib_pipeline_run_4_stage (n_buffers4, &s,
-			     ip4_lookup_prefetch_buffers_stage,
-			     ip4_dst_address_lookup_gather_keys_stage,
-			     ip4_src_dst_address_lookup_hash_finalize_stage,
-			     ip4_dst_address_lookup_hash_get_stage);
+  if (s.n_buffers_mod_4 > 0)
+    vlib_pipeline_run_3_stage (1, &s,
+			       ip4_dst_address_lookup_gather_keys_mod_stage,
+			       ip4_src_dst_address_lookup_hash_finalize_stage,
+			       ip4_dst_address_lookup_hash_get_mod_stage);
 
   return n_buffers;
 }
@@ -2403,6 +2485,9 @@ typedef struct {
   };
 
   u32 * results;
+
+  u32 n_addresses_div_4;
+  u32 n_addresses_mod_4;
 } ip4_hash_set_state_t;
 
 static always_inline u32
@@ -2415,16 +2500,30 @@ ip4_hash_set_key_gather (void * _s, u32 vi, u32 i)
 static always_inline void
 ip4_hash_set_gather_keys_stage (ip4_hash_set_state_t * s, u32 i)
 {
-  vlib_hash_get_gather_key_stage (s->hash, i,
-				  ip4_hash_set_key_gather,
-				  s,
-				  /* n_key_u32s */ 1);
+  vlib_hash_get_gather_key_stage
+    (s->hash,
+     /* vector_index */ i,
+     /* n_vectors */ VECTOR_WORD_TYPE_LEN (u32),
+     ip4_hash_set_key_gather,
+     s,
+     /* n_key_u32s */ 1);
 }
 
-/* Don't need hash mix for ip4 lookup since key is only 32 bits. */
+static always_inline void
+ip4_hash_set_gather_keys_mod_stage (ip4_hash_set_state_t * s, u32 i)
+{
+  vlib_hash_get_gather_key_stage
+    (s->hash,
+     /* vector_index */ s->n_addresses_div_4,
+     /* n_vectors */ s->n_addresses_mod_4,
+     ip4_hash_set_key_gather,
+     s,
+     /* n_key_u32s */ 1);
+}
+
 static always_inline void
 ip4_hash_set_hash_finalize_stage (ip4_hash_set_state_t * s, u32 i)
-{ vlib_hash_get_hash_finalize_stage (s->hash, i, /* n_key_u32s */ 1); }
+{ vlib_hash_finalize_stage (s->hash, i, /* n_key_u32s */ 1); }
 
 static always_inline u32
 ip4_hash_set_result (void * _s, u32 i, u32 old_result)
@@ -2436,30 +2535,113 @@ ip4_hash_set_result (void * _s, u32 i, u32 old_result)
 }
 
 static always_inline void
-ip4_hash_set_hash_set_stage (ip4_hash_set_state_t * s, u32 i)
-{ vlib_hash_set_stage (s->hash, i, ip4_hash_set_result, s, /* n_key_u32s */ 1); }
+ip4_hash_set_stage (ip4_hash_set_state_t * s, u32 i)
+{
+  vlib_hash_set_stage
+    (s->hash,
+     /* vector_index */ i,
+     /* n_vectors */ VECTOR_WORD_TYPE_LEN (u32),
+     ip4_hash_set_result,
+     s,
+     /* n_key_u32s */ 1);
+}
+
+static always_inline void
+ip4_hash_set_mod_stage (ip4_hash_set_state_t * s, u32 i)
+{
+  vlib_hash_set_stage
+    (s->hash,
+     /* vector_index */ s->n_addresses_div_4,
+     /* n_vectors */ s->n_addresses_mod_4,
+     ip4_hash_set_result,
+     s,
+     /* n_key_u32s */ 1);
+}
 
 void ip4_hash_set (vlib_hash_main_t * hash,
 		   ip4_address_t * addresses,
 		   u32 * results,
 		   uword n_addresses)
 {
-  uword n_addresses4;
   ip4_hash_set_state_t s;
 
   s.hash = hash;
   s.addresses = addresses;
   s.results = results;
+  s.n_addresses_div_4 = n_addresses / 4;
+  s.n_addresses_mod_4 = n_addresses % 4;
 
-  /* If not a multiple of 4 pad by repeating last buffer. */
-  n_addresses4 = n_addresses / 4;
-  if (n_addresses % 4)
-    {
-      ASSERT (0);
-    }
-  
-  vlib_pipeline_run_3_stage (n_addresses4, &s,
-			     ip4_hash_set_gather_keys_stage,
-			     ip4_hash_set_hash_finalize_stage,
-			     ip4_hash_set_hash_set_stage);
+  if (s.n_addresses_div_4 > 0)
+    vlib_pipeline_run_3_stage (s.n_addresses_div_4,
+			       &s,
+			       ip4_hash_set_gather_keys_stage,
+			       ip4_hash_set_hash_finalize_stage,
+			       ip4_hash_set_stage);
+
+  if (s.n_addresses_mod_4 > 0)
+    vlib_pipeline_run_3_stage (1,
+			       &s,
+			       ip4_hash_set_gather_keys_mod_stage,
+			       ip4_hash_set_hash_finalize_stage,
+			       ip4_hash_set_mod_stage);
+}
+
+static always_inline u32
+ip4_hash_unset_result (void * _s, u32 i, u32 old_result)
+{
+  ip4_hash_set_state_t * s = _s;
+  s->results[i] = old_result;
+  return 0;
+}
+
+static always_inline void
+ip4_hash_unset_stage (ip4_hash_set_state_t * s, u32 i)
+{
+  vlib_hash_unset_stage
+    (s->hash,
+     /* vector_index */ i,
+     /* n_vectors */ VECTOR_WORD_TYPE_LEN (u32),
+     ip4_hash_unset_result,
+     s,
+     /* n_key_u32s */ 1);
+}
+
+static always_inline void
+ip4_hash_unset_mod_stage (ip4_hash_set_state_t * s, u32 i)
+{
+  vlib_hash_unset_stage
+    (s->hash,
+     /* vector_index */ s->n_addresses_div_4,
+     /* n_vectors */ s->n_addresses_mod_4,
+     ip4_hash_unset_result,
+     s,
+     /* n_key_u32s */ 1);
+}
+
+void ip4_hash_unset (vlib_hash_main_t * hash,
+		     ip4_address_t * addresses,
+		     u32 * results,
+		     uword n_addresses)
+{
+  ip4_hash_set_state_t s;
+
+  s.hash = hash;
+  s.addresses = addresses;
+  s.results = results;
+  s.n_addresses_div_4 = n_addresses / 4;
+  s.n_addresses_mod_4 = n_addresses % 4;
+
+  if (s.n_addresses_div_4 > 0)
+    vlib_pipeline_run_3_stage (s.n_addresses_div_4,
+			       &s,
+			       ip4_hash_set_gather_keys_stage,
+			       ip4_hash_set_hash_finalize_stage,
+			       ip4_hash_unset_stage);
+
+  if (s.n_addresses_mod_4 > 0)
+    vlib_pipeline_run_3_stage (1,
+			       &s,
+			       ip4_hash_set_gather_keys_mod_stage,
+			       ip4_hash_set_hash_finalize_stage,
+			       ip4_hash_unset_mod_stage);
 }
