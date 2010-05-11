@@ -46,7 +46,7 @@ typedef struct {
 
   u32 * arp_input_next_index_by_hw_if_index;
 
-  ethernet_arp_ip4_entry_t * ip4_entries;
+  ethernet_arp_ip4_entry_t * ip4_entry_pool;
 
   mhash_t ip4_entry_by_key;
 } ethernet_arp_main_t;
@@ -210,6 +210,36 @@ static u8 * format_ethernet_arp_input_trace (u8 * s, va_list * va)
   return s;
 }
 
+static clib_error_t *
+ethernet_arp_sw_interface_up_down (vlib_main_t * vm,
+				   u32 sw_if_index,
+				   u32 flags)
+{
+  ethernet_arp_main_t * am = &ethernet_arp_main;
+  ethernet_arp_ip4_entry_t * e;
+
+  if (! (flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP))
+    {
+      u32 i, * to_delete = 0;
+
+      pool_foreach (e, am->ip4_entry_pool, ({
+	    if (e->key.sw_if_index == sw_if_index)
+	      vec_add1 (to_delete, e - am->ip4_entry_pool);
+      }));
+
+      for (i = 0; i < vec_len (to_delete); i++)
+	{
+	  e = pool_elt_at_index (am->ip4_entry_pool, to_delete[i]);
+	  mhash_unset (&am->ip4_entry_by_key, &e->key, 0);
+	  pool_put (am->ip4_entry_pool, e);
+	}
+
+      vec_free (to_delete);
+    }
+
+  return 0;
+}
+
 static void
 arp_set_ip4_over_ethernet (vlib_main_t * vm,
 			   ethernet_arp_main_t * am,
@@ -229,7 +259,7 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
 
   p = mhash_get (&am->ip4_entry_by_key, &k);
   if (p)
-    e = vec_elt_at_index (am->ip4_entries, p[0]);
+    e = pool_elt_at_index (am->ip4_entry_pool, p[0]);
   else
     {
       u32 adj_index;
@@ -262,9 +292,10 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
 			 &a->ip4,
 			 /* address_length */ 32,
 			 adj_index);
-      mhash_set (&am->ip4_entry_by_key, &k, vec_len (am->ip4_entries),
+      pool_get (am->ip4_entry_pool, e);
+      mhash_set (&am->ip4_entry_by_key, &k,
+                 e - am->ip4_entry_pool,
 		 /* old value */ 0);
-      vec_add2 (am->ip4_entries, e, 1);
       e->key = k;
     }
 
@@ -285,6 +316,7 @@ typedef enum {
   _ (l3_type_not_ip4, "L3 type not IP4")				\
   _ (l3_src_address_not_local, "IP4 source address not local to subnet") \
   _ (l3_dst_address_not_local, "IP4 destination address not local to subnet") \
+  _ (replies_received, "ARP replies received")				\
   _ (opcode_not_request, "ARP opcode not request")
 
 typedef enum {
@@ -376,7 +408,9 @@ arp_input (vlib_main_t * vm,
 
 	  if (arp0->opcode != clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_request))
 	    {
-	      error0 = ETHERNET_ARP_ERROR_opcode_not_request;
+	      error0 = (arp0->opcode == clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_reply)
+			? ETHERNET_ARP_ERROR_replies_received
+			: ETHERNET_ARP_ERROR_opcode_not_request);
 	      goto drop1;
 	    }
 
@@ -424,8 +458,22 @@ arp_input (vlib_main_t * vm,
 
 	drop1:
 	  {
-	    vlib_error_t * e = vlib_error_for_transpose_buffer_pointer (to_next - 1);
-	    e[0] = vlib_error_set (node->node_index, error0);
+            vlib_error_t * e;
+              
+            next0 = ARP_INPUT_NEXT_DROP;
+            if (next0 != next_index)
+              {
+                vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
+
+                next_index = next0;
+                vlib_get_next_frame (vm, node, next_index,
+                                     to_next, n_left_to_next);
+                to_next[0] = pi0;
+                n_left_to_next -= 1;
+              }
+
+            e = vlib_error_for_transpose_buffer_pointer (to_next - 1);
+            e[0] = vlib_error_set (node->node_index, error0);
 	  }
 	}
 
@@ -466,6 +514,7 @@ static VLIB_REGISTER_NODE (arp_input_node) = {
   .format_trace = format_ethernet_arp_input_trace,
 
   .hw_interface_link_up_down_function = ethernet_arp_hw_interface_link_up_down,
+  .sw_interface_admin_up_down_function = ethernet_arp_sw_interface_up_down,
 };
 
 static clib_error_t *
@@ -511,7 +560,8 @@ show_ip4_arp (vlib_main_t * vm,
   sw_if_index = ~0;
   unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index);
 
-  es = vec_dup (am->ip4_entries);
+  es = 0;
+  pool_foreach (e, am->ip4_entry_pool, ({ vec_add1 (es, e[0]); }));
   vec_sort (es, e1, e2, ip4_arp_entry_sort (vm, e1, e2));
   vlib_cli_output (vm, "%U", format_ethernet_arp_ip4_entry, vm, 0);
   vec_foreach (e, es) {
