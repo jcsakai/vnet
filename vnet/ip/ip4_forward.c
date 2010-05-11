@@ -1355,7 +1355,7 @@ ip4_arp (vlib_main_t * vm,
 
 static char * ip4_arp_error_strings[] = {
   [IP4_ARP_ERROR_DROP] = "address overflow drops",
-  [IP4_ARP_ERROR_REQUEST_SENT] = "arp requests sent",
+  [IP4_ARP_ERROR_REQUEST_SENT] = "ARP requests sent",
 };
 
 VLIB_REGISTER_NODE (ip4_arp_node) = {
