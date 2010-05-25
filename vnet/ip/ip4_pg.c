@@ -29,7 +29,7 @@
 #define IP4_PG_EDIT_CHECKSUM (1 << 0)
 #define IP4_PG_EDIT_LENGTH (1 << 1)
 
-static always_inline void
+static_always_inline void
 compute_length_and_or_checksum (vlib_main_t * vm,
 				u32 * packets,
 				u32 n_packets,

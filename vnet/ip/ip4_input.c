@@ -53,7 +53,7 @@ typedef enum {
 
 /* Validate IP v4 packets and pass them either to forwarding code
    or drop/punt exception packets. */
-static always_inline uword
+always_inline uword
 ip4_input_inline (vlib_main_t * vm,
 		  vlib_node_runtime_t * node,
 		  vlib_frame_t * frame,

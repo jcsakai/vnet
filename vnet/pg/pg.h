@@ -144,14 +144,14 @@ typedef struct pg_stream_t {
   pg_buffer_index_t * buffer_indices;
 } pg_stream_t;
 
-static always_inline void
+always_inline void
 pg_buffer_index_free (pg_buffer_index_t * bi)
 {
   vec_free (bi->edits);
   clib_fifo_free (bi->buffer_fifo);
 }
 
-static always_inline void
+always_inline void
 pg_edit_group_free (pg_edit_group_t * g)
 {
   pg_edit_t * e;
@@ -162,7 +162,7 @@ pg_edit_group_free (pg_edit_group_t * g)
   vec_free (g->fixed_packet_data_mask);
 }
 
-static always_inline void
+always_inline void
 pg_stream_free (pg_stream_t * s)
 {
   pg_edit_group_t * g;
@@ -185,15 +185,15 @@ pg_stream_free (pg_stream_t * s)
   }
 }
 
-static always_inline int
+always_inline int
 pg_stream_is_enabled (pg_stream_t * s)
 { return (s->flags & PG_STREAM_FLAGS_IS_ENABLED) != 0; }
 
-static always_inline pg_edit_group_t *
+always_inline pg_edit_group_t *
 pg_stream_get_group (pg_stream_t * s, u32 group_index)
 { return vec_elt_at_index (s->edit_groups, group_index); }
 
-static always_inline void *
+always_inline void *
 pg_create_edit_group (pg_stream_t * s,
 		      int n_edit_bytes,
 		      int n_packet_bytes,
@@ -215,7 +215,7 @@ pg_create_edit_group (pg_stream_t * s,
   return g->edits;
 }
 
-static always_inline void *
+always_inline void *
 pg_add_edits (pg_stream_t * s, int n_edit_bytes, int n_packet_bytes,
 	      u32 group_index)
 {
@@ -229,7 +229,7 @@ pg_add_edits (pg_stream_t * s, int n_edit_bytes, int n_packet_bytes,
   return e;
 }
 
-static always_inline void *
+always_inline void *
 pg_get_edit_group (pg_stream_t * s, u32 group_index)
 {
   pg_edit_group_t * g = pg_stream_get_group (s, group_index);
@@ -237,7 +237,7 @@ pg_get_edit_group (pg_stream_t * s, u32 group_index)
 }
 
 /* Number of bytes for all groups >= given group. */
-static always_inline uword
+always_inline uword
 pg_edit_group_n_bytes (pg_stream_t * s, u32 group_index)
 {
   pg_edit_group_t * g;
@@ -248,7 +248,7 @@ pg_edit_group_n_bytes (pg_stream_t * s, u32 group_index)
   return n_bytes;
 }
 
-static always_inline void
+always_inline void
 pg_free_edit_group (pg_stream_t * s)
 {
   uword i = vec_len (s->edit_groups) - 1;
@@ -314,7 +314,7 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int is_enable);
 /* Find/create free packet-generator interface index. */
 u32 pg_interface_find_free (pg_main_t * pg, uword stream_index);
 
-static always_inline pg_node_t *
+always_inline pg_node_t *
 pg_get_node (uword node_index)
 {
   pg_main_t * pg = &pg_main;

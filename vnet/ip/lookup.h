@@ -126,7 +126,7 @@ typedef struct {
   u8 local_next_by_ip_protocol[256];
 } ip_lookup_main_t;
 
-static always_inline ip_adjacency_t *
+always_inline ip_adjacency_t *
 ip_get_adjacency (ip_lookup_main_t * lm,
 		  u32 adj_index)
 {

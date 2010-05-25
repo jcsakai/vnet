@@ -107,19 +107,19 @@ extern vlib_node_registration_t ip4_arp_node;
 ip_lookup_next_t
 ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst, u32 * adj_index);
 
-static always_inline ip4_address_t *
+always_inline ip4_address_t *
 ip4_get_interface_address (ip4_main_t * im, u32 sw_if_index)
 { return vec_elt_at_index (im->ip4_address_by_sw_if_index, sw_if_index); }
 
-static always_inline uword
+always_inline uword
 ip4_get_interface_address_length (ip4_main_t * im, u32 sw_if_index)
 { return vec_elt (im->ip4_address_length_by_sw_if_index, sw_if_index); }
 
-static always_inline uword
+always_inline uword
 ip4_interface_address_is_valid (ip4_address_t * a)
 { return a->data_u32 != ~0; }
 
-static always_inline uword
+always_inline uword
 ip4_destination_matches_route (ip4_main_t * im,
 			       ip4_address_t * key,
 			       ip4_address_t * dest,
@@ -127,7 +127,7 @@ ip4_destination_matches_route (ip4_main_t * im,
 { return 0 == ((key->data_u32 ^ dest->data_u32) & im->fib_masks[dest_length]); }
 
 /* As above but allows for unaligned destinations (e.g. works right from IP header of packet). */
-static always_inline uword
+always_inline uword
 ip4_unaligned_destination_matches_route (ip4_main_t * im,
 					 ip4_address_t * key,
 					 ip4_address_t * dest,

@@ -27,7 +27,7 @@
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ppp/ppp.h>
 
-static always_inline void
+always_inline void
 ip_poison_adjacencies (ip_adjacency_t * adj, uword n_adj)
 {
   if (DEBUG > 0)

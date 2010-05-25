@@ -43,7 +43,7 @@ typedef struct {
   };
 } ip4_tcp_udp_address_t;
 
-static always_inline void
+always_inline void
 ip4_tcp_udp_address_from_header (ip4_tcp_udp_address_t * a,
 				 ip4_header_t * ip)
 {

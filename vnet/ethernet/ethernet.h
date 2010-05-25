@@ -30,7 +30,7 @@
 #include <vnet/ethernet/phy.h>
 #include <vnet/pg/pg.h>
 
-static always_inline u64
+always_inline u64
 ethernet_mac_address_u64 (u8 * a)
 { return (((u64) a[0] << (u64) (5*8))
 	  | ((u64) a[1] << (u64) (4*8))
@@ -121,7 +121,7 @@ typedef struct {
   uword * vlan_index_by_2_vlan_id;
 } ethernet_main_t;
 
-static always_inline ethernet_type_info_t *
+always_inline ethernet_type_info_t *
 ethernet_get_type_info (ethernet_main_t * em, ethernet_type_t type)
 {
   uword * p = hash_get (em->type_info_by_type, type);
@@ -133,7 +133,7 @@ extern ethernet_main_t ethernet_main;
 /* Fetch ethernet main structure possibly calling init function. */
 ethernet_main_t * ethernet_get_main (vlib_main_t * vm);
 
-static always_inline uword
+always_inline uword
 is_ethernet_interface (u32 hw_if_index)
 {
   ethernet_main_t * em = &ethernet_main;
@@ -142,7 +142,7 @@ is_ethernet_interface (u32 hw_if_index)
   return ! strcmp (c->name, ethernet_hw_interface_class.name);
 }
 
-static always_inline ethernet_interface_t *
+always_inline ethernet_interface_t *
 ethernet_get_interface (ethernet_main_t * em, u32 hw_if_index)
 {
   vlib_hw_interface_t * i = vlib_get_hw_interface (em->vlib_main, hw_if_index);
@@ -151,7 +151,7 @@ ethernet_get_interface (ethernet_main_t * em, u32 hw_if_index)
 	  : 0);
 }
 
-static always_inline u32
+always_inline u32
 ethernet_vlan_to_sw_if_index (ethernet_vlan_mapping_t * m,
 			      u32 vlan,
 			      u32 is_vlan)
@@ -203,7 +203,7 @@ uword unformat_ethernet_interface (unformat_input_t * input, va_list * args);
 
 uword unformat_pg_ethernet_header (unformat_input_t * input, va_list * args);
 
-static always_inline void
+always_inline void
 ethernet_setup_node (vlib_main_t * vm, u32 node_index)
 {
   vlib_node_t * n = vlib_get_node (vm, node_index);

@@ -71,7 +71,7 @@ typedef struct {
   u64 last_increment_value;
 } pg_edit_t;
 
-static inline void
+always_inline void
 pg_edit_free (pg_edit_t * e)
 {
   int i;
