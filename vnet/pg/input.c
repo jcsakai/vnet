@@ -60,7 +60,7 @@ static int
 validate_buffer_data (vlib_buffer_t * b, pg_stream_t * s)
 { return validate_buffer_data2 (b, s, 0, s->buffer_bytes); }
 
-static always_inline void
+always_inline void
 set_1 (void * a0,
        u64 v0,
        u64 v_min, u64 v_max,
@@ -92,7 +92,7 @@ set_1 (void * a0,
     }
 }
 
-static always_inline void
+always_inline void
 set_2 (void * a0, void * a1,
        u64 v0, u64 v1,
        u64 v_min, u64 v_max,
@@ -139,7 +139,7 @@ set_2 (void * a0, void * a1,
     }
 }
 
-static always_inline void
+static_always_inline void
 do_set_fixed (pg_main_t * pg,
 	      pg_stream_t * s,
 	      u32 * buffers,
@@ -197,7 +197,7 @@ do_set_fixed (pg_main_t * pg,
     }
 }
 
-static always_inline u64
+static_always_inline u64
 do_set_increment (pg_main_t * pg,
 		  pg_stream_t * s,
 		  u32 * buffers,
@@ -297,7 +297,7 @@ do_set_increment (pg_main_t * pg,
   return v;
 }
 
-static always_inline void
+static_always_inline void
 do_set_random (pg_main_t * pg,
 	       pg_stream_t * s,
 	       u32 * buffers,
@@ -438,7 +438,7 @@ do_set_random (pg_main_t * pg,
     clib_host_to_net_##t ((clib_net_to_host_mem_##t (a##i) &~ mask)	\
 			  | (v##i << shift))
   
-static always_inline void
+always_inline void
 setbits_1 (void * a0,
 	   u64 v0,
 	   u64 v_min, u64 v_max,
@@ -465,7 +465,7 @@ setbits_1 (void * a0,
     }
 }
 
-static always_inline void
+always_inline void
 setbits_2 (void * a0, void * a1,
 	   u64 v0, u64 v1,
 	   u64 v_min, u64 v_max,
@@ -502,7 +502,7 @@ setbits_2 (void * a0, void * a1,
 
 #undef _
 
-static always_inline void
+static_always_inline void
 do_setbits_fixed (pg_main_t * pg,
 		  pg_stream_t * s,
 		  u32 * buffers,
@@ -560,7 +560,7 @@ do_setbits_fixed (pg_main_t * pg,
     }
 }
 
-static always_inline u64
+static_always_inline u64
 do_setbits_increment (pg_main_t * pg,
 		      pg_stream_t * s,
 		      u32 * buffers,
@@ -643,7 +643,7 @@ do_setbits_increment (pg_main_t * pg,
   return v;
 }
 
-static always_inline void
+static_always_inline void
 do_setbits_random (pg_main_t * pg,
 		   pg_stream_t * s,
 		   u32 * buffers,
@@ -1094,7 +1094,7 @@ pg_set_next_buffer_pointers (pg_main_t * pg,
     }
 }
 
-static always_inline void
+static_always_inline void
 init_buffers_inline (vlib_main_t * vm,
 		     pg_stream_t * s,
 		     u32 * buffers,
@@ -1185,8 +1185,8 @@ static void pg_buffer_init (vlib_main_t * vm,
   pg_stream_t * s;
   uword bi, si;
 
-  si = fl->opaque & pow2_mask (24);
-  bi = fl->opaque >> 24;
+  si = fl->buffer_init_function_opaque & pow2_mask (24);
+  bi = fl->buffer_init_function_opaque >> 24;
 
   s = pool_elt_at_index (pg->streams, si);
 
@@ -1209,7 +1209,7 @@ pg_stream_fill_helper (pg_main_t * pg,
 
   f = vlib_buffer_get_free_list (vm, bi->free_list_index);
   f->buffer_init_function = pg_buffer_init;
-  f->opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
+  f->buffer_init_function_opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
 
   if (! vlib_buffer_alloc_from_free_list (vm,
 					  buffers,
@@ -1218,14 +1218,14 @@ pg_stream_fill_helper (pg_main_t * pg,
     return 0;
       
   /* No need to do anything with already used buffers unless debugging. */
-  if (DEBUG > 0)
+  if (DEBUG > 0 || (s->flags & PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE))
     init_buffers_inline
       (vm, s,
        buffers,
        n_alloc,
        /* data_offset */ (bi - s->buffer_indices) * s->buffer_bytes,
        s->buffer_bytes,
-       /* set data */ 0);
+       /* set data */ (s->flags & PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE) != 0);
 
   if (next_buffers)
     pg_set_next_buffer_pointers (pg, s, buffers, next_buffers, n_alloc);

@@ -25,210 +25,252 @@
  *------------------------------------------------------------------
  */
 
-#include <sys/types.h> 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <linux/if_arp.h>
-#include <stropts.h>
+#include <fcntl.h>		/* for open */
 #include <sys/ioctl.h>
-#include <linux/if_tun.h>
-#include <clib/byte_order.h>
-
-#include <fcntl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/types.h> 
+#include <sys/uio.h>		/* for iovec */
+#include <netinet/in.h>
+
+#include <linux/if_arp.h>
+#include <linux/if_tun.h>
 
 #include <vlib/vlib.h>
 #include <vlib/unix/unix.h>
 
+#include <vnet/ip/ip.h>
+
 typedef struct {
-    u32 unix_file_index;
-    i8 *input_buffer;
-    int dev_tap_fd;
-    int dev_net_tun_fd;
-    u32 punt_node_index;
-    u32 mtu;
-    i8 *tap_name;
-    u8 mac_address[6];
+  /* Vector of iovecs for readv/writev calls. */
+  struct iovec * iovecs;
+
+  /* Vector of VLIB rx buffers to use.  We allocate them in blocks
+     of VLIB_FRAME_SIZE (256). */
+  u32 * rx_buffers;
+
+  /* File descriptors for /dev/net/tun and provisioning socket. */
+  int dev_net_tun_fd, dev_tap_fd;
+
+  /* Interface MTU in bytes and # of default sized buffers. */
+  u32 mtu_bytes, mtu_buffers;
+
+  /* epoll call says we are ready to readv from socket. */
+  u32 read_ready;
+
+  /* Linux interface name for tun device. */
+  char * tun_name;
+
+  u32 unix_file_index;
 } tuntap_main_t;
 
-tuntap_main_t *tuntap_main;
-static char *inject_node_name = "ethernet-input";
+static tuntap_main_t tuntap_main = {
+  .tun_name = "fabric",
 
-enum {
-    /* Yes, this name is confusing. Sorry. */
-    PUNT_INJECT, 
+  /* Suitable defaults for an Ethernet-like tun/tap device */
+  .mtu_bytes = 4096 + 256,
 };
 
 /*
- * tuntap_punt
+ * tuntap_tx
  * Output node, writes the buffers comprising the incoming frame 
  * to the tun/tap device, aka hands them to the Linux kernel stack.
  * 
- * We dynamically register a single "next", the
- * graph node into which we *inject* packets. This is a hack which happens
- * to rhyme nicely with the dispatch macros.
  */
 static uword
-tuntap_punt (vlib_main_t * vm,
-	     vlib_node_runtime_t * node,
-	     vlib_frame_t * frame)
+tuntap_tx (vlib_main_t * vm,
+	   vlib_node_runtime_t * node,
+	   vlib_frame_t * frame)
 {
-    u32 * buffers = vlib_frame_args (frame);
-    uword n_buffers = frame->n_vectors;
-    tuntap_main_t *ttm = tuntap_main;
-    int i;
-    vlib_buffer_t *b;
-    i8 *datap;
-    int n;
-    int length, length_of_packet;
+  u32 * buffers = vlib_frame_args (frame);
+  uword n_packets = frame->n_vectors;
+  tuntap_main_t * tm = &tuntap_main;
+  int i;
 
-    for (i = 0; i < n_buffers; i++) {
-	b = vlib_get_buffer (vm, buffers[i]);
+  for (i = 0; i < n_packets; i++)
+    {
+      struct iovec * iov;
+      vlib_buffer_t * b;
+      uword l;
 
-        length_of_packet = vlib_buffer_n_bytes_in_chain (vm, buffers[i]);
+      b = vlib_get_buffer (vm, buffers[i]);
 
-	if (length_of_packet > ttm->mtu) {
-	    clib_warning ("pkt length %d >  mtu %d, discarded",
-			  b->current_length, ttm->mtu);
-	    continue;
-	}
-	/* Manual scatter-gather. One write per pkt on tun/tap */
-	if (PREDICT_FALSE (b->flags & VLIB_BUFFER_NEXT_PRESENT)) {
-	    i8 *ocp = ttm->input_buffer;
-	    int nbytes_left = length_of_packet;
-	    int nbytes_this_buffer;
-	    
-	    length = nbytes_left;
+      /* Re-set iovecs if present. */
+      if (tm->iovecs)
+	_vec_len (tm->iovecs) = 0;
 
-	    while (nbytes_left > 0) {
-		nbytes_this_buffer = clib_min (nbytes_left, b->current_length);
-		memcpy (ocp, b->data + b->current_data, nbytes_this_buffer);
-		ocp += nbytes_this_buffer;
-		nbytes_left -= nbytes_this_buffer;
-		b = vlib_get_buffer (vm, b->next_buffer);
-	    }
+      /* VLIB buffer chain -> Unix iovec(s). */
+      vec_add2 (tm->iovecs, iov, 1);
+      iov->iov_base = b->data + b->current_data;
+      iov->iov_len = l = b->current_length;
 
-	    datap = ttm->input_buffer;
-	} else {
-	    /* small pkt, write directly from the buffer */
-	    length = b->current_length;
-	    datap = (i8 *) (b->data + b->current_data);
+      if (PREDICT_FALSE (b->flags & VLIB_BUFFER_NEXT_PRESENT))
+	{
+	  do {
+	    b = vlib_get_buffer (vm, b->next_buffer);
+
+	    vec_add2 (tm->iovecs, iov, 1);
+
+	    iov->iov_base = b->data + b->current_data;
+	    iov->iov_len = b->current_length;
+	    l += b->current_length;
+	  } while (b->flags & VLIB_BUFFER_NEXT_PRESENT);
 	}
 
-	n = write (ttm->dev_net_tun_fd, datap, length_of_packet);
-
-	if (n < length_of_packet) {
-	    clib_unix_warning ("write");
-	}
+      if (writev (tm->dev_net_tun_fd, tm->iovecs, vec_len (tm->iovecs)) < l)
+	clib_unix_warning ("writev");
     }
     
-    vlib_buffer_free (vm, buffers, /* next buffer stride */ 1, n_buffers,
-		      /* follow_buffer_next */ 1);
+  vlib_buffer_free (vm, buffers, /* next buffer stride */ 1, n_packets,
+		    /* follow_buffer_next */ 1);
     
-    return n_buffers;
+  return n_packets;
 }
 
-VLIB_REGISTER_NODE (tuntap_punt_node) = {
-  .function = tuntap_punt,
-  .name = "tuntap_punt",
+static VLIB_REGISTER_NODE (tuntap_tx_node) = {
+  .function = tuntap_tx,
+  .name = "tuntap-tx",
   .type = VLIB_NODE_TYPE_INTERNAL,
   .vector_size = 4,
 };
 
-/*
- * tuntap_read
- * Non-blocking read function which injects
- * one packet at a time into the forwarding graph
- */
+enum {
+  TUNTAP_PUNT_NEXT_ETHERNET_INPUT, 
+};
 
-static clib_error_t * tuntap_read (unix_file_t * uf)
+/* Gets called when file descriptor is ready from epoll. */
+static clib_error_t * tuntap_read_ready (unix_file_t * uf)
 {
-    int n;
-    tuntap_main_t *ttm = tuntap_main;
-    vlib_main_t *vm = (vlib_main_t *) uf->private_data;
-    static u32 *buffers = 0;
-    int this_buffer_index;
-    int nbytes_this_buffer;
-    int nbuffers;
-    int n_bytes_left;
-    i8 *icp;
-    vlib_buffer_t *b = 0;
-    vlib_node_runtime_t *node_runtime;
-    u32 * to_next, n_left;
-    /* $$$$ this should be a #define, see also vlib_buffer_init() */
-    int default_buffer_size = 512;
-
-    n = read (ttm->dev_net_tun_fd, ttm->input_buffer, 
-	      vec_len(ttm->input_buffer));
-
-    if (n <= 0) {
-	clib_unix_warning ("read returned %d", n);
-	return 0;
-    }
-
-    nbuffers = (n + (default_buffer_size - 1)) / default_buffer_size;
-    vec_validate (buffers, nbuffers - 1);
-
-    if (vlib_buffer_alloc (vm, buffers, nbuffers) != nbuffers) {
-	clib_warning ("buffer allocation failure");
-	return 0;
-    }
-
-    icp = ttm->input_buffer;
-    this_buffer_index = 0;
-    n_bytes_left = n;
-
-    while (n_bytes_left > 0) {
-	nbytes_this_buffer = clib_min (n_bytes_left, default_buffer_size);
-
-	b = vlib_get_buffer (vm, buffers[this_buffer_index]);
-	
-	memcpy (b->data + b->current_data, icp, nbytes_this_buffer);
-	n_bytes_left -= nbytes_this_buffer;
-	icp += nbytes_this_buffer;
-
-        b->current_length = nbytes_this_buffer;
-
-	if (this_buffer_index < nbuffers - 1) {
-	    b->flags |= VLIB_BUFFER_NEXT_PRESENT;
-	    b->next_buffer = buffers[this_buffer_index+1];
-	} else {
-	    b->flags &= ~VLIB_BUFFER_NEXT_PRESENT;
-	    b->next_buffer = 0xdeadbeef; 
-	}
-
-	this_buffer_index++;
-    }
-
-#if DEBUG 
-    {
-        u8 * msg = vlib_validate_buffer (vm, buffers[0],
-                                         /* follow_buffer_next */ 1);
-        if (msg)
-            clib_warning ("%v", msg);
-    }
-#endif
-
-    node_runtime = vlib_node_get_runtime (vm, ttm->punt_node_index);
-
-    vlib_get_next_frame (vm, node_runtime, PUNT_INJECT, to_next, n_left);
-    to_next[0] = buffers[0];
-    n_left -= 1;
-    vlib_put_next_frame (vm, node_runtime, PUNT_INJECT, n_left);
-
-    {
-        uword n_trace = vlib_get_trace_count (vm, node_runtime);
-        if (n_trace > 0) {
-            vlib_trace_buffer (vm, node_runtime, PUNT_INJECT, b,
-                               /* follow_chain */ 1);
-            vlib_set_trace_count (vm, node_runtime, n_trace - 1);
-	}
-    }
-
-    _vec_len (buffers) = 0;
-
-    return 0;
+  tuntap_main_t * tm = &tuntap_main;
+  tm->read_ready = 1;
+  return 0;
 }
+
+static uword
+tuntap_rx (vlib_main_t * vm,
+	   vlib_node_runtime_t * node,
+	   vlib_frame_t * frame)
+{
+  tuntap_main_t * tm = &tuntap_main;
+  vlib_buffer_t * b;
+  u32 bi;
+  const uword buffer_size = VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
+
+  /* Work to do? */
+  if (! tm->read_ready)
+    return 0;
+
+  tm->read_ready = 0;
+
+  /* Make sure we have some RX buffers. */
+  {
+    uword n_left = vec_len (tm->rx_buffers);
+    uword n_alloc;
+
+    if (n_left < VLIB_FRAME_SIZE / 2)
+      {
+	if (! tm->rx_buffers)
+	  vec_alloc (tm->rx_buffers, VLIB_FRAME_SIZE);
+
+	n_alloc = vlib_buffer_alloc (vm, tm->rx_buffers + n_left, VLIB_FRAME_SIZE - n_left);
+
+	_vec_len (tm->rx_buffers) = n_left + n_alloc;
+      }
+  }
+
+  /* Allocate RX buffers from end of rx_buffers.
+     Turn them into iovecs to pass to readv. */
+  {
+    uword i_rx = vec_len (tm->rx_buffers) - 1;
+    vlib_buffer_t * b;
+    word i, n_bytes_left;
+
+    /* We should have enough buffers left for an MTU sized packet. */
+    ASSERT (vec_len (tm->rx_buffers) >= tm->mtu_buffers);
+
+    vec_validate (tm->iovecs, tm->mtu_buffers - 1);
+    for (i = 0; i < tm->mtu_buffers; i++)
+      {
+	b = vlib_get_buffer (vm, tm->rx_buffers[i_rx - i]);
+	tm->iovecs[i].iov_base = b->data;
+	tm->iovecs[i].iov_len = buffer_size;
+      }
+
+    n_bytes_left = readv (tm->dev_net_tun_fd, tm->iovecs, tm->mtu_buffers);
+    if (n_bytes_left <= 0)
+      {
+	clib_unix_warning ("readv %d", n_bytes_left);
+	return 0;
+      }
+
+    bi = tm->rx_buffers[i_rx];
+    while (1)
+      {
+	b = vlib_get_buffer (vm, tm->rx_buffers[i_rx]);
+
+	b->flags = 0;
+	b->current_data = 0;
+	b->current_length = n_bytes_left < buffer_size ? n_bytes_left : buffer_size;
+
+	n_bytes_left -= buffer_size;
+
+	if (n_bytes_left <= 0)
+	  break;
+
+	i_rx--;
+	b->flags |= VLIB_BUFFER_NEXT_PRESENT;
+	b->next_buffer = tm->rx_buffers[i_rx];
+      }
+
+    _vec_len (tm->rx_buffers) = i_rx;
+  }
+
+  if (DEBUG > 0)
+    {
+      u8 * msg = vlib_validate_buffer (vm, bi, /* follow_buffer_next */ 1);
+      if (msg)
+	clib_warning ("%v", msg);
+    }
+
+  b = vlib_get_buffer (vm, bi);
+
+  /* 
+   * If it's a TUN device, add (space for) dst + src MAC address, 
+   * to the left of the protocol number. Linux shim hdr: 
+   * (u16 flags, u16 protocol-id). Overwrite flags; use 10 octets of
+   * the pre-data area.
+   */
+  b->current_data -= 10;
+  b->current_length += 10;
+
+  {
+    uword n_trace = vlib_get_trace_count (vm, node);
+    if (n_trace > 0) {
+      vlib_trace_buffer (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT,
+			 b, /* follow_chain */ 1);
+      vlib_set_trace_count (vm, node, n_trace - 1);
+    }
+  }
+
+  /* Enqueue to ethernet-input. */
+  {
+    u32 * to_next = vlib_set_next_frame (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT);
+    to_next[0] = bi;
+  }
+
+  return 1;
+}
+
+static VLIB_REGISTER_NODE (tuntap_rx_node) = {
+  .function = tuntap_rx,
+  .name = "tuntap-rx",
+  .type = VLIB_NODE_TYPE_INPUT,
+  .vector_size = 4,
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [TUNTAP_PUNT_NEXT_ETHERNET_INPUT] = "ethernet-input",
+  },
+};
 
 /*
  * tuntap_exit
@@ -238,254 +280,247 @@ static clib_error_t * tuntap_read (unix_file_t * uf)
 static clib_error_t *
 tuntap_exit (vlib_main_t * vm)
 {
-    struct ifreq ifr;
-    int sfd;
+  tuntap_main_t *tm = &tuntap_main;
+  struct ifreq ifr;
+  int sfd;
 
-    if (tuntap_main == 0)
-	return 0;
-
-    sfd = socket (AF_INET, SOCK_STREAM, 0);
-    if (sfd < 0) {
-	clib_unix_warning("provisioning socket");
-    }
-
-    memset(&ifr, 0, sizeof (ifr));
-    strcpy (ifr.ifr_name, (char *) tuntap_main->tap_name);
-
-    /* get flags, modify to bring down interface... */
-    if (ioctl (sfd, SIOCGIFFLAGS, &ifr) < 0) {
-	clib_unix_warning ("SIOCGIFFLAGS");
-    }
-
-    ifr.ifr_flags &= ~(IFF_UP | IFF_RUNNING);
-
-    if (ioctl (sfd, SIOCSIFFLAGS, &ifr) < 0) {
-	clib_unix_warning ("SIOCSIFFLAGS");
-    }
-
-    /* Turn off persistence */
-    if (ioctl (tuntap_main->dev_net_tun_fd, TUNSETPERSIST, 0) < 0) {
-	clib_unix_warning ("TUNSETPERSIST");
-    }
-    close(tuntap_main->dev_tap_fd);
-    close(tuntap_main->dev_net_tun_fd);
-    close (sfd);
-
+  /* Not present. */
+  if (! tm->dev_net_tun_fd)
     return 0;
+
+  sfd = socket (AF_INET, SOCK_STREAM, 0);
+  if (sfd < 0)
+    clib_unix_warning("provisioning socket");
+
+  memset(&ifr, 0, sizeof (ifr));
+  strcpy (ifr.ifr_name, tm->tun_name);
+
+  /* get flags, modify to bring down interface... */
+  if (ioctl (sfd, SIOCGIFFLAGS, &ifr) < 0)
+    clib_unix_warning ("SIOCGIFFLAGS");
+
+  ifr.ifr_flags &= ~(IFF_UP | IFF_RUNNING);
+
+  if (ioctl (sfd, SIOCSIFFLAGS, &ifr) < 0)
+    clib_unix_warning ("SIOCSIFFLAGS");
+
+  /* Turn off persistence */
+  if (ioctl (tm->dev_net_tun_fd, TUNSETPERSIST, 0) < 0)
+    clib_unix_warning ("TUNSETPERSIST");
+  close(tm->dev_tap_fd);
+  close(tm->dev_net_tun_fd);
+  close (sfd);
+
+  return 0;
 }
 
 VLIB_EXIT_FUNCTION (tuntap_exit);
 
-int open_raw(char *iface)
+static clib_error_t *
+tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 {
-    int fd;
+  tuntap_main_t *tm = &tuntap_main;
+  clib_error_t * error = 0;
+  struct ifreq ifr;
+  struct sockaddr_in *sin;
+  int flags = IFF_TUN;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "mtu %d", &tm->mtu_bytes))
+	;
+
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
+    }
+
+  if (geteuid()) 
+    {
+      clib_warning ("tuntap disabled: must be superuser");
+      return 0;
+    }    
+
+  tm->dev_net_tun_fd = -1;
+  tm->dev_tap_fd = -1;
+
+  if ((tm->dev_net_tun_fd = open ("/dev/net/tun", O_RDWR)) < 0)
+    {
+      error = clib_error_return_unix (0, "open /dev/net/tun");
+      goto done;
+    }
+
+  memset (&ifr, 0, sizeof (ifr));
+  sin = (struct sockaddr_in *)&ifr.ifr_addr;
+  strcpy(ifr.ifr_name, tm->tun_name);
+  ifr.ifr_flags = flags;
+  if (ioctl (tm->dev_net_tun_fd, TUNSETIFF, (void *)&ifr) < 0)
+    {
+      error = clib_error_return_unix (0, "ioctl TUNSETIFF");
+      goto done;
+    }
+    
+  /* Make it persistent, at least until we split. */
+  if (ioctl (tm->dev_net_tun_fd, TUNSETPERSIST, 1) < 0)
+    {
+      error = clib_error_return_unix (0, "TUNSETPERSIST");
+      goto done;
+    }
+
+  /* Open a provisioning socket */
+  if ((tm->dev_tap_fd = socket(PF_PACKET, SOCK_RAW,
+			       htons(ETH_P_ALL))) < 0 )
+    {
+      error = clib_error_return_unix (0, "socket");
+      goto done;
+    }
+
+  /* Find the interface index. */
+  {
     struct ifreq ifr;
     struct sockaddr_ll sll;
-    struct packet_mreq mreq;
 
-    /* Open a provisioning socket */
-    if ((fd = socket(PF_PACKET, SOCK_RAW,
-		     htons(ETH_P_ALL))) < 0 ) {
-        clib_unix_warning("socket");
-        return(-1);
-    }
+    memset (&ifr, 0, sizeof(ifr));
+    strcpy (ifr.ifr_name, tm->tun_name);
+    if (ioctl (tm->dev_tap_fd, SIOCGIFINDEX, &ifr) < 0 )
+      {
+	error = clib_error_return_unix (0, "ioctl SIOCGIFINDEX");
+	goto done;
+      }
 
-    /* Find the interface index */
-    memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, iface, sizeof(ifr.ifr_name) - 1);
-    if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0 ) {
-        clib_unix_warning("SIOCGIFINDEX");
-	close(fd);
-        return(-1);
-    }
-
-    /* bind the provisioning socket to the interface */
+    /* Bind the provisioning socket to the interface. */
     memset(&sll, 0, sizeof(sll));
     sll.sll_family   = AF_PACKET;
     sll.sll_ifindex  = ifr.ifr_ifindex;
     sll.sll_protocol = htons(ETH_P_ALL);
 
-    if(bind(fd, (struct sockaddr*) &sll, sizeof(sll)) < 0 ) {
-        clib_unix_warning("bind");
-	close(fd);
-        return(-1);
-    }
+    if (bind(tm->dev_tap_fd, (struct sockaddr*) &sll, sizeof(sll)) < 0)
+      {
+	error = clib_error_return_unix (0, "bind");
+	goto done;
+      }
+  }
 
-    memset(&mreq, 0, sizeof(mreq));
-    mreq.mr_ifindex = ifr.ifr_ifindex;
-    mreq.mr_type = PACKET_MR_PROMISC;
-    mreq.mr_alen = 0; // sizeof (tuntap_main->mac_address);
-    memcpy (mreq.mr_address, tuntap_main->mac_address, 
-	    sizeof (tuntap_main->mac_address));
-
-    if (setsockopt(fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP,
-		   &mreq, sizeof(mreq)) < 0) {
-	clib_unix_warning("PACKET_ADD_MEMBERSHIP");
-	close(fd);
-	return (-1);
-    }
-
-    return(fd);
-}
-
-static clib_error_t *
-tuntap_config (vlib_main_t * vm, unformat_input_t * input)
-{
-    int ttfd = -1, sfd = -1;
+  /* non-blocking I/O on /dev/tapX */
+  {
     int one = 1;
-    struct ifreq ifr;
-    struct sockaddr_in *sin;
-    u32 ipv4_addr = 0xC0A80101; /* 192.168.1.1 */
+    if (ioctl (tm->dev_tap_fd, FIONBIO, &one) < 0)
+      {
+	error = clib_error_return_unix (0, "ioctl FIONBIO");
+	goto done;
+      }
+  }
+
+  tm->mtu_buffers = tm->mtu_bytes / VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
+  if (tm->mtu_bytes % VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES)
+    tm->mtu_buffers += 1;
+
+  ifr.ifr_mtu = tm->mtu_bytes;
+  if (ioctl (tm->dev_tap_fd, SIOCSIFMTU, &ifr) < 0)
+    {
+      error = clib_error_return_unix (0, "ioctl SIOCSIFMTU");
+      goto done;
+    }
+
+  /* get flags, modify to bring up interface... */
+  if (ioctl (tm->dev_tap_fd, SIOCGIFFLAGS, &ifr) < 0)
+    {
+      error = clib_error_return_unix (0, "ioctl SIOCGIFFLAGS");
+      goto done;
+    }
+
+  ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
+
+  if (ioctl (tm->dev_tap_fd, SIOCSIFFLAGS, &ifr) < 0)
+    {
+      error = clib_error_return_unix (0, "ioctl SIOCSIFFLAGS");
+      goto done;
+    }
+
+  {
     unix_file_t template = {0};
-    /* Suitable defaults for an Ethernet-like tun/tap device */
-    int mtu = 4096 + 256;
-    char *tap_name = "tap9";
-    int flags = IFF_TAP | IFF_NO_PI;
-    u8 mac_address [6] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
-    tuntap_main_t *ttm;
+    template.read_function = tuntap_read_ready;
+    template.file_descriptor = tm->dev_net_tun_fd;
+    tm->unix_file_index = unix_file_add (&unix_main, &template);
+  }
 
-    while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT) {
-	/* $$$ configure tap vs. tun, flags, mac address, mtu */
-	break;
+ done:
+  if (error)
+    {
+      if (tm->dev_net_tun_fd >= 0)
+	close (tm->dev_net_tun_fd);
+      if (tm->dev_tap_fd >= 0)
+	close (tm->dev_tap_fd);
     }
 
-    ttfd = open ("/dev/net/tun", O_RDWR);
-
-    if (ttfd < 0) {
-	clib_unix_warning("open /dev/net/tun");
-	return 0;
-    }
-
-    vec_validate(tuntap_main, 0);
-    ttm = tuntap_main;
-
-    ttm->tap_name = (i8 *)tap_name;
-    memcpy (ttm->mac_address, mac_address, sizeof (ttm->mac_address));
-
-    memset (&ifr, 0, sizeof (ifr));
-    sin = (struct sockaddr_in *)&ifr.ifr_addr;
-
-    /* Pick an arbitrary device number */
-    strcpy(ifr.ifr_name, tap_name);
-    ifr.ifr_flags = flags;
-    if (ioctl(ttfd, TUNSETIFF, (void *)&ifr) < 0) {
-	clib_unix_warning("TUNSETIFF");
-    barf:
-	close (ttfd);
-	close (sfd);
-	vec_free (tuntap_main);
-	return 0;
-    }
-    
-    /* make it persistent, at least until we split */
-    if (ioctl (ttfd, TUNSETPERSIST, 1) < 0) {
-	clib_unix_warning ("TUNSETPERSIST");
-    }
-
-    ttm->dev_net_tun_fd = ttfd;
-
-    sfd = open_raw (tap_name);
-    if (sfd < 0) {
-	clib_unix_warning("socket");
-	goto barf;
-    }
-    /* non-blocking I/O on /dev/tapX */
-    if (ioctl (sfd, FIONBIO, &one) < 0) {
-	clib_unix_warning ("FIONBIO");
-	goto barf;
-    }
-
-    ttm->dev_tap_fd = sfd;
-
-    /* Set ipv4 address, netmask, bring it up */
-    memset (&ifr, 0, sizeof (ifr));
-    strcpy (ifr.ifr_name, tap_name);
-    sin->sin_family = AF_INET;
-    sin->sin_addr.s_addr = htonl (ipv4_addr);
-    
-    if (ioctl (sfd, SIOCSIFADDR, &ifr) < 0) {
-	clib_unix_warning("SIOCSIFADDR");
-	goto barf;
-    }
-    
-    /* /16 netmask */
-    sin->sin_addr.s_addr = htonl (0xFFFF0000);
-    
-    if (ioctl (sfd, SIOCSIFNETMASK, &ifr) < 0) {
-	clib_unix_warning("SIOCSIFNETMASK");
-	goto barf;
-    }
-
-    ifr.ifr_mtu = mtu;
-    ttm->mtu = mtu;
-    if (ioctl (sfd, SIOCSIFMTU, &ifr) < 0) {
-	clib_unix_warning("SIOCSIFMTU");
-    }
-
-    /* MAC address only makes sense with a tap device */
-    if (flags & IFF_TAP) {
-        ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
-        memcpy (ifr.ifr_hwaddr.sa_data, ttm->mac_address, 
-                sizeof (ttm->mac_address));
-
-        if (ioctl (sfd, SIOCSIFHWADDR, &ifr) < 0) {
-            clib_unix_warning("SIOCSIFHWADDR");
-        }
-    }
-
-    /* get flags, modify to bring up interface... */
-    if (ioctl (sfd, SIOCGIFFLAGS, &ifr) < 0) {
-	clib_unix_warning ("SIOCGIFFLAGS");
-	goto barf;
-    }
-
-    ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
-
-    if (ioctl (sfd, SIOCSIFFLAGS, &ifr) < 0) {
-	clib_unix_warning ("SIOCSIFFLAGS");
-	goto barf;
-    }
-
-    /* Graph topology setup */
-    ttm->punt_node_index = tuntap_punt_node.index;
-    if (vlib_node_add_named_next_with_slot (vm, ttm->punt_node_index,
-                                            inject_node_name, PUNT_INJECT)
-        != PUNT_INJECT) {
-        vlib_panic_with_msg (vm, "tuntap inject point '%s' missing",
-                             inject_node_name);
-    }
-
-    /* Set up the unix_file object... */
-    vec_validate(ttm->input_buffer, mtu-1);
-
-    template.read_function = tuntap_read;
-    template.file_descriptor = ttm->dev_net_tun_fd;
-    template.error_function = tuntap_read;
-    template.private_data = (uword) vm;
-    ttm->unix_file_index = unix_file_add (&unix_main, &template);
-
-    return 0;
+  return error;
 }
 
 VLIB_CONFIG_FUNCTION (tuntap_config, "tuntap");
 
-/* call in main() to force the linker to load this module... */
-clib_error_t *
+static void
+tuntap_ip4_set_interface_address (ip4_main_t * im,
+				  uword opaque,
+				  u32 sw_if_index,
+				  ip4_address_t * address,
+				  u32 address_length)
+{
+  tuntap_main_t * tm = &tuntap_main;
+  uword is_delete;
+  struct ifreq ifr;
+
+  is_delete = ! ip4_interface_address_is_valid (address);
+
+  /* Use VLIB sw_if_index to select alias device. */
+  memset (&ifr, 0, sizeof (ifr));
+  sprintf (ifr.ifr_name, "%s:%d", tm->tun_name, sw_if_index);
+
+  if (! is_delete)
+    {
+      struct sockaddr_in * sin;
+
+      sin = (struct sockaddr_in *)&ifr.ifr_addr;
+
+      /* Set ipv4 address, netmask. */
+      sin->sin_family = AF_INET;
+      memcpy (&sin->sin_addr.s_addr, address, 4);
+      if (ioctl (tm->dev_tap_fd, SIOCSIFADDR, &ifr) < 0)
+	clib_unix_warning ("ioctl SIOCSIFADDR");
+    
+      sin->sin_addr.s_addr = im->fib_masks[address_length];
+      if (ioctl (tm->dev_tap_fd, SIOCSIFNETMASK, &ifr) < 0)
+	clib_unix_warning ("ioctl SIOCSIFNETMASK");
+    }
+
+  /* get flags, modify to bring up interface... */
+  if (ioctl (tm->dev_tap_fd, SIOCGIFFLAGS, &ifr) < 0)
+    clib_unix_warning ("ioctl SIOCGIFFLAGS");
+
+  if (is_delete)
+    ifr.ifr_flags &= ~(IFF_UP | IFF_RUNNING);
+  else
+    ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
+
+  if (ioctl (tm->dev_tap_fd, SIOCSIFFLAGS, &ifr) < 0)
+    clib_unix_warning ("ioctl SIOCSIFFLAGS");
+}
+
+static clib_error_t *
 tuntap_init (vlib_main_t * vm)
 {
+  clib_error_t * error;
+  ip4_main_t * im = &ip4_main;
+  ip4_set_interface_address_callback_t cb;
+
+  error = vlib_call_init_function (vm, ip4_init);
+  if (error)
+    return error;
+
+  cb.function = tuntap_ip4_set_interface_address;
+  cb.function_opaque = 0;
+  vec_add1 (im->set_interface_address_callbacks, cb);
+
   return 0;
 }
 
 VLIB_INIT_FUNCTION (tuntap_init);
-
-/* 
- * register_tuntap_inject_node_name
- *
- * If you want pkts injected somewhere other than ethernet-input,
- * call this function to register a different inject point... 
- */
-
-void register_tuntap_inject_node_name (char *name)
-{
-    inject_node_name = name;
-}

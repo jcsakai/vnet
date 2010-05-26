@@ -76,7 +76,7 @@ typedef struct {
   u16 urgent_pointer;
 } tcp_header_t;
 
-static always_inline int
+always_inline int
 tcp_header_bytes (tcp_header_t * t)
 { return (t->data_offset_and_flags >> 12) * sizeof (u32); }
 

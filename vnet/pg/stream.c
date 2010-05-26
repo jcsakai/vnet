@@ -52,6 +52,11 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
 				? VLIB_HW_INTERFACE_FLAG_LINK_UP
 				: 0));
 
+  vlib_sw_interface_set_flags (pg->vlib_main, pi->sw_if_index,
+			       (want_enabled
+				? VLIB_SW_INTERFACE_FLAG_ADMIN_UP
+				: 0));
+			       
   vlib_node_enable_disable (pg->vlib_main,
 			    pg_input_node.index,
 			    ! clib_bitmap_is_zero (pg->enabled_streams));
@@ -66,24 +71,19 @@ static u8 * format_pg_interface_name (u8 * s, va_list * args)
   u32 if_index = va_arg (*args, u32);
   pg_interface_t * pi;
 
-  s = format (s, "pg/stream");
   pi = vec_elt_at_index (pg->interfaces, if_index);
-  if (pi->stream_index != ~0)
-    {
-      pg_stream_t * st = vec_elt_at_index (pg->streams, pi->stream_index);
-      s = format (s, "-%v", st->name);
-    }
+  s = format (s, "pg/stream-%d", pi->stream_index);
 
   return s;
 }
 
-static vlib_device_class_t pg_dev_class = {
+static VLIB_DEVICE_CLASS (pg_dev_class) = {
   .name = "pg",
   .tx_function = pg_output,
   .format_device_name = format_pg_interface_name,
 };
 
-static vlib_hw_interface_class_t pg_interface_class = {
+static VLIB_HW_INTERFACE_CLASS (pg_interface_class) = {
   .name = "Packet generator",
 };
 
@@ -98,6 +98,8 @@ u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
     {
       i = pg->free_interfaces[l - 1];
       _vec_len (pg->free_interfaces) = l - 1;
+      pi = vec_elt_at_index (pg->interfaces, i);
+      pi->stream_index = stream_index;
     }    
   else
     {
@@ -106,8 +108,8 @@ u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
 
       pi->stream_index = stream_index;
       pi->hw_if_index = vlib_register_interface (vm,
-						 &pg_dev_class, i,
-						 &pg_interface_class, 0);
+						 pg_dev_class.index, i,
+						 pg_interface_class.index, stream_index);
       hi = vlib_get_hw_interface (vm, pi->hw_if_index);
       pi->sw_if_index = hi->sw_if_index;
     }
@@ -143,7 +145,7 @@ static void do_edit (pg_stream_t * stream,
 	}
 
       if (want_commit)
-	vec_add1 (stream->non_fixed_edits, e[0]);
+	vec_add1 (g->non_fixed_edits, e[0]);
       return;
     }
 
@@ -235,7 +237,7 @@ static void perform_fixed_edits (pg_stream_t * s)
 	do_edit (s, g, e, /* want_commit */ 1);
 
       /* All edits have either been performed or added to
-	 stream->non_fixed_edits.  So, we can delete the vector. */
+	 g->non_fixed_edits.  So, we can delete the vector. */
       vec_free (g->edits);
     }
 
@@ -244,6 +246,15 @@ static void perform_fixed_edits (pg_stream_t * s)
   vec_foreach (g, s->edit_groups)
     {
       g->start_byte_offset = vec_len (s->fixed_packet_data);
+
+      /* Relocate and copy non-fixed edits from group to stream. */
+      vec_foreach (e, g->non_fixed_edits)
+	e->lsb_bit_offset += g->start_byte_offset * BITS (u8);
+      vec_add (s->non_fixed_edits,
+	       g->non_fixed_edits,
+	       vec_len (g->non_fixed_edits));
+      vec_free (g->non_fixed_edits);
+
       vec_add (s->fixed_packet_data,
 	       g->fixed_packet_data,
 	       vec_len (g->fixed_packet_data));

@@ -15,6 +15,11 @@ vnet_main_init (vlib_main_t * vm)
 	return error;
     if ((error = vlib_call_init_function (vm, ethernet_init)))
 	return error;
+    if ((error = vlib_call_init_function (vm, ethernet_arp_init)))
+	return error;
+
+    if ((error = unix_physmem_init (vm)))
+        return error;
 
     return error;
 }

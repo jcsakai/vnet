@@ -33,7 +33,7 @@ static clib_error_t * pg_init (vlib_main_t * vm)
 {
   clib_error_t * error;
   pg_main_t * pg = &pg_main;
-  u32 i;
+  int i, j;
 
   pg->vlib_main = vm;
 
@@ -43,10 +43,19 @@ static clib_error_t * pg_init (vlib_main_t * vm)
   if ((error = vlib_call_init_function (vm, pg_cli_init)))
     goto done;
 
-  /* Create/free first interface so that it exists and can be
-     used as a destination interface for streams. */
-  i = pg_interface_find_free (pg, ~0);
-  vec_add1 (pg->free_interfaces, i);
+  /* Create/free interfaces so that they exist and can be
+     used as a destination interface for streams.  Also, create
+     a fixed number of pg interfaces so that interface numbering can
+     be made to be deterministic (at least if <= 4 streams are ever used). */
+  for (i = 0; i < 4; i++)
+    {
+      j = pg_interface_find_free (pg, i);
+      ASSERT (j == i);
+    }
+
+  /* Free interfaces. */
+  for (i = j; i >= 0; i--)
+    vec_add1 (pg->free_interfaces, i);
 
  done:
   return error;

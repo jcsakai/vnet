@@ -23,6 +23,7 @@ nobase_include_HEADERS += \
 # Layer 2 protocol: Ethernet
 ########################################
 libvnet_la_SOURCES +=				\
+ vnet/ethernet/arp.c				\
  vnet/ethernet/cli.c				\
  vnet/ethernet/format.c				\
  vnet/ethernet/init.c				\
@@ -42,9 +43,14 @@ nobase_include_HEADERS +=			\
 ########################################
 # Layer 2 protocol: PPP
 ########################################
-# libvnet_la_SOURCES +=
+libvnet_la_SOURCES +=				\
+  vnet/ppp/node.c				\
+  vnet/ppp/pg.c					\
+  vnet/ppp/ppp.c
 
 nobase_include_HEADERS +=			\
+ vnet/ppp/error.def				\
+ vnet/ppp/ppp.h					\
  vnet/ppp/packet.h
 
 ########################################
@@ -64,7 +70,7 @@ libvnet_la_SOURCES +=				\
  vnet/ip/ip_checksum.c				\
  vnet/ip/ip.h					\
  vnet/ip/ip_init.c				\
- vnet/ip/ip_lookup.c				\
+ vnet/ip/lookup.c				\
  vnet/ip/tcp_format.c				\
  vnet/ip/tcp_init.c				\
  vnet/ip/tcp_pg.c				\
@@ -126,4 +132,4 @@ noinst_PROGRAMS = vnet_unix
 
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDFLAGS = -static
-vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -lclib -lpthread -lm -ldl
+vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm

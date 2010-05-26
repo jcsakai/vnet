@@ -176,7 +176,7 @@ ethernet_phy_write_multiple (ethernet_phy_t * phy,
 			    u32 n_regs)
 { return ethernet_phy_read_write_multiple (phy, regs, n_regs, VLIB_WRITE); }
 
-static always_inline uword
+always_inline uword
 ethernet_phy_is_link_up (ethernet_phy_t * phy)
 { return (phy->media.flags & ETHERNET_MEDIA_LINK_UP) != 0; }
 

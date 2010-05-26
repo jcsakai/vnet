@@ -29,7 +29,7 @@
 #define IP4_PG_EDIT_CHECKSUM (1 << 0)
 #define IP4_PG_EDIT_LENGTH (1 << 1)
 
-static always_inline void
+static_always_inline void
 compute_length_and_or_checksum (vlib_main_t * vm,
 				u32 * packets,
 				u32 n_packets,
@@ -323,7 +323,7 @@ unformat_pg_ip4_header (unformat_input_t * input, va_list * args)
 	&& group_index + 1 < vec_len (s->edit_groups))
       {
 	pg_edit_set_fixed (&p->length,
-			   pg_edit_group_n_bytes (s, group_index + 1));
+			   pg_edit_group_n_bytes (s, group_index));
       }
 
     /* Compute IP header checksum if all edits are fixed. */

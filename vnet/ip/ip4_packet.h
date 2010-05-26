@@ -88,20 +88,20 @@ typedef union {
 #define IP4_VERSION_AND_HEADER_LENGTH_NO_OPTIONS \
   ((4 << 4) | (sizeof (ip4_header_t) / sizeof (u32)))
 
-static always_inline int
+always_inline int
 ip4_get_fragment_offset (ip4_header_t * i)
 { return clib_net_to_host_u16 (i->flags_and_fragment_offset) & 0x1fff; } 
 
 /* Fragment offset in bytes. */
-static always_inline int
+always_inline int
 ip4_get_fragment_offset_bytes (ip4_header_t * i)
 { return 8 * ip4_get_fragment_offset (i); }
 
-static always_inline int
+always_inline int
 ip4_header_bytes (ip4_header_t * i)
 { return sizeof (u32) * (i->ip_version_and_header_length & 0xf); }
 
-static always_inline void *
+always_inline void *
 ip4_next_header (ip4_header_t * i)
 { return (void *) i + ip4_header_bytes (i); }
 

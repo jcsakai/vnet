@@ -43,7 +43,7 @@ typedef enum {
   /* This packet matches an "interface route" and packets
      need to be passed to ARP to find rewrite string for
      this destination. */
-  IP_LOOKUP_NEXT_GLEAN,
+  IP_LOOKUP_NEXT_ARP,
 
   /* This packet is to be rewritten and forwarded to the next
      processing node.  This is typically the output interface but
@@ -83,10 +83,20 @@ typedef struct {
 /* Index into adjacency table. */
 typedef u32 ip_adjacency_index_t;
 
+/* Stored in 32 byte VLIB buffer opaque by ip lookup for benefit of
+   next nodes. */
 typedef struct {
-  u32 buffer;
-  u32 adj_index;
-} ip_buffer_and_adjacency_t;
+  /* Adjacency from destination/source IP address lookup. */
+  u32 dst_adj_index;
+
+  /* This gets set to ~0 until source lookup is performed. */
+  u32 src_adj_index;
+} ip_buffer_opaque_t;
+
+typedef struct {
+  /* Must be first. */
+  ip_buffer_opaque_t non_local;
+} ip_local_buffer_opaque_t;
 
 typedef enum {
   IP_LOCAL_NEXT_DROP,
@@ -103,6 +113,12 @@ typedef struct {
   /* Adjacency index for routing table misses. */
   u32 miss_adj_index;
 
+  /* Number of bytes in a fib result.  Must be at least
+     sizeof (uword).  First word is always adjacency index. */
+  u32 fib_result_n_bytes;
+
+  format_function_t * format_fib_result;
+
   /* Adjacency packet/byte counters indexed by adjacency index. */
   vlib_combined_counter_main_t adjacency_counters;
 
@@ -110,7 +126,7 @@ typedef struct {
   u8 local_next_by_ip_protocol[256];
 } ip_lookup_main_t;
 
-static always_inline ip_adjacency_t *
+always_inline ip_adjacency_t *
 ip_get_adjacency (ip_lookup_main_t * lm,
 		  u32 adj_index)
 {
@@ -132,8 +148,16 @@ do {								\
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index);
 
 /* Create new block of given number of contiguous adjacencies. */
-u32 ip_new_adjacency (ip_lookup_main_t * lm,
-		      ip_adjacency_t * adj,
-		      u32 n_adj);
+ip_adjacency_t *
+ip_add_adjacency (ip_lookup_main_t * lm,
+		  ip_adjacency_t * adj,
+		  u32 n_adj,
+		  u32 * adj_index_result);
+
+void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index);
+
+void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index);
+
+extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
 
 #endif /* included_ip_lookup_h */

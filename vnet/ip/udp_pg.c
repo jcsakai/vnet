@@ -29,7 +29,7 @@
 #define UDP_PG_EDIT_LENGTH (1 << 0)
 #define UDP_PG_EDIT_CHECKSUM (1 << 1)
 
-static always_inline void
+always_inline void
 udp_pg_edit_function_inline (pg_main_t * pg,
 			     pg_stream_t * s,
 			     pg_edit_group_t * g,

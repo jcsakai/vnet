@@ -29,8 +29,8 @@
 #include <clib/sparse_vec.h>
 
 #define foreach_ethernet_input_next		\
-  _ (PUNT, "error-punt")			\
-  _ (DROP, "error-drop")
+  _ (PUNT, "error-punt-transpose")		\
+  _ (DROP, "error-drop-transpose")
 
 typedef enum {
 #define _(s,n) ETHERNET_INPUT_NEXT_##s,
@@ -70,6 +70,7 @@ ethernet_input (vlib_main_t * vm,
   ethernet_input_runtime_t * rt = (void *) node->runtime_data;
   u32 n_left_from, next_index, i_next, * from, * to_next;
   vlib_error_t unknown_type_error = vlib_error_set (node->node_index, ETHERNET_ERROR_UNKNOWN_TYPE);
+  vlib_error_t * to_next_error, to_next_error_dummy[2];
 
   from = vlib_frame_vector_args (from_frame);
   n_left_from = from_frame->n_vectors;
@@ -88,10 +89,12 @@ ethernet_input (vlib_main_t * vm,
     {
       u32 n_left_to_next;
 
-      vlib_get_next_frame (vm, node, next_index,
-			   to_next, n_left_to_next);
+      vlib_get_next_frame_transpose (vm, node, next_index,
+				     to_next, n_left_to_next);
+      to_next_error = (next_index < ETHERNET_INPUT_N_NEXT
+		       ? vlib_error_for_transpose_buffer_pointer (to_next)
+		       : &to_next_error_dummy[0]);
 
-#if 0
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  u32 pi0, pi1;
@@ -117,6 +120,8 @@ ethernet_input (vlib_main_t * vm,
 	  pi1 = from[1];
 	  to_next[0] = pi0;
 	  to_next[1] = pi1;
+	  to_next_error[0] = unknown_type_error;
+	  to_next_error[1] = unknown_type_error;
 	  from += 2;
 	  to_next += 2;
 	  n_left_to_next -= 2;
@@ -137,85 +142,77 @@ ethernet_input (vlib_main_t * vm,
 	  /* Index sparse array with network byte order. */
 	  type0 = e0->type;
 	  type1 = e1->type;
-	  sparse_vec_index2 (next_by_type, type0, type1, &i0, &i1);
+	  sparse_vec_index2 (rt->next_by_type, type0, type1, &i0, &i1);
+
+	  to_next_error += (i0 == SPARSE_VEC_INVALID_INDEX) + (i1 == SPARSE_VEC_INVALID_INDEX);
 
 	  enqueue_code = (i0 != i_next) + 2*(i1 != i_next);
 
-	  if (PREDICT_FALSE (enqueue_code != 0 || ((i0 & i1) == 0)))
+	  if (PREDICT_FALSE (enqueue_code != 0))
 	    {
-	      vlib_error_meta_data_t * e;
-
+	      u32 * p;
 	      switch (enqueue_code)
 		{
-		case 0:
-		  ASSERT (i0 + i1 + i_next == 0);
-		  e = vlib_get_next_frame_meta_data (vm, node, next_index,
-						   n_left_to_next + 2,
-						   sizeof (e[0]));
-		  e[0] = e[1] = unknown_type_error;
-		  break;
-
 		case 1:
 		  /* A B A */
 		  to_next[-2] = pi1;
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  e = vlib_set_next_frame_meta (vm, node,
-					      vec_elt (rt->next_by_type, i0),
-					      pi0, sizeof (e[0]));
+		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_type, i0));
+		  p[0] = pi0;
 		  if (i0 == 0)
-		    e[0] = unknown_type_error;
+		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_type_error;
 		  break;
 
 		case 2:
 		  /* A A B */
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  e = vlib_set_next_frame_meta (vm, node,
-					      vec_elt (rt->next_by_type, i1),
-					      pi1, sizeof (e[0]));
+		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_type, i1));
+		  p[0] = pi1;
 		  if (i1 == 0)
-		    e[0] = unknown_type_error;
+		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_type_error;
 		  break;
 
 		case 3:
+		  /* A B B or A B C */
 		  to_next -= 2;
 		  n_left_to_next += 2;
-		  e = vlib_set_next_frame_meta (vm, node,
-					      vec_elt (rt->next_by_type, i0),
-					      pi0, sizeof (e[0]));
+		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_type, i0));
+		  p[0] = pi0;
 		  if (i0 == 0)
-		    e[0] = unknown_type_error;
+		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_type_error;
 
-		  e = vlib_set_next_frame_meta (vm, node,
-					      vec_elt (rt->next_by_type, i1),
-					      pi1, sizeof (e[0]));
+		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_type, i1));
+		  p[0] = pi1;
 		  if (i1 == 0)
-		    e[0] = unknown_type_error;
+		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_type_error;
 
 		  if (i0 == i1)
 		    {
 		      vlib_put_next_frame (vm, node, next_index,
-					 n_left_to_next);
+					   n_left_to_next);
 		      i_next = i1;
 		      next_index = vec_elt (rt->next_by_type, i_next);
-		      vlib_get_next_frame (vm, node, next_index,
-					 &n_left_to_next, &to_next);
+		      vlib_get_next_frame_transpose (vm, node, next_index, to_next, n_left_to_next);
+		      to_next_error = (next_index < ETHERNET_INPUT_N_NEXT
+				       ? vlib_error_for_transpose_buffer_pointer (to_next)
+				       : &to_next_error_dummy[0]);
 		    }
 		}
 	    }
 	}
-#endif
     
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  u32 pi0;
 	  vlib_buffer_t * p0;
 	  ethernet_header_t * e0;
-	  u32 i0, type0;
+	  u32 i0, type0, is_error0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
+	  to_next_error[0] = unknown_type_error;
 	  from += 1;
 	  to_next += 1;
 	  n_left_from -= 1;
@@ -230,34 +227,29 @@ ethernet_input (vlib_main_t * vm,
 
 	  type0 = e0->type;
 	  i0 = sparse_vec_index (rt->next_by_type, type0);
+	  is_error0 = i0 == SPARSE_VEC_INVALID_INDEX;
+	  to_next_error += is_error0;
 	  
-	  if (PREDICT_FALSE ((i0 != i_next) || (i0 == SPARSE_VEC_INVALID_INDEX)))
+	  /* Sent packet to wrong next? */
+	  if (PREDICT_FALSE (i0 != i_next))
 	    {
-	      /* Sent packet to wrong next? */
-	      if (i0 != i_next)
-		{
-		  /* Return old frame; remove incorrectly enqueued packet. */
-		  vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
+	      /* Return old frame; remove incorrectly enqueued packet. */
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
 
-		  /* Send to correct next. */
-		  i_next = i0;
-		  next_index = vec_elt (rt->next_by_type, i_next);
-		  vlib_get_next_frame (vm, node, next_index,
-				       to_next, n_left_to_next);
-		  to_next[0] = pi0;
-		  to_next += 1;
-		  n_left_to_next -= 1;
-		}
+	      /* Send to correct next. */
+	      i_next = i0;
+	      next_index = vec_elt (rt->next_by_type, i_next);
+	      vlib_get_next_frame_transpose (vm, node, next_index,
+					     to_next, n_left_to_next);
+	      to_next_error = (next_index < ETHERNET_INPUT_N_NEXT
+			       ? vlib_error_for_transpose_buffer_pointer (to_next)
+			       : &to_next_error_dummy[0]);
 
-	      /* Error? */
-	      if (i0 == 0)
-		{
-		  /* No need to write buffer index; it should already
-		     be there. */
-		  ASSERT (to_next[-1] == pi0);
-		  to_next[0] = unknown_type_error;
-		  to_next += 1;
-		}
+	      to_next[0] = pi0;
+	      to_next_error[0] = unknown_type_error;
+	      to_next += 1;
+	      to_next_error += is_error0;
+	      n_left_to_next -= 1;
 	    }
 	}
 
@@ -289,7 +281,7 @@ ethernet_sw_interface_up_down (vlib_main_t * vm,
     goto done;
 
   m->vlan_to_sw_if_index[si->sub.id] =
-    ((flags & VLIB_SW_INTERFACE_FLAG_UP) ? sw_if_index : si->sup_sw_if_index);
+    ((flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) ? sw_if_index : si->sup_sw_if_index);
 
  done:
   return error;
@@ -323,7 +315,7 @@ VLIB_REGISTER_NODE (ethernet_input_node) = {
   .format_trace = format_ethernet_input_trace,
   .unformat_buffer = unformat_ethernet_header,
 
-  .sw_interface_up_down_function = ethernet_sw_interface_up_down,
+  .sw_interface_admin_up_down_function = ethernet_sw_interface_up_down,
 };
 
 static clib_error_t * ethernet_input_init (vlib_main_t * vm)

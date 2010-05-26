@@ -1,5 +1,5 @@
 /*
- * ip/format.h: ip 4 and/or 6 formatting
+ * ppp_error.def: ppp errors
  *
  * Copyright (c) 2008 Eliot Dresselhaus
  *
@@ -23,48 +23,5 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef included_ip_format_h
-#define included_ip_format_h
-
-/* IP4 or IP6. */
-
-format_function_t format_ip_protocol;
-unformat_function_t unformat_ip_protocol;
-
-format_function_t format_tcp_udp_port;
-unformat_function_t unformat_tcp_udp_port;
-
-format_function_t format_ip_adjacency;
-format_function_t format_ip_adjacency_packet_data;
-
-unformat_function_t unformat_ip_adjacency;
-
-/* IP4 */
-
-/* Parse an IP4 address %d.%d.%d.%d. */
-unformat_function_t unformat_ip4_address;
-
-/* Format an IP4 address. */
-format_function_t format_ip4_address;
-format_function_t format_ip4_address_and_length;
-
-/* Parse an IP4 header. */
-unformat_function_t unformat_ip4_header;
-
-/* Format an IP4 header. */
-format_function_t format_ip4_header;
-
-/* Parse an IP packet matching pattern. */
-unformat_function_t unformat_ip4_match;
-
-unformat_function_t unformat_pg_ip4_header;
-
-/* IP6 */
-/* FIXME */
-
-/* Format a TCP/UDP headers. */
-format_function_t format_tcp_header, format_udp_header;
-
-unformat_function_t unformat_pg_tcp_header, unformat_pg_udp_header;
-
-#endif /* included_ip_format_h */
+ppp_error (UNKNOWN_PROTOCOL, "unknown ppp protocol")
+ppp_error (UNKNOWN_ADDRESS_CONTROL, "address, control != 0xff03")
