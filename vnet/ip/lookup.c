@@ -455,7 +455,7 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	  vlib_get_combined_counter (&lm->adjacency_counters, adj_index, &c);
 	  vlib_cli_output (vm, "%-20U%16Ld%16Ld %U",
 			   format_ip4_address_and_length,
-			   r->address, r->address_length,
+			   r->address.data, r->address_length,
 			   c.packets, c.bytes,
 			   format_ip_adjacency,
 			   vm, lm, adj_index);
