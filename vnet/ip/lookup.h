@@ -83,6 +83,41 @@ typedef struct {
 /* Index into adjacency table. */
 typedef u32 ip_adjacency_index_t;
 
+typedef struct {
+  /* Directly connected next-hop adjacency index. */
+  u32 next_hop_adj_index;
+
+  /* Path weight for this adjacency. */
+  u32 weight;
+} ip_multipath_next_hop_t;
+
+typedef struct {
+  /* Adjacency index of first index in block. */
+  u32 adj_index;
+  
+  /* Power of 2 size of adjacency block. */
+  u32 n_adj_in_block;
+
+  /* Number of prefixes that point to this adjacency. */
+  u32 reference_count;
+
+  /* Normalized next hops are used as hash keys: they are sorted by weight
+     and weights are chosen so they add up to 1 << log2_n_adj_in_block (with
+     zero-weighted next hops being deleted).
+     Unnormalized next hops are saved so that control plane has a record of exactly
+     what the RIB told it. */
+  struct {
+    /* Number of hops in the multipath. */
+    u32 count;
+
+    /* Offset into next hop heap for this block. */
+    u32 heap_offset;
+
+    /* Heap handle used to for example free block when we're done with it. */
+    u32 heap_handle;
+  } normalized_next_hops, unnormalized_next_hops;
+} ip_multipath_adjacency_t;
+
 /* Stored in 32 byte VLIB buffer opaque by ip lookup for benefit of
    next nodes. */
 typedef struct {
@@ -109,6 +144,19 @@ typedef enum {
 typedef struct {
   /* Adjacency heap. */
   ip_adjacency_t * adjacency_heap;
+
+  /* Heap of (next hop, weight) blocks.  Sorted by next hop. */
+  ip_multipath_next_hop_t * next_hop_heap;
+
+  /* Indexed by heap_handle from ip_adjacency_t. */
+  ip_multipath_adjacency_t * multipath_adjacencies;
+
+  /* Temporary vectors for looking up next hops in hash. */
+  ip_multipath_next_hop_t * next_hop_hash_lookup_key;
+  ip_multipath_next_hop_t * next_hop_hash_lookup_key_normalized;
+
+  /* Hash table mapping multipath adjacency next hops and weights to. */
+  uword * multipath_adjacency_by_next_hops;
 
   /* Adjacency index for routing table misses. */
   u32 miss_adj_index;
@@ -155,6 +203,15 @@ ip_add_adjacency (ip_lookup_main_t * lm,
 		  u32 * adj_index_result);
 
 void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index);
+
+ip_multipath_adjacency_t *
+ip_multipath_adjacency_get (ip_lookup_main_t * lm,
+			    ip_multipath_next_hop_t * nh_vector,
+			    uword create_if_non_existent);
+
+void
+ip_multipath_adjacency_free (ip_lookup_main_t * lm,
+			     ip_multipath_adjacency_t * a);
 
 void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index);
 

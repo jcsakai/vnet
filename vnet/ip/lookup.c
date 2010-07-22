@@ -23,6 +23,7 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <clib/math.h>		/* for fabs */
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ppp/ppp.h>
@@ -78,6 +79,235 @@ void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index)
   heap_dealloc (lm->adjacency_heap, handle);
 }
 
+static int
+next_hop_sort_by_weight (ip_multipath_next_hop_t * n1,
+			 ip_multipath_next_hop_t * n2)
+{
+  int cmp = (int) n1->weight - (int) n2->weight;
+  return (cmp == 0
+	  ? (int) n1->next_hop_adj_index - (int) n2->next_hop_adj_index
+	  : (cmp > 0 ? +1 : -1));
+}
+
+/* Given next hop vector is over-written with normalized one with sorted weights and
+   with weights corresponding to the number of adjacencies for each next hop.
+   Returns number of adjacencies in block. */
+static u32 ip_multipath_normalize_next_hops (ip_lookup_main_t * lm,
+					     ip_multipath_next_hop_t * raw_next_hops,
+					     ip_multipath_next_hop_t ** normalized_next_hops)
+{
+  ip_multipath_next_hop_t * nhs;
+  uword n_nhs, n_adj, n_adj_left, i;
+  f64 sum_weight, norm, error;
+
+  n_nhs = vec_len (raw_next_hops);
+  ASSERT (n_nhs > 0);
+  if (n_nhs == 0)
+    return 0;
+
+  /* Allocate enough space for 2 copies; we'll use second copy to save original weights. */
+  nhs = *normalized_next_hops;
+  vec_validate (nhs, 2*n_nhs - 1);
+
+  /* Fast path: 1 next hop in block. */
+  n_adj = n_nhs;
+  if (n_nhs == 1)
+    {
+      nhs[0] = raw_next_hops[0];
+      nhs[0].weight = 1;
+      goto done;
+    }
+
+  else if (n_nhs == 2)
+    {
+      int cmp = next_hop_sort_by_weight (&raw_next_hops[0], &raw_next_hops[1]) < 0;
+
+      /* Fast sort. */
+      nhs[0] = raw_next_hops[cmp];
+      nhs[1] = raw_next_hops[cmp ^ 1];
+
+      /* Fast path: equal cost multipath with 2 next hops. */
+      if (nhs[0].weight == nhs[1].weight)
+	goto done;
+    }
+  else
+    {
+      memcpy (nhs, raw_next_hops, n_nhs * sizeof (raw_next_hops[0]));
+      qsort (nhs, n_nhs, sizeof (nhs[0]), (void *) next_hop_sort_by_weight);
+    }
+
+  /* Find total weight to normalize weights. */
+  sum_weight = 0;
+  for (i = 0; i < n_nhs; i++)
+    sum_weight += nhs[i].weight;
+
+  /* In the unlikely case that all weights are given as 0, set them all to 1. */
+  if (sum_weight == 0)
+    {
+      for (i = 0; i < n_nhs; i++)
+	nhs[i].weight = 1;
+      sum_weight = n_nhs;
+    }
+
+  /* Save copies of all next hop weights to avoid being overwritten in loop below. */
+  for (i = 0; i < n_nhs; i++)
+    nhs[n_nhs + i].weight = nhs[i].weight;
+
+  /* Try larger and larger power of 2 sized adjacency blocks until we
+     find one where traffic flows to within 1% of specified weights. */
+  for (n_adj = max_pow2 (n_nhs); ; n_adj *= 2)
+    {
+      error = 0;
+
+      norm = n_adj / sum_weight;
+      n_adj_left = n_adj;
+      for (i = 0; i < n_nhs && n_adj_left > 0; i++)
+	{
+	  f64 nf = nhs[n_nhs + i].weight * norm; /* use saved weights */
+	  word n = flt_round_nearest (nf);
+
+	  n = n > n_adj_left ? n_adj_left : n;
+	  n_adj_left -= n;
+	  error += fabs (nf - n);
+	  nhs[i].weight = n;
+	}
+	
+      /* Less than 1% error with this size adjacency block? */
+      if (error <= 1e-2)
+	{
+	  /* Truncate any next hops with zero weight. */
+	  _vec_len (nhs) = i;
+	  break;
+	}
+    }
+
+ done:
+  /* Save vector for next call. */
+  *normalized_next_hops = nhs;
+  return n_adj;
+}
+
+ip_multipath_adjacency_t *
+ip_multipath_adjacency_get (ip_lookup_main_t * lm,
+			    ip_multipath_next_hop_t * raw_next_hops,
+			    uword create_if_non_existent)
+{
+  uword * p;
+  u32 i, j, n_adj, adj_index, adj_heap_handle;
+  ip_adjacency_t * adj, * copy_adj;
+  ip_multipath_next_hop_t * nh, * nhs;
+  ip_multipath_adjacency_t * madj;
+
+  n_adj = ip_multipath_normalize_next_hops (lm, raw_next_hops, &lm->next_hop_hash_lookup_key_normalized);
+  nhs = lm->next_hop_hash_lookup_key_normalized;
+
+  /* Basic sanity. */
+  ASSERT (n_adj >= vec_len (raw_next_hops));
+
+  /* Use normalized next hops to see if we've seen a block equivalent to this one before. */
+  p = hash_get_mem (lm->multipath_adjacency_by_next_hops, nhs);
+  if (p)
+    return vec_elt_at_index (lm->multipath_adjacencies, p[0]);
+
+  if (! create_if_non_existent)
+    return 0;
+
+  adj = ip_add_adjacency (lm, /* copy_adj */ 0, n_adj, &adj_index);
+  adj_heap_handle = adj[0].heap_handle;
+  
+  /* Fill in adjacencies in block based on corresponding next hop adjacencies. */
+  i = 0;
+  vec_foreach (nh, nhs)
+    {
+      copy_adj = ip_get_adjacency (lm, nh->next_hop_adj_index);
+      for (j = 0; j < nh->weight; j++)
+	{
+	  adj[i] = copy_adj[0];
+	  adj[i].heap_handle = adj_heap_handle;
+	  adj[i].n_adj = n_adj;
+	  i++;
+	}
+    }
+
+  /* All adjacencies should have been initialized. */
+  ASSERT (i == n_adj);
+
+  vec_validate (lm->multipath_adjacencies, adj_heap_handle);
+  madj = vec_elt_at_index (lm->multipath_adjacencies, adj_heap_handle);
+  
+  madj->adj_index = adj_index;
+  madj->n_adj_in_block = n_adj;
+  madj->reference_count = 0;	/* caller will set to one. */
+
+  madj->normalized_next_hops.count = vec_len (nhs);
+  madj->normalized_next_hops.heap_offset
+    = heap_alloc (lm->next_hop_heap, vec_len (nhs),
+		  madj->normalized_next_hops.heap_handle);
+  memcpy (lm->next_hop_heap + madj->normalized_next_hops.heap_offset,
+	  nhs, vec_bytes (nhs));
+
+  madj->unnormalized_next_hops.count = vec_len (raw_next_hops);
+  madj->unnormalized_next_hops.heap_offset
+    = heap_alloc (lm->next_hop_heap, vec_len (raw_next_hops),
+		  madj->unnormalized_next_hops.heap_handle);
+  memcpy (lm->next_hop_heap + madj->unnormalized_next_hops.heap_offset,
+	  raw_next_hops, vec_bytes (raw_next_hops));
+
+  return madj;
+}
+
+void
+ip_multipath_adjacency_free (ip_lookup_main_t * lm,
+			     ip_multipath_adjacency_t * a)
+{
+  ASSERT (0);
+}
+
+always_inline ip_multipath_next_hop_t *
+ip_next_hop_hash_key_get_next_hops (ip_lookup_main_t * lm, uword k,
+				    uword * n_next_hops)
+{
+  ip_multipath_next_hop_t * nhs;
+  uword n_nhs;
+  if (k & 1)
+    {
+      uword handle = k / 2;
+      nhs = heap_elt_with_handle (lm->next_hop_heap, handle);
+      n_nhs = heap_len (lm->next_hop_heap, handle);
+    }
+  else
+    {
+      nhs = uword_to_pointer (k, ip_multipath_next_hop_t *);
+      n_nhs = vec_len (nhs);
+    }
+  *n_next_hops = n_nhs;
+  return nhs;
+}
+
+static uword
+ip_next_hop_hash_key_sum (hash_t * h, uword key0)
+{
+  ip_lookup_main_t * lm = uword_to_pointer (h->user, ip_lookup_main_t *);  
+  ip_multipath_next_hop_t * k0;
+  uword n0;
+
+  k0 = ip_next_hop_hash_key_get_next_hops (lm, key0, &n0);
+  return hash_memory (k0, n0 * sizeof (k0[0]), /* seed */ n0);
+}
+
+static uword
+ip_next_hop_hash_key_equal (hash_t * h, uword key0, uword key1)
+{
+  ip_lookup_main_t * lm = uword_to_pointer (h->user, ip_lookup_main_t *);  
+  ip_multipath_next_hop_t * k0, * k1;
+  uword n0, n1;
+
+  k0 = ip_next_hop_hash_key_get_next_hops (lm, key0, &n0);
+  k1 = ip_next_hop_hash_key_get_next_hops (lm, key1, &n1);
+
+  return n0 == n1 && ! memcmp (k0, k1, n0 * sizeof (k0[0]));
+}
+
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
 {
   u32 ai;
@@ -93,6 +323,15 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
 
   if (! lm->fib_result_n_bytes)
     lm->fib_result_n_bytes = sizeof (uword);
+
+  lm->multipath_adjacency_by_next_hops
+    = hash_create2 (/* elts */ 0,
+		    /* user */ pointer_to_uword (lm),
+		    /* value_bytes */ sizeof (uword),
+		    ip_next_hop_hash_key_sum,
+		    ip_next_hop_hash_key_equal,
+		    /* format pair/arg */
+		    0, 0);
 }
 
 u8 * format_ip_lookup_next (u8 * s, va_list * args)

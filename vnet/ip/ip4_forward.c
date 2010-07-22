@@ -156,6 +156,154 @@ u32 ip4_add_del_route (ip4_main_t * im,
   return adj_index;
 }
 
+clib_error_t *
+ip4_add_del_route_next_hop (ip4_main_t * im,
+			    u32 flags,
+			    ip4_address_t * dst_address,
+			    u32 dst_address_length,
+			    ip4_address_t * next_hop,
+			    u32 next_hop_sw_if_index,
+			    u32 next_hop_weight)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, next_hop_sw_if_index);
+  ip4_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
+  u32 dst_address_u32, n_nhs, i_nh;
+  uword * dst_hash, * dst_result, dst_adj_index;
+  ip_adjacency_t * dst_adj;
+  uword * nh_hash, * nh_result, nh_adj_index;
+  ip_multipath_adjacency_t * mp_old, * mp_new;
+  ip_multipath_next_hop_t * nh, * nhs, * hash_nhs;
+  int is_del = (flags & IP4_ROUTE_FLAG_DEL) != 0;
+
+  /* Lookup next hop to be added or deleted. */
+  nh_hash = fib->adj_index_by_dst_address[32];
+  nh_result = hash_get (nh_hash, next_hop->data_u32);
+
+  /* Next hop must be known. */
+  if (! nh_result)
+    return clib_error_return (0, "next-hop %U/32 not in FIB",
+			      format_ip4_address, next_hop);
+
+  nh_adj_index = *nh_result;
+
+  ASSERT (dst_address_length < ARRAY_LEN (im->fib_masks));
+  dst_address_u32 = dst_address->data_u32 & im->fib_masks[dst_address_length];
+
+  dst_hash = fib->adj_index_by_dst_address[dst_address_length];
+  dst_result = hash_get (dst_hash, dst_address_u32);
+  if (dst_result)
+    {
+      dst_adj_index = dst_result[0];
+      dst_adj = ip_get_adjacency (lm, dst_adj_index);
+    }
+  else
+    {
+      /* For deletes destination must be known. */
+      if (is_del)
+	return clib_error_return (0, "unknown destination %U/%d",
+				  format_ip4_address, dst_address,
+				  dst_address_length);
+
+      dst_adj_index = ~0;
+      dst_adj = 0;
+    }
+
+  mp_old = mp_new = 0;
+  nhs = 0;
+  n_nhs = 0;
+  i_nh = 0;
+  if (dst_adj)
+    {
+      mp_old = vec_elt_at_index (lm->multipath_adjacencies, dst_adj->heap_handle);
+	
+      nhs = vec_elt_at_index (lm->next_hop_heap, mp_old->unnormalized_next_hops.heap_offset);
+      n_nhs = mp_old->unnormalized_next_hops.count;
+
+      /* Linear search: ok since n_next_hops is small. */
+      for (i_nh = 0; i_nh < n_nhs; i_nh++)
+	if (nhs[i_nh].next_hop_adj_index == nh_adj_index)
+	  break;
+
+      /* Given next hop not found. */
+      if (i_nh >= n_nhs && is_del)
+	return clib_error_return (0, "requested deleting next-hop %U not found in multi-path",
+				  format_ip4_address, next_hop);
+    }
+
+  hash_nhs = lm->next_hop_hash_lookup_key;
+  if (hash_nhs)
+    _vec_len (hash_nhs) = 0;
+
+  if (is_del)
+    {
+      if (n_nhs > 1)
+	{
+	  /* Prepare lookup key for multipath with target next hop deleted. */
+	  if (i_nh > 0)
+	    vec_add (hash_nhs, nhs + 0, i_nh);
+	  if (i_nh + 1 < n_nhs)
+	    vec_add (hash_nhs, nhs + i_nh + 1, n_nhs - (i_nh + 1));
+	}
+    }
+  else				/* ! delete => its an add */
+    {
+      /* If next hop is already there with the same weight, we have nothing to do. */
+      if (i_nh < n_nhs && nhs[i_nh].weight == next_hop_weight)
+	return 0;
+
+      /* Copy old next hops to lookup key vector. */
+      if (n_nhs > 0)
+	vec_add (hash_nhs, nhs, n_nhs);
+
+      if (i_nh < n_nhs)
+	{
+	  /* Change weight of existing next hop. */
+	  nh = vec_elt_at_index (hash_nhs, i_nh);
+	}
+      else
+	{
+	  /* Add a new next hop. */
+	  vec_add2 (hash_nhs, nh, 1);
+	  nh->next_hop_adj_index = nh_adj_index;
+	}
+
+      /* Set weight for added or old next hop. */
+      nh->weight = next_hop_weight;
+    }
+
+  if (vec_len (hash_nhs) > 0)
+    mp_new = ip_multipath_adjacency_get (lm, hash_nhs,
+					 /* create_if_non_existent */ 1);
+
+  if (mp_new != mp_old)
+    {
+      if (mp_old)
+	{
+	  ASSERT (mp_old->reference_count > 0);
+	  mp_old->reference_count -= 1;
+	}
+      if (mp_new)
+	mp_new->reference_count += 1;
+    }
+
+  if (mp_old && mp_old->reference_count == 0)
+    ip_multipath_adjacency_free (lm, mp_old);
+
+  if (mp_old != mp_new)
+    ip4_add_del_route (im, fib_index,
+		       ((is_del ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
+			| IP4_ROUTE_FLAG_FIB_INDEX),
+		       dst_address,
+		       dst_address_length,
+		       mp_new ? mp_new->adj_index : dst_adj_index);
+
+  /* Save key vector next call. */
+  lm->next_hop_hash_lookup_key = hash_nhs;
+
+  return /* no error */ 0;
+}
+
 void *
 ip4_get_route (ip4_main_t * im,
 	       u32 table_index_or_table_id,

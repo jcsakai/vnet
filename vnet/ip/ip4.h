@@ -154,6 +154,15 @@ u32 ip4_add_del_route (ip4_main_t * im,
 		       u32 address_length,
 		       u32 adj_index);
 
+clib_error_t *
+ip4_add_del_route_next_hop (ip4_main_t * im,
+			    u32 flags,
+			    ip4_address_t * dst_address,
+			    u32 dst_address_length,
+			    ip4_address_t * next_hop,
+			    u32 next_hop_sw_if_index,
+			    u32 next_hop_weight);
+
 void *
 ip4_get_route (ip4_main_t * im,
 	       u32 fib_index_or_table_id,
