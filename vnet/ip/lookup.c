@@ -28,6 +28,9 @@
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ppp/ppp.h>
 
+static void
+ip_multipath_del_adjacency (ip_lookup_main_t * lm, u32 del_adj_index);
+
 always_inline void
 ip_poison_adjacencies (ip_adjacency_t * adj, uword n_adj)
 {
@@ -69,15 +72,21 @@ ip_add_adjacency (ip_lookup_main_t * lm,
   return adj;
 }
 
-void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index)
+static void ip_del_adjacency2 (ip_lookup_main_t * lm, u32 adj_index, u32 delete_multipath_adjacency)
 {
   ip_adjacency_t * adj = ip_get_adjacency (lm, adj_index);
   uword handle = adj->heap_handle;
+
+  if (delete_multipath_adjacency)
+    ip_multipath_del_adjacency (lm, adj_index);
 
   ip_poison_adjacencies (adj, adj->n_adj);
 
   heap_dealloc (lm->adjacency_heap, handle);
 }
+
+void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index)
+{ ip_del_adjacency2 (lm, adj_index, /* delete_multipath_adjacency */ 1); }
 
 static int
 next_hop_sort_by_weight (ip_multipath_next_hop_t * n1,
@@ -115,6 +124,7 @@ static u32 ip_multipath_normalize_next_hops (ip_lookup_main_t * lm,
     {
       nhs[0] = raw_next_hops[0];
       nhs[0].weight = 1;
+      _vec_len (nhs) = 1;
       goto done;
     }
 
@@ -128,7 +138,11 @@ static u32 ip_multipath_normalize_next_hops (ip_lookup_main_t * lm,
 
       /* Fast path: equal cost multipath with 2 next hops. */
       if (nhs[0].weight == nhs[1].weight)
-	goto done;
+	{
+	  nhs[0].weight = nhs[1].weight = 1;
+	  _vec_len (nhs) = 2;
+	  goto done;
+	}
     }
   else
     {
@@ -161,7 +175,7 @@ static u32 ip_multipath_normalize_next_hops (ip_lookup_main_t * lm,
 
       norm = n_adj / sum_weight;
       n_adj_left = n_adj;
-      for (i = 0; i < n_nhs && n_adj_left > 0; i++)
+      for (i = 0; i < n_nhs; i++)
 	{
 	  f64 nf = nhs[n_nhs + i].weight * norm; /* use saved weights */
 	  word n = flt_round_nearest (nf);
@@ -172,8 +186,10 @@ static u32 ip_multipath_normalize_next_hops (ip_lookup_main_t * lm,
 	  nhs[i].weight = n;
 	}
 	
-      /* Less than 1% error with this size adjacency block? */
-      if (error <= 1e-2)
+      nhs[0].weight += n_adj_left;
+
+      /* Less than 5% average error per adjacency with this size adjacency block? */
+      if (error <= lm->multipath_next_hop_error_tolerance*n_adj)
 	{
 	  /* Truncate any next hops with zero weight. */
 	  _vec_len (nhs) = i;
@@ -187,7 +203,7 @@ static u32 ip_multipath_normalize_next_hops (ip_lookup_main_t * lm,
   return n_adj;
 }
 
-ip_multipath_adjacency_t *
+static u32
 ip_multipath_adjacency_get (ip_lookup_main_t * lm,
 			    ip_multipath_next_hop_t * raw_next_hops,
 			    uword create_if_non_existent)
@@ -207,14 +223,14 @@ ip_multipath_adjacency_get (ip_lookup_main_t * lm,
   /* Use normalized next hops to see if we've seen a block equivalent to this one before. */
   p = hash_get_mem (lm->multipath_adjacency_by_next_hops, nhs);
   if (p)
-    return vec_elt_at_index (lm->multipath_adjacencies, p[0]);
+    return p[0];
 
   if (! create_if_non_existent)
     return 0;
 
   adj = ip_add_adjacency (lm, /* copy_adj */ 0, n_adj, &adj_index);
   adj_heap_handle = adj[0].heap_handle;
-  
+
   /* Fill in adjacencies in block based on corresponding next hop adjacencies. */
   i = 0;
   vec_foreach (nh, nhs)
@@ -234,7 +250,7 @@ ip_multipath_adjacency_get (ip_lookup_main_t * lm,
 
   vec_validate (lm->multipath_adjacencies, adj_heap_handle);
   madj = vec_elt_at_index (lm->multipath_adjacencies, adj_heap_handle);
-  
+
   madj->adj_index = adj_index;
   madj->n_adj_in_block = n_adj;
   madj->reference_count = 0;	/* caller will set to one. */
@@ -253,14 +269,184 @@ ip_multipath_adjacency_get (ip_lookup_main_t * lm,
   memcpy (lm->next_hop_heap + madj->unnormalized_next_hops.heap_offset,
 	  raw_next_hops, vec_bytes (raw_next_hops));
 
-  return madj;
+  return adj_heap_handle;
+}
+
+/* Returns 0 for next hop not found. */
+u32
+ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
+					 u32 is_del,
+					 u32 old_mp_adj_index,
+					 u32 next_hop_adj_index,
+					 u32 next_hop_weight,
+					 u32 * new_mp_adj_index)
+{
+  ip_multipath_adjacency_t * mp_old, * mp_new;
+  ip_multipath_next_hop_t * nh, * nhs, * hash_nhs;
+  u32 n_nhs, i_nh;
+
+  mp_old = 0;
+  n_nhs = 0;
+  if (old_mp_adj_index != ~0)
+    {
+      mp_old = vec_elt_at_index (lm->multipath_adjacencies, old_mp_adj_index);
+	
+      nhs = vec_elt_at_index (lm->next_hop_heap, mp_old->unnormalized_next_hops.heap_offset);
+      n_nhs = mp_old->unnormalized_next_hops.count;
+
+      /* Linear search: ok since n_next_hops is small. */
+      for (i_nh = 0; i_nh < n_nhs; i_nh++)
+	if (nhs[i_nh].next_hop_adj_index == next_hop_adj_index)
+	  break;
+
+      /* Given next hop not found. */
+      if (i_nh >= n_nhs && is_del)
+	return 0;
+    }
+
+  hash_nhs = lm->next_hop_hash_lookup_key;
+  if (hash_nhs)
+    _vec_len (hash_nhs) = 0;
+
+  if (is_del)
+    {
+      if (n_nhs > 1)
+	{
+	  /* Prepare lookup key for multipath with target next hop deleted. */
+	  if (i_nh > 0)
+	    vec_add (hash_nhs, nhs + 0, i_nh);
+	  if (i_nh + 1 < n_nhs)
+	    vec_add (hash_nhs, nhs + i_nh + 1, n_nhs - (i_nh + 1));
+	}
+    }
+  else /* it's an add. */
+    {
+      /* If next hop is already there with the same weight, we have nothing to do. */
+      if (i_nh < n_nhs && nhs[i_nh].weight == next_hop_weight)
+	goto done;
+
+      /* Copy old next hops to lookup key vector. */
+      if (n_nhs > 0)
+	vec_add (hash_nhs, nhs, n_nhs);
+
+      if (i_nh < n_nhs)
+	{
+	  /* Change weight of existing next hop. */
+	  nh = vec_elt_at_index (hash_nhs, i_nh);
+	}
+      else
+	{
+	  /* Add a new next hop. */
+	  vec_add2 (hash_nhs, nh, 1);
+	  nh->next_hop_adj_index = next_hop_adj_index;
+	}
+
+      /* Set weight for added or old next hop. */
+      nh->weight = next_hop_weight;
+    }
+
+  if (vec_len (hash_nhs) > 0)
+    {
+      u32 tmp = ip_multipath_adjacency_get (lm, hash_nhs,
+					    /* create_if_non_existent */ 1);
+      if (tmp != ~0)
+	mp_new = vec_elt_at_index (lm->multipath_adjacencies, tmp);
+
+      /* Fetch again since pool may have moved. */
+      if (mp_old)
+	mp_old = vec_elt_at_index (lm->multipath_adjacencies, old_mp_adj_index);
+    }
+
+  new_mp_adj_index[0] = mp_new ? mp_new - lm->multipath_adjacencies : ~0;
+
+  if (mp_new != mp_old)
+    {
+      if (mp_old)
+	{
+	  ASSERT (mp_old->reference_count > 0);
+	  mp_old->reference_count -= 1;
+	}
+      if (mp_new)
+	mp_new->reference_count += 1;
+    }
+
+  if (mp_old && mp_old->reference_count == 0)
+    ip_multipath_adjacency_free (lm, mp_old);
+
+ done:
+  /* Save key vector next call. */
+  lm->next_hop_hash_lookup_key = hash_nhs;
+
+  return 1;
+}
+
+static void
+ip_multipath_del_adjacency (ip_lookup_main_t * lm, u32 del_adj_index)
+{
+  ip_adjacency_t * adj = ip_get_adjacency (lm, del_adj_index);
+  ip_multipath_adjacency_t * madj, * new_madj;
+  ip_multipath_next_hop_t * nhs, * hash_nhs;
+  u32 i, n_nhs, madj_index, new_madj_index;
+
+  /* It is illegal to directly delete a multipath adjacency. */
+  if (DEBUG > 0)
+    {
+      madj = vec_elt_at_index (lm->multipath_adjacencies, adj->heap_handle);
+      ASSERT (madj->reference_count == 0);
+    }
+
+  vec_validate (lm->adjacency_remap_table, vec_len (lm->adjacency_heap) - 1);
+
+  for (madj_index = 0; madj_index < vec_len (lm->multipath_adjacencies); madj_index++)
+    {
+      madj = vec_elt_at_index (lm->multipath_adjacencies, madj_index);
+      if (madj->n_adj_in_block == 0)
+	continue;
+
+      nhs = heap_elt_at_index (lm->next_hop_heap, madj->unnormalized_next_hops.heap_offset);
+      n_nhs = madj->unnormalized_next_hops.count;
+      for (i = 0; i < n_nhs; i++)
+	if (nhs[i].next_hop_adj_index == del_adj_index)
+	  break;
+
+      /* del_adj_index not found in unnormalized_next_hops?  We're done. */
+      if (i >= n_nhs)
+	continue;
+
+      new_madj = 0;
+      if (n_nhs > 1)
+	{
+	  hash_nhs = lm->next_hop_hash_lookup_key;
+	  if (hash_nhs)
+	    _vec_len (hash_nhs) = 0;
+	  if (i > 0)
+	    vec_add (hash_nhs, nhs + 0, i);
+	  if (i + 1 < n_nhs)
+	    vec_add (hash_nhs, nhs + i + 1, n_nhs - (i + 1));
+
+	  new_madj_index = ip_multipath_adjacency_get (lm, hash_nhs, /* create_if_non_existent */ 1);
+
+	  lm->next_hop_hash_lookup_key = hash_nhs;
+
+	  if (new_madj_index == madj_index)
+	    continue;
+
+	  new_madj = vec_elt_at_index (lm->multipath_adjacencies, new_madj_index);
+	}
+
+      lm->adjacency_remap_table[madj->adj_index] = new_madj ? 1 + new_madj->adj_index : ~0;
+      lm->n_adjacency_remaps += 1;
+      ip_multipath_adjacency_free (lm, madj);
+    }
 }
 
 void
 ip_multipath_adjacency_free (ip_lookup_main_t * lm,
 			     ip_multipath_adjacency_t * a)
 {
-  ASSERT (0);
+  heap_dealloc (lm->next_hop_heap, a->normalized_next_hops.heap_handle);
+  heap_dealloc (lm->next_hop_heap, a->unnormalized_next_hops.heap_handle);
+  ip_del_adjacency2 (lm, a->adj_index, a->reference_count == 0);
 }
 
 always_inline ip_multipath_next_hop_t *
@@ -332,6 +518,9 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
 		    ip_next_hop_hash_key_equal,
 		    /* format pair/arg */
 		    0, 0);
+
+  /* 5% max error tolerance for multipath. */
+  lm->multipath_next_hop_error_tolerance = .05;
 }
 
 u8 * format_ip_lookup_next (u8 * s, va_list * args)
@@ -368,26 +557,34 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
   ip_lookup_main_t * lm = va_arg (*args, ip_lookup_main_t *);
   u32 adj_index = va_arg (*args, u32);
   ip_adjacency_t * adj = ip_get_adjacency (lm, adj_index);
+  uword indent = format_get_indent (s);
+  uword i, n_adj = adj->n_adj;
 
-  s = format (s, "%d: ", adj_index);
-
-  switch (adj->lookup_next_index)
+  for (i = 0; i < n_adj; i++, adj++)
     {
-    case IP_LOOKUP_NEXT_REWRITE:
-    case IP_LOOKUP_NEXT_MULTIPATH:
-      s = format (s, "%U",
-		  format_vnet_rewrite,
-		  vm, &adj->rewrite_header, sizeof (adj->rewrite_data));
-      break;
+      if (i > 0)
+	s = format (s, "\n%U", format_white_space, indent);
 
-    default:
-      s = format (s, "%U", format_ip_lookup_next, adj->lookup_next_index);
-      if (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP)
-	s = format (s, " %U",
-		    format_vlib_sw_interface_name,
-		      vm,
-		      vlib_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
-      break;
+      s = format (s, "%d: ", adj_index + i);
+
+      switch (adj->lookup_next_index)
+	{
+	case IP_LOOKUP_NEXT_REWRITE:
+	case IP_LOOKUP_NEXT_MULTIPATH:
+	  s = format (s, "%U",
+		      format_vnet_rewrite,
+		      vm, &adj->rewrite_header, sizeof (adj->rewrite_data));
+	  break;
+
+	default:
+	  s = format (s, "%U", format_ip_lookup_next, adj->lookup_next_index);
+	  if (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP)
+	    s = format (s, " %U",
+			format_vlib_sw_interface_name,
+			vm,
+			vlib_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
+	  break;
+	}
     }
 
   return s;
@@ -516,13 +713,16 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
   ip4_main_t * im4 = &ip4_main;
   ip_lookup_main_t * lm = &im4->lookup_main;
   clib_error_t * error = 0;
-  u32 address_len, is_ip4, table_id, is_del;
-  ip4_address_t address;
-  ip_adjacency_t * add_adj = 0;
+  u32 address_valid, dst_address_len, is_ip4, table_id, is_del;
+  u32 weight, * weights = 0;
+  u32 sw_if_index, * sw_if_indices = 0;
+  ip4_address_t ip4_addr, ip4_dst_address, * ip4_via_next_hops = 0;
+  ip_adjacency_t parse_adj, * add_adj = 0;
 
   is_ip4 = 0;
   is_del = 0;
   table_id = 0;
+  address_valid = 0;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "table %d", &table_id))
@@ -531,76 +731,139 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	is_del = 1;
       else if (unformat (input, "add"))
 	is_del = 0;
+
       else if (unformat (input, "%U/%d",
-			 unformat_ip4_address, &address,
-			 &address_len))
+			 unformat_ip4_address, &ip4_addr,
+			 &dst_address_len))
 	{
 	  is_ip4 = 1;
-	  break;
+	  ip4_dst_address = ip4_addr;
+	  address_valid = 1;
 	}
+
+      else if (unformat (input, "via %U %U weight %u",
+			 unformat_ip4_address, &ip4_addr,
+			 unformat_vlib_sw_interface, vm, &sw_if_index,
+			 &weight))
+	{
+	  vec_add1 (ip4_via_next_hops, ip4_addr);
+	  vec_add1 (sw_if_indices, sw_if_index);
+	  vec_add1 (weights, weight);
+	}
+
+      else if (unformat (input, "via %U %U",
+			 unformat_ip4_address, &ip4_addr,
+			 unformat_vlib_sw_interface, vm, &sw_if_index))
+	{
+	  vec_add1 (ip4_via_next_hops, ip4_addr);
+	  vec_add1 (sw_if_indices, sw_if_index);
+	  vec_add1 (weights, 1);
+	}
+			 
+      else if (unformat (input, "via %U",
+			 unformat_ip_adjacency, vm, &parse_adj, ip4_rewrite_node.index))
+	vec_add1 (add_adj, parse_adj);
+
       else
-	return unformat_parse_error (input);
-    }
-    
-  if (! is_del)
-    {
-      while (1)
 	{
-	  ip_adjacency_t parse_adj;
-
-	  if (! unformat_user (input, unformat_ip_adjacency, vm, &parse_adj,
-			       is_ip4 ? ip4_rewrite_node.index : ~0))
-	    break;
-
-	  vec_add1 (add_adj, parse_adj);
-	}
-
-      if (vec_len (add_adj) == 0)
-	{
-	  error = clib_error_return (0, "expected adjacencies");
+	  error = unformat_parse_error (input);
 	  goto done;
 	}
     }
-
-  ASSERT (is_ip4);
-
-  if (is_del)
+    
+  if (! address_valid)
     {
-      u32 adj_index = 0;
+      error = clib_error_return (0, "expected ip4/ip6 destination address/length.");
+      goto done;
+    }
 
-      if (is_ip4)
+  if (! is_del && vec_len (add_adj) + vec_len (weights) == 0)
+    {
+      error = clib_error_return (0, "no next hops or adjacencies to add.");
+      goto done;
+    }
+
+  if (is_ip4)
+    {
+      if (is_del)
 	{
-	  adj_index = ip4_add_del_route (im4, table_id,
-					 IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
-					 &address, address_len,
-					 /* adj index */ ~0);
-	  if (adj_index == ~0)
+	  if (vec_len (ip4_via_next_hops) == 0)
 	    {
-	      error = clib_error_return
-		(0, "no such route %U",
-		 format_ip4_address_and_length, &address, address_len);
-	      goto done;
+	      u32 adj_index;
+
+	      adj_index = ip4_add_del_route (im4, table_id,
+					     IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
+					     &ip4_dst_address, dst_address_len,
+					     /* adj index */ ~0);
+	      if (adj_index != ~0)
+		ip_del_adjacency (lm, adj_index);
+	      else
+		{
+		  error = clib_error_return
+		    (0, "no such route %U",
+		     format_ip4_address_and_length, &ip4_dst_address, dst_address_len);
+		  goto done;
+		}
+
+	      ip4_maybe_remap_adjacencies (im4, table_id, IP4_ROUTE_FLAG_TABLE_ID);
+	    }
+	  else
+	    {
+	      u32 i;
+	      for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		{
+		  error = ip4_add_del_route_next_hop (im4,
+						      IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
+						      &ip4_dst_address, dst_address_len,
+						      &ip4_via_next_hops[i],
+						      sw_if_indices[i],
+						      weights[i]);
+		  if (error)
+		    goto done;
+		}
 	    }
 	}
 
-      ip_del_adjacency (lm, adj_index);
-    }
-  else
-    {
-      u32 ai;
-      ip_adjacency_t * adj;
+      else
+	{
+	  if (vec_len (add_adj) > 0)
+	    {
+	      u32 new_ai, old_ai;
+	      ip_adjacency_t * adj;
 
-      adj = ip_add_adjacency (lm, add_adj, vec_len (add_adj), &ai);
+	      adj = ip_add_adjacency (lm, add_adj, vec_len (add_adj), &new_ai);
 
-      if (is_ip4)
-	ip4_add_del_route (im4, table_id,
-			   IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
-			   &address, address_len,
-			   ai);
+	      old_ai = ip4_add_del_route (im4, table_id,
+					  IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
+					  &ip4_dst_address, dst_address_len,
+					  new_ai);
+
+	      /* Delete old adjacency index if present. */
+	      if (old_ai != new_ai && old_ai != ~0)
+		ip_del_adjacency (lm, old_ai);
+	    }
+	  else if (vec_len (ip4_via_next_hops) > 0)
+	    {
+	      u32 i;
+	      for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		{
+		  error = ip4_add_del_route_next_hop (im4,
+						      IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
+						      &ip4_dst_address, dst_address_len,
+						      &ip4_via_next_hops[i],
+						      sw_if_indices[i],
+						      weights[i]);
+		  if (error)
+		    goto done;
+		}
+	    }
+	}
     }
 
  done:
   vec_free (add_adj);
+  vec_free (weights);
+  vec_free (ip4_via_next_hops);
   return error;
 }
 
@@ -682,7 +945,6 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	{
 	  vlib_counter_t c;
 	  uword adj_index, * result = 0;
-	  ip_adjacency_t * adj;
 
 	  adj_index = r->index;
 	  if (n_words_per_result > 1)
@@ -701,10 +963,6 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 
 	  if (result && lm->format_fib_result)
 	    vlib_cli_output (vm, "%20s%U", "", lm->format_fib_result, vm, lm, result, 0);
-
-	  adj = ip_get_adjacency (lm, adj_index);
-	  if (adj->n_adj > 1)
-	    ASSERT (0);
 	}
     }
 

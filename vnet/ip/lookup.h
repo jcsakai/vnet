@@ -158,6 +158,13 @@ typedef struct {
   /* Hash table mapping multipath adjacency next hops and weights to. */
   uword * multipath_adjacency_by_next_hops;
 
+  u32 * adjacency_remap_table;
+  u32 n_adjacency_remaps;
+
+  /* If average error per adjacency is less than this threshold adjacency block
+     size is accepted. */
+  f64 multipath_next_hop_error_tolerance;
+
   /* Adjacency index for routing table misses. */
   u32 miss_adj_index;
 
@@ -204,14 +211,17 @@ ip_add_adjacency (ip_lookup_main_t * lm,
 
 void ip_del_adjacency (ip_lookup_main_t * lm, u32 adj_index);
 
-ip_multipath_adjacency_t *
-ip_multipath_adjacency_get (ip_lookup_main_t * lm,
-			    ip_multipath_next_hop_t * nh_vector,
-			    uword create_if_non_existent);
-
 void
 ip_multipath_adjacency_free (ip_lookup_main_t * lm,
 			     ip_multipath_adjacency_t * a);
+
+u32
+ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
+					 u32 is_del,
+					 u32 old_mp_adj_index,
+					 u32 next_hop_adj_index,
+					 u32 next_hop_weight,
+					 u32 * new_mp_adj_index);
 
 void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index);
 

@@ -96,6 +96,7 @@ u32 ip4_add_del_route (ip4_main_t * im,
 		       u32 address_length,
 		       u32 adj_index)
 {
+  ip_lookup_main_t * lm = &im->lookup_main;
   ip4_fib_t * fib = find_fib_by_table_index_or_id (im, fib_index_or_table_id, flags);
   u32 dst_address = address->data_u32;
   uword * hash, * p, old_adj_index, is_del;
@@ -106,7 +107,6 @@ u32 ip4_add_del_route (ip4_main_t * im,
 
   if (! fib->adj_index_by_dst_address[address_length])
     {
-      ip_lookup_main_t * lm = &im->lookup_main;
       ASSERT (lm->fib_result_n_bytes >= sizeof (uword));
       fib->adj_index_by_dst_address[address_length] =
 	hash_create (32 /* elts */,
@@ -116,6 +116,8 @@ u32 ip4_add_del_route (ip4_main_t * im,
   hash = fib->adj_index_by_dst_address[address_length];
 
   is_del = (flags & IP4_ROUTE_FLAG_DEL) != 0;
+
+  old_adj_index = ~0;
 
   /* For deletes callbacks are done before route is inserted. */
   if (is_del)
@@ -131,16 +133,13 @@ u32 ip4_add_del_route (ip4_main_t * im,
 			    p);
 	}
 
-      old_adj_index = ~0;
       hash_unset3 (hash, dst_address, &old_adj_index);
       fib->adj_index_by_dst_address[address_length] = hash;
-      adj_index = old_adj_index;
     }
   else
     {
-      hash_set (hash, dst_address, adj_index);
+      hash_set3 (hash, dst_address, adj_index, &old_adj_index);
       fib->adj_index_by_dst_address[address_length] = hash;
-
       /* For adds callbacks are done after route is inserted. */
       if (vec_len (im->add_del_route_callbacks) > 0)
 	{
@@ -153,7 +152,7 @@ u32 ip4_add_del_route (ip4_main_t * im,
 	}
     }
 
-  return adj_index;
+  return old_adj_index;
 }
 
 clib_error_t *
@@ -168,12 +167,11 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
   ip_lookup_main_t * lm = &im->lookup_main;
   u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, next_hop_sw_if_index);
   ip4_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
-  u32 dst_address_u32, n_nhs, i_nh;
+  u32 dst_address_u32, old_mp_adj_index, new_mp_adj_index;
   uword * dst_hash, * dst_result, dst_adj_index;
   ip_adjacency_t * dst_adj;
   uword * nh_hash, * nh_result, nh_adj_index;
-  ip_multipath_adjacency_t * mp_old, * mp_new;
-  ip_multipath_next_hop_t * nh, * nhs, * hash_nhs;
+  ip_multipath_adjacency_t * old_mp, * new_mp;
   int is_del = (flags & IP4_ROUTE_FLAG_DEL) != 0;
 
   /* Lookup next hop to be added or deleted. */
@@ -209,97 +207,30 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
       dst_adj = 0;
     }
 
-  mp_old = mp_new = 0;
-  nhs = 0;
-  n_nhs = 0;
-  i_nh = 0;
-  if (dst_adj)
-    {
-      mp_old = vec_elt_at_index (lm->multipath_adjacencies, dst_adj->heap_handle);
-	
-      nhs = vec_elt_at_index (lm->next_hop_heap, mp_old->unnormalized_next_hops.heap_offset);
-      n_nhs = mp_old->unnormalized_next_hops.count;
+  old_mp_adj_index = dst_adj ? dst_adj->heap_handle : ~0;
 
-      /* Linear search: ok since n_next_hops is small. */
-      for (i_nh = 0; i_nh < n_nhs; i_nh++)
-	if (nhs[i_nh].next_hop_adj_index == nh_adj_index)
-	  break;
+  if (! ip_multipath_adjacency_add_del_next_hop
+      (lm, is_del,
+       dst_adj ? dst_adj->heap_handle : ~0,
+       nh_adj_index,
+       next_hop_weight,
+       &new_mp_adj_index))
+    return clib_error_return (0, "requested deleting next-hop %U not found in multi-path",
+			      format_ip4_address, next_hop);
+  
+  old_mp = new_mp = 0;
+  if (old_mp_adj_index != ~0)
+    old_mp = vec_elt_at_index (lm->multipath_adjacencies, old_mp_adj_index);
+  if (new_mp_adj_index != ~0)
+    new_mp = vec_elt_at_index (lm->multipath_adjacencies, new_mp_adj_index);
 
-      /* Given next hop not found. */
-      if (i_nh >= n_nhs && is_del)
-	return clib_error_return (0, "requested deleting next-hop %U not found in multi-path",
-				  format_ip4_address, next_hop);
-    }
-
-  hash_nhs = lm->next_hop_hash_lookup_key;
-  if (hash_nhs)
-    _vec_len (hash_nhs) = 0;
-
-  if (is_del)
-    {
-      if (n_nhs > 1)
-	{
-	  /* Prepare lookup key for multipath with target next hop deleted. */
-	  if (i_nh > 0)
-	    vec_add (hash_nhs, nhs + 0, i_nh);
-	  if (i_nh + 1 < n_nhs)
-	    vec_add (hash_nhs, nhs + i_nh + 1, n_nhs - (i_nh + 1));
-	}
-    }
-  else				/* ! delete => its an add */
-    {
-      /* If next hop is already there with the same weight, we have nothing to do. */
-      if (i_nh < n_nhs && nhs[i_nh].weight == next_hop_weight)
-	return 0;
-
-      /* Copy old next hops to lookup key vector. */
-      if (n_nhs > 0)
-	vec_add (hash_nhs, nhs, n_nhs);
-
-      if (i_nh < n_nhs)
-	{
-	  /* Change weight of existing next hop. */
-	  nh = vec_elt_at_index (hash_nhs, i_nh);
-	}
-      else
-	{
-	  /* Add a new next hop. */
-	  vec_add2 (hash_nhs, nh, 1);
-	  nh->next_hop_adj_index = nh_adj_index;
-	}
-
-      /* Set weight for added or old next hop. */
-      nh->weight = next_hop_weight;
-    }
-
-  if (vec_len (hash_nhs) > 0)
-    mp_new = ip_multipath_adjacency_get (lm, hash_nhs,
-					 /* create_if_non_existent */ 1);
-
-  if (mp_new != mp_old)
-    {
-      if (mp_old)
-	{
-	  ASSERT (mp_old->reference_count > 0);
-	  mp_old->reference_count -= 1;
-	}
-      if (mp_new)
-	mp_new->reference_count += 1;
-    }
-
-  if (mp_old && mp_old->reference_count == 0)
-    ip_multipath_adjacency_free (lm, mp_old);
-
-  if (mp_old != mp_new)
+  if (old_mp != new_mp)
     ip4_add_del_route (im, fib_index,
 		       ((is_del ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
 			| IP4_ROUTE_FLAG_FIB_INDEX),
 		       dst_address,
 		       dst_address_length,
-		       mp_new ? mp_new->adj_index : dst_adj_index);
-
-  /* Save key vector next call. */
-  lm->next_hop_hash_lookup_key = hash_nhs;
+		       new_mp ? new_mp->adj_index : dst_adj_index);
 
   return /* no error */ 0;
 }
@@ -356,6 +287,65 @@ ip4_foreach_matching_route (ip4_main_t * im,
   return results;
 }
 
+void ip4_maybe_remap_adjacencies (ip4_main_t * im,
+				  u32 table_index_or_table_id,
+				  u32 flags)
+{
+  ip4_fib_t * fib = find_fib_by_table_index_or_id (im, table_index_or_table_id, flags);
+  ip_lookup_main_t * lm = &im->lookup_main;
+  u32 i, l;
+  static u32 * to_delete;
+
+  if (lm->n_adjacency_remaps == 0)
+    return;
+
+  for (l = 0; l <= 32; l++)
+    {
+      hash_pair_t * p;
+      uword * hash = fib->adj_index_by_dst_address[l];
+
+      if (hash_elts (hash) == 0)
+	continue;
+
+      if (to_delete)
+	_vec_len (to_delete) = 0;
+
+      hash_foreach_pair (p, hash, ({
+	    u32 adj_index = p->value[0];
+	    u32 m = vec_elt (lm->adjacency_remap_table, adj_index);
+	    if (m != 0)
+	      {
+		/* Reset mapping table. */
+		lm->adjacency_remap_table[adj_index] = 0;
+
+		/* New adjacency points to nothing: so delete prefix. */
+		if (m == ~0)
+		  vec_add1 (to_delete, p->key);
+		else
+		  {
+		    ip4_add_del_route_callback_t * cb;
+		    ip4_address_t a;
+
+		    /* Remap to new adjacency. */
+		    a.data_u32 = p->key;
+		    p->value[0] = m - 1;
+		    vec_foreach (cb, im->add_del_route_callbacks)
+		      cb->function (im, cb->function_opaque,
+				    fib, flags | IP4_ROUTE_FLAG_DEL,
+				    &a, l,
+				    p->value);
+		  }
+	      }
+      }));
+
+      for (i = 0; i < vec_len (to_delete); i++)
+	hash_unset (hash, to_delete[i]);
+    }
+
+  /* All remaps have been performed. */
+  lm->n_adjacency_remaps = 0;
+}
+
 void ip4_delete_matching_routes (ip4_main_t * im,
 				 u32 table_index_or_table_id,
 				 u32 flags,
@@ -387,6 +377,8 @@ void ip4_delete_matching_routes (ip4_main_t * im,
 	  ip_del_adjacency (&im->lookup_main, adj_index);
 	}
     }
+
+  ip4_maybe_remap_adjacencies (im, table_index_or_table_id, flags);
 }
 
 static uword
