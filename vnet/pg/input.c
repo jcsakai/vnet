@@ -52,6 +52,7 @@ validate_buffer_data2 (vlib_buffer_t * b, pg_stream_t * s,
   clib_warning ("buffer %U", format_vlib_buffer, b);
   clib_warning ("differ at index %d", i);
   clib_warning ("is     %U", format_hex_bytes, bd, n_bytes);
+  clib_warning ("mask   %U", format_hex_bytes, pm, n_bytes);
   clib_warning ("expect %U", format_hex_bytes, pd, n_bytes);
   return 0;
 }

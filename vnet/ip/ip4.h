@@ -94,6 +94,9 @@ typedef struct ip4_main_t {
 
   /* Functions to call when interface address changes. */
   ip4_set_interface_address_callback_t * set_interface_address_callbacks;
+
+  /* Seed for Jenkins hash used to compute ip4 flow hash. */
+  u32 flow_hash_seed;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
@@ -104,8 +107,8 @@ extern vlib_node_registration_t ip4_input_node;
 extern vlib_node_registration_t ip4_rewrite_node;
 extern vlib_node_registration_t ip4_arp_node;
 
-ip_lookup_next_t
-ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst, u32 * adj_index);
+u32
+ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst);
 
 always_inline ip4_address_t *
 ip4_get_interface_address (ip4_main_t * im, u32 sw_if_index)

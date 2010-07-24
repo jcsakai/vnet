@@ -28,13 +28,12 @@
 #include <vnet/ethernet/arp_packet.h>	/* for ethernet_arp_header_t */
 
 /* This is really, really simple but stupid fib. */
-ip_lookup_next_t
-ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst, u32 * adj_index)
+u32
+ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
   u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
   ip4_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
-  ip_adjacency_t * adj;
   uword * p, * hash, key;
   i32 i, dst_address, ai;
 
@@ -57,9 +56,7 @@ ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst, u32 * adj
   ai = lm->miss_adj_index;
 
  done:
-  *adj_index = ai;
-  adj = ip_get_adjacency (lm, ai);
-  return adj->lookup_next_index;
+  return ai;
 }
 
 static ip4_fib_t *
@@ -381,12 +378,33 @@ void ip4_delete_matching_routes (ip4_main_t * im,
   ip4_maybe_remap_adjacencies (im, table_index_or_table_id, flags);
 }
 
+/* Compute flow hash.  We'll use it to select which Sponge to use for this
+   flow.  And other things. */
+always_inline u32
+ip4_compute_flow_hash (ip4_header_t * ip, u32 flow_hash_seed)
+{
+    tcp_header_t * tcp = (void *) (ip + 1);
+    u32 a, b, c;
+    uword is_tcp_udp = (ip->protocol == IP_PROTOCOL_TCP
+			|| ip->protocol == IP_PROTOCOL_UDP);
+
+    c = ip->dst_address.data_u32;
+    b = ip->src_address.data_u32;
+    a = is_tcp_udp ? tcp->ports.src_and_dst : 0;
+    a ^= ip->protocol ^ flow_hash_seed;
+
+    hash_v3_finalize32 (a, b, c);
+
+    return c;
+}
+
 static uword
 ip4_lookup (vlib_main_t * vm,
 	    vlib_node_runtime_t * node,
 	    vlib_frame_t * frame)
 {
   ip4_main_t * im = &ip4_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
   vlib_combined_counter_main_t * cm = &im->lookup_main.adjacency_counters;
   u32 n_left_from, n_left_to_next, * from, * to_next;
   ip_lookup_next_t next;
@@ -407,6 +425,7 @@ ip4_lookup (vlib_main_t * vm,
 	  ip_lookup_next_t next0, next1;
 	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_header_t * ip0, * ip1;
+	  ip_adjacency_t * adj0, * adj1;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -428,11 +447,27 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  next0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, &adj_index0);
-	  next1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, &adj_index1);
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address);
+
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+	  adj1 = ip_get_adjacency (lm, adj_index1);
+
+	  next0 = adj0->lookup_next_index;
+	  next1 = adj1->lookup_next_index;
 
 	  i0 = vlib_get_buffer_opaque (p0);
 	  i1 = vlib_get_buffer_opaque (p1);
+
+	  i0->flow_hash = ip4_compute_flow_hash (ip0, im->flow_hash_seed);
+	  i1->flow_hash = ip4_compute_flow_hash (ip1, im->flow_hash_seed);
+
+	  ASSERT (adj0->n_adj > 0);
+	  ASSERT (adj1->n_adj > 0);
+	  ASSERT (is_pow2 (adj0->n_adj));
+	  ASSERT (is_pow2 (adj1->n_adj));
+	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
+	  adj_index1 += (i1->flow_hash & (adj1->n_adj - 1));
 
 	  i0->dst_adj_index = adj_index0;
 	  i1->dst_adj_index = adj_index1;
@@ -489,17 +524,28 @@ ip4_lookup (vlib_main_t * vm,
 	  ip_buffer_opaque_t * i0;
 	  u32 pi0, adj_index0;
 	  ip_lookup_next_t next0;
+	  ip_adjacency_t * adj0;
 
 	  pi0 = from[0];
+	  to_next[0] = pi0;
 
 	  p0 = vlib_get_buffer (vm, pi0);
 
 	  ip0 = vlib_buffer_get_current (p0);
-	  next0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, &adj_index0);
 
-	  to_next[0] = pi0;
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+
+	  next0 = adj0->lookup_next_index;
 
 	  i0 = vlib_get_buffer_opaque (p0);
+
+	  i0->flow_hash = ip4_compute_flow_hash (ip0, im->flow_hash_seed);
+
+	  ASSERT (adj0->n_adj > 0);
+	  ASSERT (is_pow2 (adj0->n_adj));
+	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
 
 	  i0->dst_adj_index = adj_index0;
 
@@ -690,7 +736,6 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
     [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
     [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
     [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
-    [IP_LOOKUP_NEXT_MULTIPATH] = "ip4-multipath",
   },
 
   .sw_interface_admin_up_down_function = ip4_sw_interface_admin_up_down,
@@ -781,7 +826,6 @@ static u8 * format_ip4_forward_next_trace (u8 * s, va_list * args)
 	      vm, &im->lookup_main, t->adj_index);
   switch (adj->lookup_next_index)
     {
-    case IP_LOOKUP_NEXT_MULTIPATH:
     case IP_LOOKUP_NEXT_REWRITE:
       s = format (s, "\n%U%U",
 		  format_white_space, indent,
@@ -1150,9 +1194,9 @@ ip4_local (vlib_main_t * vm,
 	  if (error0 == unknown_protocol
 	      && i0->non_local.src_adj_index == ~0)
 	    {
-	      ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX],
-			      &ip0->src_address,
-			      &i0->non_local.src_adj_index);
+	      i0->non_local.src_adj_index =
+		ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX],
+				&ip0->src_address);
 	      error0 = (lm->miss_adj_index == i0->non_local.src_adj_index
 			? src_lookup_miss
 			: error0);
@@ -1160,9 +1204,9 @@ ip4_local (vlib_main_t * vm,
 	  if (error1 == unknown_protocol
 	      && i1->non_local.src_adj_index == ~0)
 	    {
-	      ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX],
-			      &ip1->src_address,
-			      &i1->non_local.src_adj_index);
+	      i1->non_local.src_adj_index =
+		ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX],
+				&ip1->src_address);
 	      error1 = (lm->miss_adj_index == i1->non_local.src_adj_index
 			? src_lookup_miss
 			: error1);
@@ -1309,9 +1353,9 @@ ip4_local (vlib_main_t * vm,
 	  if (error0 == unknown_protocol
 	      && i0->non_local.src_adj_index == ~0)
 	    {
-	      ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX],
-			      &ip0->src_address,
-			      &i0->non_local.src_adj_index);
+	      i0->non_local.src_adj_index =
+		ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX],
+				&ip0->src_address);
 	      error0 = (lm->miss_adj_index == i0->non_local.src_adj_index
 			? src_lookup_miss
 			: error0);
@@ -1556,8 +1600,6 @@ ip4_rewrite_slow_path (vlib_main_t * vm,
   adj_index0 = adj_index;
   adj0 = ip_get_adjacency (lm, adj_index0);
       
-  ASSERT (adj0[0].n_adj == 1);
-
   pi0 = buffer_index;
   p0 = vlib_get_buffer (vm, pi0);
 
@@ -1689,10 +1731,6 @@ ip4_rewrite (vlib_main_t * vm,
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
       
-	  /* Multi-path should go elsewhere. */
-	  ASSERT (adj0[0].n_adj == 1);
-	  ASSERT (adj1[0].n_adj == 1);
-
 	  rw_len0 = adj0[0].rewrite_header.data_bytes;
 	  rw_len1 = adj1[0].rewrite_header.data_bytes;
 
@@ -1768,9 +1806,6 @@ ip4_rewrite (vlib_main_t * vm,
 	  adj_index0 = i0->dst_adj_index;
 	  adj0 = ip_get_adjacency (lm, adj_index0);
       
-	  /* Multi-path should go elsewhere. */
-	  ASSERT (adj0[0].n_adj == 1);
-
 	  ip0 = vlib_buffer_get_current (p0);
 
 	  /* Decrement TTL & update checksum. */
@@ -1850,38 +1885,5 @@ VLIB_REGISTER_NODE (ip4_rewrite_node) = {
   .n_next_nodes = 1,
   .next_nodes = {
     [IP4_REWRITE_NEXT_DROP] = "error-drop",
-  },
-};
-
-static uword
-ip4_multipath (vlib_main_t * vm,
-	       vlib_node_runtime_t * node,
-	       vlib_frame_t * frame)
-{
-  u32 * buffers = vlib_frame_vector_args (frame);
-  uword n_packets = frame->n_vectors;
-
-  vlib_error_drop_buffers (vm, node,
-			   buffers,
-			   /* stride */ 1,
-			   n_packets,
-			   /* next */ 0,
-			   ip4_input_node.index,
-			   IP4_ERROR_ADJACENCY_DROP);
-
-  if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip4_forward_next_trace (vm, node, frame);
-
-  return n_packets;
-}
-
-static VLIB_REGISTER_NODE (ip4_multipath_node) = {
-  .function = ip4_multipath,
-  .name = "ip4-multipath",
-  .vector_size = sizeof (u32),
-
-  .n_next_nodes = 1,
-  .next_nodes = {
-    [0] = "ip4-rewrite",
   },
 };

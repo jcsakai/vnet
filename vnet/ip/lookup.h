@@ -50,11 +50,6 @@ typedef enum {
      might be another node for further output processing. */
   IP_LOOKUP_NEXT_REWRITE,
 
-  /* This packet matches a multipath adjacency (e.g. n_adj > 1).
-     The (src,dst) (address,layer 4 ports) will be hashed to figure
-     which adjacency of the batch to take. */
-  IP_LOOKUP_NEXT_MULTIPATH,
-
   IP_LOOKUP_N_NEXT,
 } ip_lookup_next_t;
 
@@ -71,7 +66,7 @@ typedef struct {
   ip_lookup_next_t lookup_next_index : 16;
 
   union {
-    /* IP_LOOKUP_NEXT_{REWRITE,MULTIPATH} adjacencies. */
+    /* IP_LOOKUP_NEXT_REWRITE adjacencies. */
     vnet_declare_rewrite (64 - 2*sizeof(u32));
 
     /* IP_LOOKUP_NEXT_LOCAL */
@@ -126,6 +121,10 @@ typedef struct {
 
   /* This gets set to ~0 until source lookup is performed. */
   u32 src_adj_index;
+
+  /* Flow hash value for this packet computed from IP src/dst address
+     protocol and ports. */
+  u32 flow_hash;
 } ip_buffer_opaque_t;
 
 typedef struct {

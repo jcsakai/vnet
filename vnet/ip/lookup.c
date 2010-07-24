@@ -541,7 +541,6 @@ u8 * format_ip_lookup_next (u8 * s, va_list * args)
     case IP_LOOKUP_NEXT_ARP: t = "arp"; break;
 
     case IP_LOOKUP_NEXT_REWRITE:
-    case IP_LOOKUP_NEXT_MULTIPATH:
       break;
     }
 
@@ -557,34 +556,25 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
   ip_lookup_main_t * lm = va_arg (*args, ip_lookup_main_t *);
   u32 adj_index = va_arg (*args, u32);
   ip_adjacency_t * adj = ip_get_adjacency (lm, adj_index);
-  uword indent = format_get_indent (s);
-  uword i, n_adj = adj->n_adj;
 
-  for (i = 0; i < n_adj; i++, adj++)
+  s = format (s, "%d: ", adj_index);
+
+  switch (adj->lookup_next_index)
     {
-      if (i > 0)
-	s = format (s, "\n%U", format_white_space, indent);
+    case IP_LOOKUP_NEXT_REWRITE:
+      s = format (s, "%U",
+		  format_vnet_rewrite,
+		  vm, &adj->rewrite_header, sizeof (adj->rewrite_data));
+      break;
 
-      s = format (s, "%d: ", adj_index + i);
-
-      switch (adj->lookup_next_index)
-	{
-	case IP_LOOKUP_NEXT_REWRITE:
-	case IP_LOOKUP_NEXT_MULTIPATH:
-	  s = format (s, "%U",
-		      format_vnet_rewrite,
-		      vm, &adj->rewrite_header, sizeof (adj->rewrite_data));
-	  break;
-
-	default:
-	  s = format (s, "%U", format_ip_lookup_next, adj->lookup_next_index);
-	  if (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP)
-	    s = format (s, " %U",
-			format_vlib_sw_interface_name,
-			vm,
-			vlib_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
-	  break;
-	}
+    default:
+      s = format (s, "%U", format_ip_lookup_next, adj->lookup_next_index);
+      if (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP)
+	s = format (s, " %U",
+		    format_vlib_sw_interface_name,
+		    vm,
+		    vlib_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
+      break;
     }
 
   return s;
@@ -602,7 +592,6 @@ u8 * format_ip_adjacency_packet_data (u8 * s, va_list * args)
   switch (adj->lookup_next_index)
     {
     case IP_LOOKUP_NEXT_REWRITE:
-    case IP_LOOKUP_NEXT_MULTIPATH:
       s = format (s, "%U",
 		  format_vnet_rewrite_header,
 		  vm, &adj->rewrite_header, packet_data, n_packet_data_bytes);
@@ -943,8 +932,10 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 		       "Destination", "Packets", "Bytes", "Adjacency");
       vec_foreach (r, routes)
 	{
-	  vlib_counter_t c;
-	  uword adj_index, * result = 0;
+	  vlib_counter_t c, sum;
+	  uword i, j, n_left, n_nhs, adj_index, * result = 0;
+	  ip_adjacency_t * adj;
+	  ip_multipath_next_hop_t * nhs, tmp_nhs[1];
 
 	  adj_index = r->index;
 	  if (n_words_per_result > 1)
@@ -953,13 +944,57 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	      adj_index = result[0];
 	    }
 
-	  vlib_get_combined_counter (&lm->adjacency_counters, adj_index, &c);
-	  vlib_cli_output (vm, "%-20U%16Ld%16Ld %U",
-			   format_ip4_address_and_length,
-			   r->address.data, r->address_length,
-			   c.packets, c.bytes,
-			   format_ip_adjacency,
-			   vm, lm, adj_index);
+	  adj = ip_get_adjacency (lm, adj_index);
+	  if (adj->n_adj == 1)
+	    {
+	      nhs = &tmp_nhs[0];
+	      nhs[0].next_hop_adj_index = ~0; /* not used */
+	      nhs[0].weight = 1;
+	      n_nhs = 1;
+	    }
+	  else
+	    {
+	      ip_multipath_adjacency_t * madj;
+	      madj = vec_elt_at_index (lm->multipath_adjacencies, adj->heap_handle);
+	      nhs = heap_elt_at_index (lm->next_hop_heap, madj->normalized_next_hops.heap_offset);
+	      n_nhs = madj->normalized_next_hops.count;
+	    }
+
+	  n_left = nhs[0].weight;
+	  vlib_counter_zero (&sum);
+	  for (i = j = 0; i < adj->n_adj; i++)
+	    {
+	      n_left -= 1;
+	      vlib_get_combined_counter (&lm->adjacency_counters, adj_index + i, &c);
+	      vlib_counter_add (&sum, &c);
+	      if (n_left == 0)
+		{
+		  u8 * msg = 0;
+		  if (j == 0)
+		    msg = format (msg, "%-20U",
+				  format_ip4_address_and_length,
+				  r->address.data, r->address_length);
+		  else
+		    msg = format (msg, "%U", format_white_space, 20);
+
+		  msg = format (msg, "%16Ld%16Ld", sum.packets, sum.bytes);
+
+		  msg = format (msg, " %d x %U",
+				nhs[j].weight,
+				format_ip_adjacency,
+				vm, lm, adj_index + i);
+
+		  vlib_cli_output (vm, "%v", msg);
+		  vec_free (msg);
+
+		  j++;
+		  if (j < n_nhs)
+		    {
+		      n_left = nhs[j].weight;
+		      vlib_counter_zero (&sum);
+		    }
+		}
+	    }
 
 	  if (result && lm->format_fib_result)
 	    vlib_cli_output (vm, "%20s%U", "", lm->format_fib_result, vm, lm, result, 0);

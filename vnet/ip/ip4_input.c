@@ -426,6 +426,9 @@ static clib_error_t * ip4_init (vlib_main_t * vm)
   if ((error = vlib_call_init_function (vm, ip4_cli_init)))
     return error;
 
+  /* Set flow hash to something non-zero. */
+  ip4_main.flow_hash_seed = 0xdeadbeef;
+
   return error;
 }
 
