@@ -169,7 +169,7 @@ typedef struct {
 
   /* Number of bytes in a fib result.  Must be at least
      sizeof (uword).  First word is always adjacency index. */
-  u32 fib_result_n_bytes;
+  u32 fib_result_n_bytes, fib_result_n_words;
 
   format_function_t * format_fib_result;
 
