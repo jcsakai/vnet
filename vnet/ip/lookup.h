@@ -164,8 +164,8 @@ typedef struct {
      size is accepted. */
   f64 multipath_next_hop_error_tolerance;
 
-  /* Adjacency index for routing table misses. */
-  u32 miss_adj_index;
+  /* Adjacency index for routing table misses and drops. */
+  u32 miss_adj_index, drop_adj_index;
 
   /* Number of bytes in a fib result.  Must be at least
      sizeof (uword).  First word is always adjacency index. */

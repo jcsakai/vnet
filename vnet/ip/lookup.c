@@ -285,8 +285,10 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
   ip_multipath_next_hop_t * nh, * nhs, * hash_nhs;
   u32 n_nhs, i_nh;
 
-  mp_old = 0;
+  mp_new = mp_old = 0;
   n_nhs = 0;
+  i_nh = 0;
+  nhs = 0;
   if (old_mp_adj_index != ~0)
     {
       mp_old = vec_elt_at_index (lm->multipath_adjacencies, old_mp_adj_index);
@@ -496,16 +498,15 @@ ip_next_hop_hash_key_equal (hash_t * h, uword key0, uword key1)
 
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
 {
-  u32 ai;
   ip_adjacency_t * adj;
 
   /* Hand-craft special miss adjacency to use when nothing matches in the
-     routing table. */
-  adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &ai);
-
+     routing table.  Same for drop adjacency. */
+  adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &lm->miss_adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_MISS;
 
-  lm->miss_adj_index = ai;
+  adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &lm->drop_adj_index);
+  adj->lookup_next_index = IP_LOOKUP_NEXT_DROP;
 
   if (! lm->fib_result_n_bytes)
     lm->fib_result_n_bytes = sizeof (uword);

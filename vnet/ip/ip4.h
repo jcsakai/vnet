@@ -27,6 +27,7 @@
 #define included_ip_ip4_h
 
 #include <vnet/ip/ip4_packet.h>
+#include <vnet/ip/lookup.h>
 
 typedef struct {
   /* Hash table for each prefix length mapping. */
