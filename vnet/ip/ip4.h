@@ -32,6 +32,9 @@ typedef struct {
   /* Hash table for each prefix length mapping. */
   uword * adj_index_by_dst_address[33];
 
+  /* Temporary vectors for holding new/old values for hash_set. */
+  uword * new_hash_values, * old_hash_values;
+
   /* Table ID (hash key) for this FIB. */
   u32 table_id;
 
@@ -48,7 +51,8 @@ typedef void (ip4_add_del_route_function_t)
    u32 flags,
    ip4_address_t * address,
    u32 address_length,
-   void * lookup_result);
+   void * old_result,
+   void * new_result);
 
 typedef struct {
   ip4_add_del_route_function_t * function;

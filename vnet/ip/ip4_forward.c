@@ -96,7 +96,7 @@ u32 ip4_add_del_route (ip4_main_t * im,
   ip_lookup_main_t * lm = &im->lookup_main;
   ip4_fib_t * fib = find_fib_by_table_index_or_id (im, fib_index_or_table_id, flags);
   u32 dst_address = address->data_u32;
-  uword * hash, * p, old_adj_index, is_del;
+  uword * hash, is_del;
   ip4_add_del_route_callback_t * cb;
 
   ASSERT (address_length < ARRAY_LEN (im->fib_masks));
@@ -105,51 +105,63 @@ u32 ip4_add_del_route (ip4_main_t * im,
   if (! fib->adj_index_by_dst_address[address_length])
     {
       ASSERT (lm->fib_result_n_bytes >= sizeof (uword));
+      lm->fib_result_n_words = round_pow2 (lm->fib_result_n_bytes, sizeof (uword));
+
       fib->adj_index_by_dst_address[address_length] =
-	hash_create (32 /* elts */,
-		     /* value size */ round_pow2 (lm->fib_result_n_bytes, sizeof (uword)));
+	hash_create (32 /* elts */, lm->fib_result_n_words * sizeof (uword));
+
+      /* Initialize new/old hash value vectors. */
+      vec_validate_init_empty (fib->new_hash_values, lm->fib_result_n_words - 1, ~0);
+      vec_validate_init_empty (fib->old_hash_values, lm->fib_result_n_words - 1, ~0);
     }
 
   hash = fib->adj_index_by_dst_address[address_length];
 
   is_del = (flags & IP4_ROUTE_FLAG_DEL) != 0;
 
-  old_adj_index = ~0;
-
-  /* For deletes callbacks are done before route is inserted. */
   if (is_del)
     {
-      if (vec_len (im->add_del_route_callbacks) > 0)
-	{
-	  p = hash_get (hash, dst_address);
-	  if (p != 0)
-	    vec_foreach (cb, im->add_del_route_callbacks)
-	      cb->function (im, cb->function_opaque,
-			    fib, flags,
-			    address, address_length,
-			    p);
-	}
+      fib->old_hash_values[0] = ~0;
+      hash = _hash_unset (hash, dst_address, fib->old_hash_values);
+      fib->adj_index_by_dst_address[address_length] = hash;
 
-      hash_unset3 (hash, dst_address, &old_adj_index);
-      fib->adj_index_by_dst_address[address_length] = hash;
-    }
-  else
-    {
-      hash_set3 (hash, dst_address, adj_index, &old_adj_index);
-      fib->adj_index_by_dst_address[address_length] = hash;
-      /* For adds callbacks are done after route is inserted. */
-      if (vec_len (im->add_del_route_callbacks) > 0)
+      if (vec_len (im->add_del_route_callbacks) > 0
+	  && fib->old_hash_values[0] != ~0) /* make sure destination was found in hash */
 	{
-	  p = hash_get (hash, dst_address);
+	  fib->new_hash_values[0] = ~0;
 	  vec_foreach (cb, im->add_del_route_callbacks)
 	    cb->function (im, cb->function_opaque,
 			  fib, flags,
 			  address, address_length,
-			  p);
+			  fib->old_hash_values,
+			  fib->new_hash_values);
+	}
+    }
+  else
+    {
+      fib->new_hash_values[0] = adj_index;
+      memset (fib->old_hash_values, ~0, vec_bytes (fib->old_hash_values));
+      hash = _hash_set3 (hash, dst_address, fib->new_hash_values, fib->old_hash_values);
+      fib->adj_index_by_dst_address[address_length] = hash;
+
+      if (vec_len (im->add_del_route_callbacks) > 0)
+	{
+	  uword * p;
+
+	  vec_foreach (cb, im->add_del_route_callbacks)
+	    cb->function (im, cb->function_opaque,
+			  fib, flags,
+			  address, address_length,
+			  fib->old_hash_values,
+			  fib->new_hash_values);
+
+	  p = hash_get (hash, dst_address);
+	  memcpy (p, fib->new_hash_values, vec_bytes (fib->new_hash_values));
 	}
     }
 
-  return old_adj_index;
+  /* Return old adjacency index. */
+  return fib->old_hash_values[0];
 }
 
 clib_error_t *
@@ -291,7 +303,9 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
   ip4_fib_t * fib = find_fib_by_table_index_or_id (im, table_index_or_table_id, flags);
   ip_lookup_main_t * lm = &im->lookup_main;
   u32 i, l;
-  static u32 * to_delete;
+  ip4_address_t a;
+  ip4_add_del_route_callback_t * cb;
+  static ip4_address_t * to_delete;
 
   if (lm->n_adjacency_remaps == 0)
     return;
@@ -310,33 +324,48 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
       hash_foreach_pair (p, hash, ({
 	    u32 adj_index = p->value[0];
 	    u32 m = vec_elt (lm->adjacency_remap_table, adj_index);
-	    if (m != 0)
+
+	    if (m)
 	      {
+		/* Record destination address from hash key. */
+		a.data_u32 = p->key;
+
 		/* Reset mapping table. */
 		lm->adjacency_remap_table[adj_index] = 0;
 
 		/* New adjacency points to nothing: so delete prefix. */
 		if (m == ~0)
-		  vec_add1 (to_delete, p->key);
+		  vec_add1 (to_delete, a);
 		else
 		  {
-		    ip4_add_del_route_callback_t * cb;
-		    ip4_address_t a;
 
 		    /* Remap to new adjacency. */
-		    a.data_u32 = p->key;
-		    p->value[0] = m - 1;
+		    memcpy (fib->old_hash_values, p->value, vec_bytes (fib->old_hash_values));
+
+		    /* Set new adjacency value. */
+		    fib->new_hash_values[0] = p->value[0] = m - 1;
+
 		    vec_foreach (cb, im->add_del_route_callbacks)
 		      cb->function (im, cb->function_opaque,
-				    fib, flags | IP4_ROUTE_FLAG_DEL,
+				    fib, flags | IP4_ROUTE_FLAG_ADD,
 				    &a, l,
-				    p->value);
+				    fib->old_hash_values,
+				    fib->new_hash_values);
 		  }
 	      }
       }));
 
+      fib->new_hash_values[0] = ~0;
       for (i = 0; i < vec_len (to_delete); i++)
-	hash_unset (hash, to_delete[i]);
+	{
+	  hash = _hash_unset (hash, to_delete[i].data_u32, fib->old_hash_values);
+	  vec_foreach (cb, im->add_del_route_callbacks)
+	    cb->function (im, cb->function_opaque,
+				    fib, flags | IP4_ROUTE_FLAG_DEL,
+				    &a, l,
+				    fib->old_hash_values,
+				    fib->new_hash_values);
+	}
     }
 
   /* All remaps have been performed. */
