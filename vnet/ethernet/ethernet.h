@@ -119,6 +119,9 @@ typedef struct {
 
   /* Hash indexed by 24 bits of (inner << 12) | outer VLAN IDs. */
   uword * vlan_index_by_2_vlan_id;
+
+  /* Set to one to use AB.CD.EF instead of A:B:C:D:E:F as ethernet format. */
+  int format_ethernet_address_16bit;
 } ethernet_main_t;
 
 always_inline ethernet_type_info_t *

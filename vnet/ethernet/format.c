@@ -28,9 +28,15 @@
 
 u8 * format_ethernet_address (u8 * s, va_list * args)
 {
+  ethernet_main_t * em = &ethernet_main;
   u8 * a = va_arg (*args, u8 *);
-  return format (s, "%02x:%02x:%02x:%02x:%02x:%02x",
-		 a[0], a[1], a[2], a[3], a[4], a[5]);
+
+  if (em->format_ethernet_address_16bit)
+    return format (s, "%02x%02x.%02x%02x.%02x%02x",
+		   a[0], a[1], a[2], a[3], a[4], a[5]);
+  else
+    return format (s, "%02x:%02x:%02x:%02x:%02x:%02x",
+		   a[0], a[1], a[2], a[3], a[4], a[5]);
 }
 
 u8 * format_ethernet_type (u8 * s, va_list * args)
