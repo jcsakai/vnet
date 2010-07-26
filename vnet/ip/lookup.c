@@ -557,8 +557,6 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
   u32 adj_index = va_arg (*args, u32);
   ip_adjacency_t * adj = ip_get_adjacency (lm, adj_index);
 
-  s = format (s, "%d: ", adj_index);
-
   switch (adj->lookup_next_index)
     {
     case IP_LOOKUP_NEXT_REWRITE:
@@ -970,6 +968,8 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	      if (n_left == 0)
 		{
 		  u8 * msg = 0;
+		  uword indent;
+
 		  if (j == 0)
 		    msg = format (msg, "%-20U",
 				  format_ip4_address_and_length,
@@ -977,10 +977,12 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 		  else
 		    msg = format (msg, "%U", format_white_space, 20);
 
-		  msg = format (msg, "%16Ld%16Ld", sum.packets, sum.bytes);
+		  msg = format (msg, "%16Ld%16Ld ", sum.packets, sum.bytes);
 
-		  msg = format (msg, " %d x %U",
-				nhs[j].weight,
+		  indent = vec_len (msg);
+		  msg = format (msg, "weight %d, index %d\n%U%U",
+				nhs[j].weight, adj_index + i,
+				format_white_space, indent,
 				format_ip_adjacency,
 				vm, lm, adj_index + i);
 
