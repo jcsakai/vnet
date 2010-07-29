@@ -25,8 +25,6 @@
 
 #include <clib/math.h>		/* for fabs */
 #include <vnet/ip/ip.h>
-#include <vnet/ethernet/ethernet.h>
-#include <vnet/ppp/ppp.h>
 
 static void
 ip_multipath_del_adjacency (ip_lookup_main_t * lm, u32 del_adj_index);
@@ -53,6 +51,9 @@ ip_add_adjacency (ip_lookup_main_t * lm,
 
   ip_poison_adjacencies (adj, n_adj);
 
+  /* Validate adjacency counters. */
+  vlib_validate_counter (&lm->adjacency_counters, ai + n_adj - 1);
+
   for (i = 0; i < n_adj; i++)
     {
       if (copy_adj)
@@ -60,9 +61,6 @@ ip_add_adjacency (ip_lookup_main_t * lm,
 
       adj[i].heap_handle = handle;
       adj[i].n_adj = n_adj;
-
-      /* Validate adjacency counters. */
-      vlib_validate_counter (&lm->adjacency_counters, ai + i);
 
       /* Zero possibly stale counters for re-used adjacencies. */
       vlib_zero_combined_counter (&lm->adjacency_counters, ai + i);
@@ -390,12 +388,8 @@ ip_multipath_del_adjacency (ip_lookup_main_t * lm, u32 del_adj_index)
   ip_multipath_next_hop_t * nhs, * hash_nhs;
   u32 i, n_nhs, madj_index, new_madj_index;
 
-  /* It is illegal to directly delete a multipath adjacency. */
-  if (DEBUG > 0)
-    {
-      madj = vec_elt_at_index (lm->multipath_adjacencies, adj->heap_handle);
-      ASSERT (madj->reference_count == 0);
-    }
+  if (adj->heap_handle >= vec_len (lm->multipath_adjacencies))
+    return;
 
   vec_validate (lm->adjacency_remap_table, vec_len (lm->adjacency_heap) - 1);
 
@@ -627,38 +621,6 @@ static uword unformat_ip_lookup_next (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index)
-{
-  vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
-  ip_lookup_next_t n;
-  u32 node_index;
-
-  if (is_ethernet_interface (hw->hw_if_index))
-    {
-      n = IP_LOOKUP_NEXT_ARP;
-      node_index = ip4_arp_node.index;
-    }
-  else
-    {
-      n = IP_LOOKUP_NEXT_REWRITE;
-      node_index = ip4_rewrite_node.index;
-    }
-
-  adj->lookup_next_index = n;
-  adj->rewrite_header.sw_if_index = sw_if_index;
-  adj->rewrite_header.node_index = node_index;
-  adj->rewrite_header.next_index = vlib_node_add_next (vm, node_index, hw->output_node_index);
-
-  if (n == IP_LOOKUP_NEXT_REWRITE)
-    {
-      if (is_ppp_interface (vm, hw->hw_if_index))
-	ppp_set_adjacency (&adj->rewrite_header, sizeof (adj->rewrite_data),
-			   PPP_PROTOCOL_ip4);
-      else
-	ASSERT (0);
-    }
-}
-
 uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
@@ -672,7 +634,7 @@ uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
   if (unformat (input, "arp %U",
 		unformat_vlib_sw_interface, vm, &sw_if_index))
     {
-      ip_adjacency_set_arp (vm, adj, sw_if_index);
+      ip4_adjacency_set_interface_route (vm, adj, sw_if_index);
     }
 
   else if (unformat_user (input, unformat_ip_lookup_next, &next))

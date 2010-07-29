@@ -222,8 +222,6 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
 					 u32 next_hop_weight,
 					 u32 * new_mp_adj_index);
 
-void ip_adjacency_set_arp (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index);
-
 extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
 
 #endif /* included_ip_lookup_h */

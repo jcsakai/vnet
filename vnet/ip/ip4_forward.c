@@ -26,6 +26,8 @@
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h>	/* for ethernet_header_t */
 #include <vnet/ethernet/arp_packet.h>	/* for ethernet_arp_header_t */
+#include <vnet/ppp/ppp.h>
+#include <vnet/vnet/l3_types.h>
 
 /* This is really, really simple but stupid fib. */
 u32
@@ -105,7 +107,7 @@ u32 ip4_add_del_route (ip4_main_t * im,
   if (! fib->adj_index_by_dst_address[address_length])
     {
       ASSERT (lm->fib_result_n_bytes >= sizeof (uword));
-      lm->fib_result_n_words = round_pow2 (lm->fib_result_n_bytes, sizeof (uword));
+      lm->fib_result_n_words = round_pow2 (lm->fib_result_n_bytes, sizeof (uword)) / sizeof (uword);
 
       fib->adj_index_by_dst_address[address_length] =
 	hash_create (32 /* elts */, lm->fib_result_n_words * sizeof (uword));
@@ -173,26 +175,46 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
 			    u32 next_hop_sw_if_index,
 			    u32 next_hop_weight)
 {
+  vlib_main_t * vm = &vlib_global_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, next_hop_sw_if_index);
   ip4_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
   u32 dst_address_u32, old_mp_adj_index, new_mp_adj_index;
-  uword * dst_hash, * dst_result, dst_adj_index;
+  u32 dst_adj_index, nh_adj_index;
+  uword * dst_hash, * dst_result;
+  uword * nh_hash, * nh_result;
   ip_adjacency_t * dst_adj;
-  uword * nh_hash, * nh_result, nh_adj_index;
   ip_multipath_adjacency_t * old_mp, * new_mp;
   int is_del = (flags & IP4_ROUTE_FLAG_DEL) != 0;
+  int is_interface_next_hop;
 
   /* Lookup next hop to be added or deleted. */
-  nh_hash = fib->adj_index_by_dst_address[32];
-  nh_result = hash_get (nh_hash, next_hop->data_u32);
+  is_interface_next_hop = next_hop->data_u32 == 0;
+  if (is_interface_next_hop)
+    {
+      nh_result = hash_get (im->interface_adj_index_by_sw_if_index, next_hop_sw_if_index);
+      if (nh_result)
+	nh_adj_index = *nh_result;
+      else
+	{
+	  ip_adjacency_t * adj;
+	  adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
+				  &nh_adj_index);
+	  ip4_adjacency_set_interface_route (vm, adj, next_hop_sw_if_index);
+	  hash_set (im->interface_adj_index_by_sw_if_index, next_hop_sw_if_index, nh_adj_index);
+	}
+    }
+  else
+    {
+      nh_hash = fib->adj_index_by_dst_address[32];
+      nh_result = hash_get (nh_hash, next_hop->data_u32);
 
-  /* Next hop must be known. */
-  if (! nh_result)
-    return clib_error_return (0, "next-hop %U/32 not in FIB",
-			      format_ip4_address, next_hop);
-
-  nh_adj_index = *nh_result;
+      /* Next hop must be known. */
+      if (! nh_result)
+	return clib_error_return (0, "next-hop %U/32 not in FIB",
+				  format_ip4_address, next_hop);
+      nh_adj_index = *nh_result;
+    }
 
   ASSERT (dst_address_length < ARRAY_LEN (im->fib_masks));
   dst_address_u32 = dst_address->data_u32 & im->fib_masks[dst_address_length];
@@ -603,6 +625,47 @@ ip4_lookup (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
+void ip4_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj,
+					u32 sw_if_index)
+{
+  vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
+  ip_lookup_next_t n;
+  u32 node_index;
+
+  if (is_ethernet_interface (hw->hw_if_index))
+    {
+      n = IP_LOOKUP_NEXT_ARP;
+      node_index = ip4_arp_node.index;
+    }
+  else
+    {
+      n = IP_LOOKUP_NEXT_REWRITE;
+      node_index = ip4_rewrite_node.index;
+    }
+
+  adj->lookup_next_index = n;
+  adj->rewrite_header.sw_if_index = sw_if_index;
+  adj->rewrite_header.node_index = node_index;
+  adj->rewrite_header.next_index = vlib_node_add_next (vm, node_index, hw->output_node_index);
+
+  if (n == IP_LOOKUP_NEXT_REWRITE)
+    {
+      vlib_hw_interface_class_t * hc = vlib_get_hw_interface_class (vm, hw->hw_class_index);
+      u8 rw_tmp[1024];
+      uword n_rw_tmp;
+
+      ASSERT (hc->set_rewrite);
+      ASSERT (sizeof (adj->rewrite_data) < sizeof (rw_tmp));
+
+      n_rw_tmp = hc->set_rewrite (&rw_tmp, sizeof (adj->rewrite_data), VNET_L3_PACKET_TYPE_IP4);
+
+      ASSERT (n_rw_tmp > 0 && n_rw_tmp < sizeof (adj->rewrite_data));
+	
+      vnet_rewrite_set_data_internal (&adj->rewrite_header, sizeof (adj->rewrite_data),
+				      rw_tmp, n_rw_tmp);
+    }
+}
+
 static void
 ip4_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
 			  ip4_main_t * im, u32 fib_index,
@@ -616,7 +679,7 @@ ip4_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
     {
       adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			      &adj_index);
-      ip_adjacency_set_arp (vm, adj, sw_if_index);
+      ip4_adjacency_set_interface_route (vm, adj, sw_if_index);
 
       ip4_add_del_route (im, fib_index,
 			 IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_FIB_INDEX,
@@ -812,7 +875,7 @@ ip4_lookup_init (vlib_main_t * vm)
 #define _8(f,v) h[0].f = v; h[1].f = ~0
     _16 (ethernet.type, ETHERNET_TYPE_ARP);
     _16 (arp.l2_type, ETHERNET_ARP_HARDWARE_TYPE_ethernet);
-    _16 (arp.l3_type, ETHERNET_TYPE_IP);
+    _16 (arp.l3_type, ETHERNET_TYPE_IP4);
     _8 (arp.n_l2_address_bytes, 6);
     _8 (arp.n_l3_address_bytes, 4);
     _16 (arp.opcode, ETHERNET_ARP_OPCODE_request);

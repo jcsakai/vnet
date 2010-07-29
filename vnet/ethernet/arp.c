@@ -150,7 +150,7 @@ static u8 * format_ethernet_arp_header (u8 * s, va_list * va)
 	      a->n_l2_address_bytes, a->n_l3_address_bytes);
 	      
   if (l2_type == ETHERNET_ARP_HARDWARE_TYPE_ethernet
-      && l3_type == ETHERNET_TYPE_IP)
+      && l3_type == ETHERNET_TYPE_IP4)
     {
       s = format (s, "\n%U%U/%U -> %U/%U",
 		  format_white_space, indent,
@@ -284,7 +284,7 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
       if (ethif)
 	memcpy (&eth_rw.src_address, ethif->address, sizeof (eth_rw.src_address));
       memcpy (&eth_rw.dst_address, a->ethernet, sizeof (eth_rw.dst_address));
-      eth_rw.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP);
+      eth_rw.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP4);
 
       vnet_rewrite_set_data (adj[0], &eth_rw, sizeof (eth_rw));
 
@@ -378,7 +378,7 @@ arp_input (vlib_main_t * vm,
 	  error0 = (arp0->l2_type != clib_net_to_host_u16 (ETHERNET_ARP_HARDWARE_TYPE_ethernet)
 		    ? ETHERNET_ARP_ERROR_l2_type_not_ethernet
 		    : error0);
-	  error0 = (arp0->l3_type != clib_net_to_host_u16 (ETHERNET_TYPE_IP)
+	  error0 = (arp0->l3_type != clib_net_to_host_u16 (ETHERNET_TYPE_IP4)
 		    ? ETHERNET_ARP_ERROR_l3_type_not_ip4
 		    : error0);
 
@@ -435,7 +435,7 @@ arp_input (vlib_main_t * vm,
 	    = if_addr0->data_u32;
 
 	  /* Fill in ethernet header. */
-	  eth0 = (void *) arp0 - sizeof (eth0[0]);
+	  eth0 = (void *) arp0 - sizeof (eth0[0]); /* fixme wrong for sap/snap/vlan; save current_header for start of eth header in buffer opaque */
 
 	  p0->current_data -= sizeof (eth0[0]);
 	  p0->current_length += sizeof (eth0[0]);
@@ -621,7 +621,7 @@ unformat_pg_arp_header (unformat_input_t * input, va_list * args)
 
   /* Defaults. */
   pg_edit_set_fixed (&p->l2_type, ETHERNET_ARP_HARDWARE_TYPE_ethernet);
-  pg_edit_set_fixed (&p->l3_type, ETHERNET_TYPE_IP);
+  pg_edit_set_fixed (&p->l3_type, ETHERNET_TYPE_IP4);
   pg_edit_set_fixed (&p->n_l2_address_bytes, 6);
   pg_edit_set_fixed (&p->n_l3_address_bytes, 4);
 

@@ -83,8 +83,22 @@ static VLIB_DEVICE_CLASS (pg_dev_class) = {
   .format_device_name = format_pg_interface_name,
 };
 
+static uword pg_set_rewrite (void * rewrite,
+			     uword max_rewrite_bytes,
+			     uword l3_type)
+{
+  u16 * h = rewrite;
+
+  if (max_rewrite_bytes < sizeof (h[0]))
+    return 0;
+
+  h[0] = clib_host_to_net_u16 (l3_type);
+  return sizeof (h[0]);
+}
+
 static VLIB_HW_INTERFACE_CLASS (pg_interface_class) = {
   .name = "Packet generator",
+  .set_rewrite = pg_set_rewrite,
 };
 
 u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)

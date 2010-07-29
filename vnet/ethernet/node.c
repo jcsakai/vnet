@@ -130,6 +130,7 @@ ethernet_input (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  p1 = vlib_get_buffer (vm, pi1);
 
+	  /* FIXME sap/snap/vlan */
 	  e0 = (void *) (p0->data + p0->current_data);
 	  e1 = (void *) (p1->data + p1->current_data);
 

@@ -91,17 +91,20 @@ typedef struct ip4_main_t {
   ip4_address_t * ip4_address_by_sw_if_index;
   u8 * ip4_address_length_by_sw_if_index;
 
-  /* Template used to generate IP4 ARP packets. */
-  vlib_packet_template_t ip4_arp_request_packet_template;
-
   /* Vector of functions to call when routes are added/deleted. */
   ip4_add_del_route_callback_t * add_del_route_callbacks;
 
   /* Functions to call when interface address changes. */
   ip4_set_interface_address_callback_t * set_interface_address_callbacks;
 
+  /* Template used to generate IP4 ARP packets. */
+  vlib_packet_template_t ip4_arp_request_packet_template;
+
   /* Seed for Jenkins hash used to compute ip4 flow hash. */
   u32 flow_hash_seed;
+
+  /* Hash table mapping interface rewrite adjacency index by sw if index. */
+  uword * interface_adj_index_by_sw_if_index;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
@@ -196,6 +199,8 @@ void ip4_delete_matching_routes (ip4_main_t * im,
 void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 				  u32 table_index_or_table_id,
 				  u32 flags);
+
+void ip4_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index);
 
 uword
 ip4_tcp_register_listener (vlib_main_t * vm,

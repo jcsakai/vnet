@@ -410,7 +410,7 @@ static clib_error_t * ip4_init (vlib_main_t * vm)
 {
   clib_error_t * error;
 
-  ethernet_register_input_type (vm, ETHERNET_TYPE_IP,
+  ethernet_register_input_type (vm, ETHERNET_TYPE_IP4,
 				ip4_input_node.index);
   ppp_register_input_protocol (vm, PPP_PROTOCOL_ip4,
 			       ip4_input_node.index);

@@ -12,7 +12,8 @@ nobase_include_HEADERS =
 libvnet_la_SOURCES += \
   vnet/vnet/rewrite.c				
 
-nobase_include_HEADERS += \
+nobase_include_HEADERS +=			\
+  vnet/vnet/l3_types.h				\
   vnet/vnet/rewrite.h
 
 ########################################
