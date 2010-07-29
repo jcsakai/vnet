@@ -182,7 +182,7 @@ static uword ppp_set_rewrite (void * rewrite,
   return sizeof (h[0]);
 }
 
-vlib_hw_interface_class_t ppp_hw_interface_class = {
+VLIB_HW_INTERFACE_CLASS (ppp_hw_interface_class) = {
   .name = "PPP",
   .format_header = format_ppp_header_with_length,
   .unformat_header = unformat_ppp_header,
