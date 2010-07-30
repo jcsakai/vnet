@@ -850,21 +850,39 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   ip4_route_t * routes, * r;
   ip4_fib_t * fib;
   ip_lookup_main_t * lm = &im4->lookup_main;
-  uword * results, n_words_per_result, i;
+  uword * results, i;
+  int verbose;
 
   routes = 0;
   results = 0;
-  ASSERT (lm->fib_result_n_bytes % sizeof (uword) == 0);
-  n_words_per_result = lm->fib_result_n_bytes / sizeof (uword);
+  verbose = 1;
+  if (unformat (input, "brief") || unformat (input, "summary")
+      || unformat (input, "sum"))
+    verbose = 0;
 
   vec_foreach (fib, im4->fibs)
     {
       vlib_cli_output (vm, "Table %d", fib->table_id);
 
+      /* Show summary? */
+      if (! verbose)
+	{
+	  vlib_cli_output (vm, "%=20s%=16s", "Prefix length", "Count");
+	  for (i = 0; i < ARRAY_LEN (fib->adj_index_by_dst_address); i++)
+	    {
+	      uword * hash = fib->adj_index_by_dst_address[i];
+	      uword n_elts = hash_elts (hash);
+	      if (n_elts > 0)
+		vlib_cli_output (vm, "%20d%16d", i, n_elts);
+	    }
+	  continue;
+	}
+
       if (routes)
 	_vec_len (routes) = 0;
       if (results)
 	_vec_len (results) = 0;
+
       for (i = 0; i < ARRAY_LEN (fib->adj_index_by_dst_address); i++)
 	{
 	  uword * hash = fib->adj_index_by_dst_address[i];
@@ -873,10 +891,10 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	    ip4_route_t x;
 	    x.address.data_u32 = p->key;
 	    x.address_length = i;
-	    if (n_words_per_result > 1)
+	    if (lm->fib_result_n_words > 1)
 	      {
 		x.index = vec_len (results);
-		vec_add (results, p->value, n_words_per_result);
+		vec_add (results, p->value, lm->fib_result_n_words);
 	      }
 	    else
 	      x.index = p->value[0];
@@ -899,7 +917,7 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	  ip_multipath_next_hop_t * nhs, tmp_nhs[1];
 
 	  adj_index = r->index;
-	  if (n_words_per_result > 1)
+	  if (lm->fib_result_n_words > 1)
 	    {
 	      result = vec_elt_at_index (results, adj_index);
 	      adj_index = result[0];
