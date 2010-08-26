@@ -172,6 +172,8 @@ ethernet_register_interface (vlib_main_t * vm,
 			     ethernet_phy_t * phy,
 			     u32 * hw_if_index_return);
 
+void ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index);
+
 /* Register given node index to take input for given ethernet type. */
 void
 ethernet_register_input_type (vlib_main_t * vm,

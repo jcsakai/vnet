@@ -140,6 +140,23 @@ ethernet_register_interface (vlib_main_t * vm,
   return error;
 }
 			     
+void
+ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index)
+{
+  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_interface_t * ei;
+  vlib_hw_interface_t * hi;
+
+  hi = vlib_get_hw_interface (vm, hw_if_index);
+  ei = pool_elt_at_index (em->interfaces, hi->hw_instance);
+
+  /* Delete vlan mapping table. */
+  vec_free (em->vlan_mapping_by_sw_if_index[hi->sw_if_index].vlan_to_sw_if_index);
+
+  vlib_delete_hw_interface (vm, hw_if_index);
+  pool_put (em->interfaces, ei);
+}
+
 static clib_error_t *
 ethernet_interface_link_up_down (vlib_main_t * vm,
 				 u32 hw_if_index,

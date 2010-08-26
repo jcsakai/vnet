@@ -716,7 +716,8 @@ ip4_del_interface_routes (ip4_main_t * im, u32 fib_index,
 				     address_length,
 				     /* adj_index */ ~0);
 
-      ip_del_adjacency (lm, adj_index);
+      if (adj_index != ~0)
+	ip_del_adjacency (lm, adj_index);
     }
 
   adj_index
@@ -725,8 +726,8 @@ ip4_del_interface_routes (ip4_main_t * im, u32 fib_index,
 			 address,
 			 32,
 			 /* adj_index */ ~0);
-
-  ip_del_adjacency (lm, adj_index);
+  if (adj_index != ~0)
+    ip_del_adjacency (lm, adj_index);
 
   ip4_delete_matching_routes (im, fib_index, IP4_ROUTE_FLAG_FIB_INDEX,
 			      address->data,
