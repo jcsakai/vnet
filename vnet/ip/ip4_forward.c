@@ -141,8 +141,10 @@ u32 ip4_add_del_route (ip4_main_t * im,
     }
   else
     {
-      fib->new_hash_values[0] = adj_index;
       memset (fib->old_hash_values, ~0, vec_bytes (fib->old_hash_values));
+      memset (fib->new_hash_values, ~0, vec_bytes (fib->new_hash_values));
+      fib->new_hash_values[0] = adj_index;
+
       hash = _hash_set3 (hash, dst_address, fib->new_hash_values, fib->old_hash_values);
       fib->adj_index_by_dst_address[address_length] = hash;
 
