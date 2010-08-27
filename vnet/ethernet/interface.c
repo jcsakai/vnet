@@ -151,7 +151,8 @@ ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index)
   ei = pool_elt_at_index (em->interfaces, hi->hw_instance);
 
   /* Delete vlan mapping table. */
-  vec_free (em->vlan_mapping_by_sw_if_index[hi->sw_if_index].vlan_to_sw_if_index);
+  if (hi->sw_if_index < vec_len (em->vlan_mapping_by_sw_if_index))
+    vec_free (em->vlan_mapping_by_sw_if_index[hi->sw_if_index].vlan_to_sw_if_index);
 
   vlib_delete_hw_interface (vm, hw_if_index);
   pool_put (em->interfaces, ei);
