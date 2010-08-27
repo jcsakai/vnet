@@ -106,15 +106,21 @@ u32 ip4_add_del_route (ip4_main_t * im,
 
   if (! fib->adj_index_by_dst_address[address_length])
     {
+      hash_t * h;
+      uword max_index;
+
       ASSERT (lm->fib_result_n_bytes >= sizeof (uword));
       lm->fib_result_n_words = round_pow2 (lm->fib_result_n_bytes, sizeof (uword)) / sizeof (uword);
 
       fib->adj_index_by_dst_address[address_length] =
 	hash_create (32 /* elts */, lm->fib_result_n_words * sizeof (uword));
 
+      h = hash_header (fib->adj_index_by_dst_address[address_length]);
+      max_index = (hash_value_bytes (h) / sizeof (fib->new_hash_values[0])) - 1;
+
       /* Initialize new/old hash value vectors. */
-      vec_validate_init_empty (fib->new_hash_values, lm->fib_result_n_words - 1, ~0);
-      vec_validate_init_empty (fib->old_hash_values, lm->fib_result_n_words - 1, ~0);
+      vec_validate_init_empty (fib->new_hash_values, max_index, ~0);
+      vec_validate_init_empty (fib->old_hash_values, max_index, ~0);
     }
 
   hash = fib->adj_index_by_dst_address[address_length];
