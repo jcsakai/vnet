@@ -55,6 +55,19 @@ nobase_include_HEADERS +=			\
  vnet/ppp/packet.h
 
 ########################################
+# Layer 2 protocol: HDLC
+########################################
+libvnet_la_SOURCES +=				\
+  vnet/hdlc/node.c				\
+  vnet/hdlc/pg.c				\
+  vnet/hdlc/hdlc.c
+
+nobase_include_HEADERS +=			\
+ vnet/hdlc/error.def				\
+ vnet/hdlc/hdlc.h				\
+ vnet/hdlc/packet.h
+
+########################################
 # Layer 3 protocols go here
 ########################################
 
