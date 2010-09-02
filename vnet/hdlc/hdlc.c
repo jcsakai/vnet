@@ -221,7 +221,7 @@ static clib_error_t * hdlc_init (vlib_main_t * vm)
   foreach_hdlc_protocol
 #undef _
 
-  return /* no error */ 0;
+  return vlib_call_init_function (vm, hdlc_input_init);
 }
 
 VLIB_INIT_FUNCTION (hdlc_init);

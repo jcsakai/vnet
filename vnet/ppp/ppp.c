@@ -218,10 +218,10 @@ static clib_error_t * ppp_init (vlib_main_t * vm)
   pm->protocol_info_by_protocol = hash_create (0, sizeof (uword));
 
 #define _(n,s) add_protocol (pm, PPP_PROTOCOL_##s, #s);
-  foreach_ppp_protocol
+  foreach_ppp_protocol;
 #undef _
 
-  return /* no error */ 0;
+  return vlib_call_init_function (vm, ppp_input_init);
 }
 
 VLIB_INIT_FUNCTION (ppp_init);
