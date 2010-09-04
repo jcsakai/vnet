@@ -317,8 +317,9 @@ tuntap_exit (vlib_main_t * vm)
 VLIB_EXIT_FUNCTION (tuntap_exit);
 
 static clib_error_t *
-tuntap_config (vlib_main_t * vm, unformat_input_t * input)
+tuntap_config (vlib_main_t * vm, vlib_config_function_runtime_t * rt)
 {
+  unformat_input_t * input = &rt->input;
   tuntap_main_t *tm = &tuntap_main;
   clib_error_t * error = 0;
   struct ifreq ifr;
@@ -456,7 +457,10 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
   return error;
 }
 
-VLIB_CONFIG_FUNCTION (tuntap_config, "tuntap");
+static VLIB_CONFIG_FUNCTION (tuntap_config_function) = {
+  .name = "tuntap",
+  .function = tuntap_config,
+};
 
 static void
 tuntap_ip4_set_interface_address (ip4_main_t * im,
