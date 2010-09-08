@@ -335,14 +335,14 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 				  format_unformat_error, input);
     }
 
+  tm->dev_net_tun_fd = -1;
+  tm->dev_tap_fd = -1;
+
   if (geteuid()) 
     {
       clib_warning ("tuntap disabled: must be superuser");
       return 0;
     }    
-
-  tm->dev_net_tun_fd = -1;
-  tm->dev_tap_fd = -1;
 
   if ((tm->dev_net_tun_fd = open ("/dev/net/tun", O_RDWR)) < 0)
     {
@@ -468,6 +468,10 @@ tuntap_ip4_set_interface_address (ip4_main_t * im,
   tuntap_main_t * tm = &tuntap_main;
   uword is_delete;
   struct ifreq ifr;
+
+  /* Tuntap disabled. */
+  if (tm->dev_tap_fd < 0)
+    return;
 
   is_delete = ! ip4_interface_address_is_valid (address);
 

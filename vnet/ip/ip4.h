@@ -26,6 +26,7 @@
 #ifndef included_ip_ip4_h
 #define included_ip_ip4_h
 
+#include <vlib/mc.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/lookup.h>
 
@@ -147,7 +148,7 @@ ip4_unaligned_destination_matches_route (ip4_main_t * im,
 
 void
 ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
-			   ip4_address_t * to_set, uword to_set_length);
+			   ip4_address_t * to_set, u32 to_set_length);
 
 int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 
@@ -210,5 +211,7 @@ uword
 ip4_udp_register_listener (vlib_main_t * vm,
 			   u16 dst_port,
 			   u32 next_node_index);
+
+serialize_function_t serialize_vnet_ip4_main, unserialize_vnet_ip4_main;
 
 #endif /* included_ip_ip4_h */

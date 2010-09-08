@@ -742,9 +742,71 @@ ip4_del_interface_routes (ip4_main_t * im, u32 fib_index,
 			      address_length);
 }
 
-void
-ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
-			   ip4_address_t * new_address, uword new_length)
+typedef struct {
+    u32 sw_if_index;
+    ip4_address_t address;
+    u32 length;
+} ip4_interface_address_t;
+
+static void serialize_vec_ip4_set_interface_address (serialize_main_t * m, va_list * va)
+{
+    ip4_interface_address_t * a = va_arg (*va, ip4_interface_address_t *);
+    u32 n = va_arg (*va, u32);
+    u32 i;
+    for (i = 0; i < n; i++) {
+        serialize_integer (m, a[i].sw_if_index, sizeof (a[i].sw_if_index));
+        serialize_integer (m, a[i].address.data_u32, sizeof (a[i].address));
+        serialize_integer (m, a[i].length, sizeof (a[i].length));
+    }
+}
+
+static void unserialize_vec_ip4_set_interface_address (serialize_main_t * m, va_list * va)
+{
+    ip4_interface_address_t * a = va_arg (*va, ip4_interface_address_t *);
+    u32 n = va_arg (*va, u32);
+    u32 i;
+    for (i = 0; i < n; i++) {
+        unserialize_integer (m, &a[i].sw_if_index, sizeof (a[i].sw_if_index));
+        unserialize_integer (m, &a[i].address.data_u32, sizeof (a[i].address));
+        unserialize_integer (m, &a[i].length, sizeof (a[i].length));
+    }
+}
+
+static void serialize_ip4_set_interface_address_msg (serialize_main_t * m, va_list * va)
+{
+  ip4_interface_address_t * a = va_arg (*va, ip4_interface_address_t *);
+  serialize (m, serialize_vec_ip4_set_interface_address, a, 1);
+}
+
+static void
+ip4_set_interface_address_internal (vlib_main_t * vm,
+				    u32 sw_if_index,
+				    ip4_address_t * new_address,
+				    u32 new_length,
+				    u32 redistribute);
+
+static void unserialize_ip4_set_interface_address_msg (serialize_main_t * m, va_list * va)
+{
+  mc_main_t * mcm = va_arg (*va, mc_main_t *);
+  vlib_main_t * vm = mcm->vlib_main;
+  ip4_interface_address_t a;
+  unserialize (m, unserialize_vec_ip4_set_interface_address, &a, 1);
+  ip4_set_interface_address_internal (vm, a.sw_if_index, &a.address, a.length,
+				      /* redistribute */ 0);
+}
+
+static MC_SERIALIZE_MSG (ip4_set_interface_address_msg) = {
+  .name = "vnet_ip4_set_interface_address",
+  .serialize = serialize_ip4_set_interface_address_msg,
+  .unserialize = unserialize_ip4_set_interface_address_msg,
+};
+
+static void
+ip4_set_interface_address_internal (vlib_main_t * vm,
+				    u32 sw_if_index,
+				    ip4_address_t * new_address,
+				    u32 new_length,
+				    u32 redistribute)
 {
   ip4_main_t * im = &ip4_main;
   ip4_address_t old_address;
@@ -759,6 +821,16 @@ ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
   if (new_address->data_u32 == old_address.data_u32
       && old_length == new_length)
     return;
+
+  if (vm->mc_main && redistribute)
+    {
+      ip4_interface_address_t a;
+      a.sw_if_index = sw_if_index;
+      a.address = new_address[0];
+      a.length = new_length;
+      mc_serialize (vm->mc_main, &ip4_set_interface_address_msg, &a);
+      return;
+    }
 
   im->ip4_address_by_sw_if_index[sw_if_index] = new_address[0];
   im->ip4_address_length_by_sw_if_index[sw_if_index] = new_length;
@@ -781,6 +853,51 @@ ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
       cb->function (im, cb->function_opaque, sw_if_index,
 		    new_address, new_length);
   }
+}
+
+void
+ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
+			   ip4_address_t * new_address, u32 new_length)
+{
+  ip4_set_interface_address_internal (vm, sw_if_index, new_address, new_length,
+				      /* redistribute */ 1);
+}
+
+void serialize_vnet_ip4_main (serialize_main_t * m, va_list * va)
+{
+  vlib_main_t * vm = va_arg (*va, vlib_main_t *);
+  vlib_interface_main_t * vim = &vm->interface_main;
+  vlib_sw_interface_t * si;
+  ip4_main_t * i4m = &ip4_main;
+  ip4_interface_address_t * as = 0, * a;
+
+  pool_foreach (si, vim->sw_interfaces, ({
+    u32 sw_if_index = si->sw_if_index;
+    ip4_address_t x = vec_elt (i4m->ip4_address_by_sw_if_index, sw_if_index);
+    if (x.data_u32 != ~0)
+      {
+	vec_add2 (as, a, 1);
+	a->address = x;
+	a->length = vec_elt (i4m->ip4_address_length_by_sw_if_index, sw_if_index);
+	a->sw_if_index = sw_if_index;
+      }
+  }));
+  vec_serialize (m, as, serialize_vec_ip4_set_interface_address);
+  vec_free (as);
+}
+
+void unserialize_vnet_ip4_main (serialize_main_t * m, va_list * va)
+{
+  vlib_main_t * vm = va_arg (*va, vlib_main_t *);
+  ip4_interface_address_t * as = 0, * a;
+
+  vec_unserialize (m, &as, unserialize_vec_ip4_set_interface_address);
+  vec_foreach (a, as) {
+    ip4_set_interface_address_internal
+      (vm, a->sw_if_index, &a->address, a->length,
+       /* redistribute */ 0);
+  }
+  vec_free (as);
 }
 
 static clib_error_t *
