@@ -176,12 +176,58 @@ static MC_SERIALIZE_MSG (ip4_add_del_route_msg) = {
   .unserialize = unserialize_ip4_add_del_route_msg,
 };
 
+static void
+ip4_fib_set_adj_index (ip4_main_t * im,
+		       ip4_fib_t * fib,
+		       u32 flags,
+		       u32 dst_address_u32,
+		       u32 dst_address_length,
+		       u32 adj_index)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  uword * hash;
+
+  memset (fib->old_hash_values, ~0, vec_bytes (fib->old_hash_values));
+  memset (fib->new_hash_values, ~0, vec_bytes (fib->new_hash_values));
+  fib->new_hash_values[0] = adj_index;
+
+  /* Make sure adj index is valid. */
+  if (DEBUG > 0)
+    (void) ip_get_adjacency (lm, adj_index);
+
+  hash = fib->adj_index_by_dst_address[dst_address_length];
+
+  hash = _hash_set3 (hash, dst_address_u32,
+		     fib->new_hash_values,
+		     fib->old_hash_values);
+
+  fib->adj_index_by_dst_address[dst_address_length] = hash;
+
+  if (vec_len (im->add_del_route_callbacks) > 0)
+    {
+      ip4_add_del_route_callback_t * cb;
+      ip4_address_t d;
+      uword * p;
+
+      d.data_u32 = dst_address_u32;
+      vec_foreach (cb, im->add_del_route_callbacks)
+	cb->function (im, cb->function_opaque,
+		      fib, flags,
+		      &d, dst_address_length,
+		      fib->old_hash_values,
+		      fib->new_hash_values);
+
+      p = hash_get (hash, dst_address_u32);
+      memcpy (p, fib->new_hash_values, vec_bytes (fib->new_hash_values));
+    }
+}
+
 void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 {
   vlib_main_t * vm = &vlib_global_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   ip4_fib_t * fib;
-  u32 dst_address, adj_index;
+  u32 dst_address, dst_address_length, adj_index;
   uword * hash, is_del;
   ip4_add_del_route_callback_t * cb;
 
@@ -198,15 +244,16 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
     adj_index = a->adj_index;
 
   dst_address = a->dst_address.data_u32;
+  dst_address_length = a->dst_address_length;
   fib = find_fib_by_table_index_or_id (im, a->table_index_or_table_id, a->flags);
 
-  ASSERT (a->dst_address_length < ARRAY_LEN (im->fib_masks));
-  dst_address &= im->fib_masks[a->dst_address_length];
+  ASSERT (dst_address_length < ARRAY_LEN (im->fib_masks));
+  dst_address &= im->fib_masks[dst_address_length];
 
-  if (! fib->adj_index_by_dst_address[a->dst_address_length])
-    ip4_fib_init_adj_index_by_dst_address (lm, fib, a->dst_address_length);
+  if (! fib->adj_index_by_dst_address[dst_address_length])
+    ip4_fib_init_adj_index_by_dst_address (lm, fib, dst_address_length);
 
-  hash = fib->adj_index_by_dst_address[a->dst_address_length];
+  hash = fib->adj_index_by_dst_address[dst_address_length];
 
   is_del = (a->flags & IP4_ROUTE_FLAG_DEL) != 0;
 
@@ -214,7 +261,7 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
     {
       fib->old_hash_values[0] = ~0;
       hash = _hash_unset (hash, dst_address, fib->old_hash_values);
-      fib->adj_index_by_dst_address[a->dst_address_length] = hash;
+      fib->adj_index_by_dst_address[dst_address_length] = hash;
 
       if (vec_len (im->add_del_route_callbacks) > 0
 	  && fib->old_hash_values[0] != ~0) /* make sure destination was found in hash */
@@ -223,39 +270,14 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 	  vec_foreach (cb, im->add_del_route_callbacks)
 	    cb->function (im, cb->function_opaque,
 			  fib, a->flags,
-			  &a->dst_address, a->dst_address_length,
+			  &a->dst_address, dst_address_length,
 			  fib->old_hash_values,
 			  fib->new_hash_values);
 	}
     }
   else
-    {
-      memset (fib->old_hash_values, ~0, vec_bytes (fib->old_hash_values));
-      memset (fib->new_hash_values, ~0, vec_bytes (fib->new_hash_values));
-      fib->new_hash_values[0] = adj_index;
-
-      /* Make sure adj index is valid. */
-      if (DEBUG > 0)
-	(void) ip_get_adjacency (lm, adj_index);
-
-      hash = _hash_set3 (hash, dst_address, fib->new_hash_values, fib->old_hash_values);
-      fib->adj_index_by_dst_address[a->dst_address_length] = hash;
-
-      if (vec_len (im->add_del_route_callbacks) > 0)
-	{
-	  uword * p;
-
-	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, a->flags,
-			  &a->dst_address, a->dst_address_length,
-			  fib->old_hash_values,
-			  fib->new_hash_values);
-
-	  p = hash_get (hash, dst_address);
-	  memcpy (p, fib->new_hash_values, vec_bytes (fib->new_hash_values));
-	}
-    }
+    ip4_fib_set_adj_index (im, fib, a->flags, dst_address, dst_address_length,
+			   adj_index);
 
   /* Delete old adjacency index if present and changed. */
   {
@@ -1040,16 +1062,11 @@ static void serialize_vec_ip4_fib (serialize_main_t * m, va_list * va)
       serialize_integer (m, f->table_id, sizeof (f->table_id));
       for (l = 0; l < ARRAY_LEN (f->adj_index_by_dst_address); l++)
 	{
-	  u32 n_bytes = round_pow2 (l, BITS (u8)) / BITS (u8);
 	  u32 n_elts = hash_elts (f->adj_index_by_dst_address[l]);
 
 	  serialize_integer (m, n_elts, sizeof (n_elts));
 	  hash_foreach (dst, adj_index, f->adj_index_by_dst_address[l], ({
-		ip4_address_t a;
-		u8 * p;
-		a.data_u32 = dst;
-		p = serialize_get (m, n_bytes);
-		memcpy (p, a.data, n_bytes);
+		serialize_integer (m, dst, sizeof (dst));
 		serialize_integer (m, adj_index, sizeof (adj_index));
 	  }));
 	}
@@ -1060,7 +1077,9 @@ static void unserialize_vec_ip4_fib (serialize_main_t * m, va_list * va)
 {
   ip4_fib_t * fibs = va_arg (*va, ip4_fib_t *);
   u32 n = va_arg (*va, u32);
-  u32 i, l, adj_index;
+  u32 i, l, flags;
+
+  flags = IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_NO_REDISTRIBUTE;
 
   for (i = 0; i < n; i++)
     {
@@ -1072,25 +1091,22 @@ static void unserialize_vec_ip4_fib (serialize_main_t * m, va_list * va)
 
       for (l = 0; l < ARRAY_LEN (f->adj_index_by_dst_address); l++)
 	{
-	  u32 n_bytes = round_pow2 (l, BITS (u8)) / BITS (u8);
 	  u32 n_elts;
 
 	  unserialize_integer (m, &n_elts, sizeof (u32));
+	  if (n_elts == 0)
+	    continue;
+
+	  ASSERT (! f->adj_index_by_dst_address[l]);
+	  ip4_fib_init_adj_index_by_dst_address (&ip4_main.lookup_main, f, l);
+
 	  while (n_elts > 0)
 	    {
-	      ip4_address_t a;
-	      u8 * p;
+	      u32 dst_address, adj_index;
 
-	      p = unserialize_get (m, n_bytes);
-	      a.data_u32 = 0;
-	      memcpy (a.data, p, n_bytes);
-
+	      unserialize_integer (m, &dst_address, sizeof (dst_address));
 	      unserialize_integer (m, &adj_index, sizeof (adj_index));
-
-	      if (! f->adj_index_by_dst_address[l])
-		ip4_fib_init_adj_index_by_dst_address (&ip4_main.lookup_main, f, l);
-
-	      hash_set (f->adj_index_by_dst_address[l], a.data_u32, adj_index);
+	      ip4_fib_set_adj_index (&ip4_main, f, flags, dst_address, l, adj_index);
 	      n_elts--;
 	    }
 	}

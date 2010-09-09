@@ -201,6 +201,21 @@ static u32 ip_multipath_normalize_next_hops (ip_lookup_main_t * lm,
   return n_adj;
 }
 
+always_inline uword
+ip_next_hop_hash_key_from_handle (uword handle)
+{ return 1 + 2*handle; }
+
+always_inline uword
+ip_next_hop_hash_key_is_heap_handle (uword k)
+{ return k & 1; }
+
+always_inline uword
+ip_next_hop_hash_key_get_heap_handle (uword k)
+{
+  ASSERT (ip_next_hop_hash_key_is_heap_handle (k));
+  return k / 2;
+}
+
 static u32
 ip_multipath_adjacency_get (ip_lookup_main_t * lm,
 			    ip_multipath_next_hop_t * raw_next_hops,
@@ -261,7 +276,7 @@ ip_multipath_adjacency_get (ip_lookup_main_t * lm,
 	  nhs, vec_bytes (nhs));
 
   hash_set (lm->multipath_adjacency_by_next_hops,
-	    madj->normalized_next_hops.heap_handle,
+	    ip_next_hop_hash_key_from_handle (madj->normalized_next_hops.heap_handle),
 	    madj - lm->multipath_adjacencies);
 
   madj->unnormalized_next_hops.count = vec_len (raw_next_hops);
@@ -444,8 +459,11 @@ void
 ip_multipath_adjacency_free (ip_lookup_main_t * lm,
 			     ip_multipath_adjacency_t * a)
 {
+  hash_unset (lm->multipath_adjacency_by_next_hops,
+	      ip_next_hop_hash_key_from_handle (a->normalized_next_hops.heap_handle));
   heap_dealloc (lm->next_hop_heap, a->normalized_next_hops.heap_handle);
   heap_dealloc (lm->next_hop_heap, a->unnormalized_next_hops.heap_handle);
+
   ip_del_adjacency2 (lm, a->adj_index, a->reference_count == 0);
 }
 
@@ -455,9 +473,9 @@ ip_next_hop_hash_key_get_next_hops (ip_lookup_main_t * lm, uword k,
 {
   ip_multipath_next_hop_t * nhs;
   uword n_nhs;
-  if (k & 1)
+  if (ip_next_hop_hash_key_is_heap_handle (k))
     {
-      uword handle = k / 2;
+      uword handle = ip_next_hop_hash_key_get_heap_handle (k);
       nhs = heap_elt_with_handle (lm->next_hop_heap, handle);
       n_nhs = heap_len (lm->next_hop_heap, handle);
     }
@@ -634,12 +652,14 @@ void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
 
   /* Build hash table from unserialized data. */
   {
-    ip_multipath_adjacency_t * madj;
-    vec_foreach (madj, lm->multipath_adjacencies)
+    ip_multipath_adjacency_t * a;
+
+    vec_foreach (a, lm->multipath_adjacencies)
       {
-	hash_set (lm->multipath_adjacency_by_next_hops,
-		  madj->normalized_next_hops.heap_handle,
-		  madj - lm->multipath_adjacencies);
+	if (a->n_adj_in_block > 0)
+	  hash_set (lm->multipath_adjacency_by_next_hops,
+		    ip_next_hop_hash_key_from_handle (a->normalized_next_hops.heap_handle),
+		    a - lm->multipath_adjacencies);
       }
   }
 }
@@ -815,7 +835,6 @@ static clib_error_t *
 ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 {
   ip4_main_t * im4 = &ip4_main;
-  ip_lookup_main_t * lm = &im4->lookup_main;
   clib_error_t * error = 0;
   u32 address_valid, dst_address_len, is_ip4, table_id, is_del;
   u32 weight, * weights = 0;
