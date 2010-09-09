@@ -141,6 +141,9 @@ typedef enum {
 } ip_local_next_t;
 
 typedef struct {
+  /* 1 for ip6; 0 for ip4. */
+  u8 is_ip6;
+
   /* Adjacency heap. */
   ip_adjacency_t * adjacency_heap;
 
@@ -226,5 +229,6 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
 extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
 
 serialize_function_t serialize_ip_lookup_main, unserialize_ip_lookup_main;
+serialize_function_t serialize_vec_ip_adjacency, unserialize_vec_ip_adjacency;
 
 #endif /* included_ip_lookup_h */

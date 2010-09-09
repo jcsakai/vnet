@@ -494,7 +494,7 @@ ip_next_hop_hash_key_equal (hash_t * h, uword key0, uword key1)
   return n0 == n1 && ! memcmp (k0, k1, n0 * sizeof (k0[0]));
 }
 
-static void serialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
+void serialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
 {
   ip_adjacency_t * a = va_arg (*va, ip_adjacency_t *);
   u32 n = va_arg (*va, u32);
@@ -521,7 +521,7 @@ static void serialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
     }
 }
 
-static void unserialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
+void unserialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
 {
   ip_adjacency_t * a = va_arg (*va, ip_adjacency_t *);
   u32 n = va_arg (*va, u32);
@@ -616,6 +616,7 @@ void serialize_ip_lookup_main (serialize_main_t * m, va_list * va)
   ASSERT (lm->n_adjacency_remaps == 0);
 
   serialize (m, serialize_heap, lm->adjacency_heap, serialize_vec_ip_adjacency);
+
   serialize (m, serialize_heap, lm->next_hop_heap, serialize_vec_ip_multipath_next_hop);
   vec_serialize (m, lm->multipath_adjacencies, serialize_vec_ip_multipath_adjacency);
 }
@@ -627,6 +628,9 @@ void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
   unserialize (m, unserialize_heap, &lm->adjacency_heap, unserialize_vec_ip_adjacency);
   unserialize (m, unserialize_heap, &lm->next_hop_heap, unserialize_vec_ip_multipath_next_hop);
   vec_unserialize (m, &lm->multipath_adjacencies, unserialize_vec_ip_multipath_adjacency);
+
+  /* Validate adjacency counters. */
+  vlib_validate_counter (&lm->adjacency_counters, vec_len (lm->adjacency_heap) - 1);
 
   /* Build hash table from unserialized data. */
   {
@@ -885,14 +889,21 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 
   if (is_ip4)
     {
+      ip4_add_del_route_args_t a;
+
+      memset (&a, 0, sizeof (a));
+      a.flags = IP4_ROUTE_FLAG_TABLE_ID;
+      a.table_index_or_table_id = table_id;
+      a.dst_address = ip4_dst_address;
+      a.dst_address_length = dst_address_len;
+      a.adj_index = ~0;
+
       if (is_del)
 	{
 	  if (vec_len (ip4_via_next_hops) == 0)
 	    {
-	      ip4_add_del_route (im4, table_id,
-				 IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
-				 &ip4_dst_address, dst_address_len,
-				 /* adj index */ ~0);
+	      a.flags |= IP4_ROUTE_FLAG_DEL;
+	      ip4_add_del_route (im4, &a);
 	      ip4_maybe_remap_adjacencies (im4, table_id, IP4_ROUTE_FLAG_TABLE_ID);
 	    }
 	  else
@@ -914,14 +925,11 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	{
 	  if (vec_len (add_adj) > 0)
 	    {
-	      u32 new_ai;
-
-	      ip_add_adjacency (lm, add_adj, vec_len (add_adj), &new_ai);
+	      a.flags |= IP4_ROUTE_FLAG_ADD;
+	      a.add_adj = add_adj;
+	      a.n_add_adj = vec_len (add_adj);
 	      
-	      ip4_add_del_route (im4, table_id,
-				 IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
-				 &ip4_dst_address, dst_address_len,
-				 new_ai);
+	      ip4_add_del_route (im4, &a);
 	    }
 	  else if (vec_len (ip4_via_next_hops) > 0)
 	    {
