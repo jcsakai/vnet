@@ -159,14 +159,32 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 #define IP4_ROUTE_FLAG_DEL (1 << 0)
 #define IP4_ROUTE_FLAG_TABLE_ID  (0 << 1)
 #define IP4_ROUTE_FLAG_FIB_INDEX (1 << 1)
-#define IP4_ROUTE_FLAG_NO_MC (1 << 2)
+#define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 2)
+#define IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 3)
 
-void ip4_add_del_route (ip4_main_t * im,
-			u32 fib_index_or_table_id,
-			u32 flags,
-			ip4_address_t * address,
-			u32 address_length,
-			u32 adj_index);
+typedef struct {
+  /* IP4_ROUTE_FLAG_* */
+  u32 flags;
+
+  /* Either index of fib or table_id to hash and get fib.
+     IP4_ROUTE_FLAG_FIB_INDEX specifies index; otherwise table_id is assumed. */
+  u32 table_index_or_table_id;
+
+  /* Destination address (prefix) and length. */
+  ip4_address_t dst_address;
+  u32 dst_address_length;
+
+  /* Adjacency to use for this destination. */
+  u32 adj_index;
+
+  /* If specified adjacencies to add and then
+     use for this destination.  add_adj/n_add_adj
+     are override adj_index if specified. */
+  ip_adjacency_t * add_adj;
+  u32 n_add_adj;
+} ip4_add_del_route_args_t;
+
+void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * args);
 
 void ip4_add_del_route_next_hop (ip4_main_t * im,
 				 u32 flags,

@@ -249,7 +249,6 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
   ethernet_arp_ip4_key_t k;
   ethernet_arp_ip4_entry_t * e;
   ip4_main_t * im = &ip4_main;
-  ip_lookup_main_t * lm = &im->lookup_main;
   uword * p, fib_index;
 
   fib_index = im->fib_index_by_sw_if_index[sw_if_index];
@@ -262,36 +261,33 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
     e = pool_elt_at_index (am->ip4_entry_pool, p[0]);
   else
     {
-      u32 adj_index;
-      ip_adjacency_t * adj;
-      vnet_rewrite_header_t * rw;
-      vlib_sw_interface_t * sw = vlib_get_sup_sw_interface (vm, sw_if_index);
-      vlib_hw_interface_t * hw = vlib_get_hw_interface (vm, sw->hw_if_index);
-      ethernet_interface_t * ethif = ethernet_get_interface (&ethernet_main, sw->hw_if_index);
-      ethernet_header_t eth_rw;
+      ip4_add_del_route_args_t args;
+      ip_adjacency_t adj;
+      ethernet_header_t * eth;
 
-      adj = ip_add_adjacency (lm, /* template */ 0, /* block_size */ 1,
-			      &adj_index);
+      adj.lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
 
-      adj->lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
+      vnet_rewrite_for_sw_interface
+	(vm,
+	 VNET_L3_PACKET_TYPE_IP4,
+	 sw_if_index,
+	 ip4_rewrite_node.index,
+	 &adj.rewrite_header,
+	 sizeof (adj.rewrite_data));
 
-      rw = &adj->rewrite_header;
-      rw->sw_if_index = sw_if_index;
-      rw->max_packet_bytes = hw->max_packet_bytes[VLIB_TX];
-      rw->node_index = ip4_rewrite_node.index;
-      rw->next_index = vlib_node_add_next (vm, rw->node_index, hw->output_node_index);
+      /* Copy in destination ethernet address from ARP. */
+      eth = vnet_rewrite_get_data (adj);
+      memcpy (eth->dst_address, a->ethernet, sizeof (eth->dst_address));
 
-      if (ethif)
-	memcpy (&eth_rw.src_address, ethif->address, sizeof (eth_rw.src_address));
-      memcpy (&eth_rw.dst_address, a->ethernet, sizeof (eth_rw.dst_address));
-      eth_rw.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP4);
+      args.table_index_or_table_id = fib_index;
+      args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD;
+      args.dst_address = a->ip4;
+      args.dst_address_length = 32;
+      args.adj_index = ~0;
+      args.add_adj = &adj;
+      args.n_add_adj = 1;
 
-      vnet_rewrite_set_data (adj[0], &eth_rw, sizeof (eth_rw));
-
-      ip4_add_del_route (im, fib_index, IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD,
-			 &a->ip4,
-			 /* address_length */ 32,
-			 adj_index);
+      ip4_add_del_route (im, &args);
       pool_get (am->ip4_entry_pool, e);
       mhash_set (&am->ip4_entry_by_key, &k,
                  e - am->ip4_entry_pool,
