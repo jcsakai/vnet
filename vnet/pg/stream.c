@@ -83,9 +83,11 @@ static VLIB_DEVICE_CLASS (pg_dev_class) = {
   .format_device_name = format_pg_interface_name,
 };
 
-static uword pg_set_rewrite (void * rewrite,
-			     uword max_rewrite_bytes,
-			     uword l3_type)
+static uword pg_set_rewrite (vlib_main_t * vm,
+			     u32 sw_if_index,
+			     u32 l3_type,
+			     void * rewrite,
+			     uword max_rewrite_bytes)
 {
   u16 * h = rewrite;
 
