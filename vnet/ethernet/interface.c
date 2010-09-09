@@ -24,6 +24,7 @@
  */
 
 #include <vlib/vlib.h>
+#include <vnet/vnet/l3_types.h>
 #include <vnet/pg/pg.h>
 #include <vnet/ethernet/ethernet.h>
 
@@ -31,6 +32,57 @@ static clib_error_t *
 ethernet_interface_link_up_down (vlib_main_t * vm,
 				 u32 hw_if_index,
 				 u32 flags);
+
+static uword ethernet_set_rewrite (vlib_main_t * vm,
+				   u32 sw_if_index,
+				   u32 l3_type,
+				   void * rewrite,
+				   uword max_rewrite_bytes)
+{
+  vlib_sw_interface_t * sub_sw = vlib_get_sw_interface (vm, sw_if_index);
+  vlib_sw_interface_t * sup_sw = vlib_get_sup_sw_interface (vm, sw_if_index);
+  vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
+  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_interface_t * ei;
+  ethernet_header_t * h = rewrite;
+  ethernet_type_t type;
+  uword n_bytes = sizeof (h[0]);
+
+  if (sub_sw != sup_sw)
+    n_bytes += sizeof (ethernet_vlan_header_t);
+
+  if (n_bytes > max_rewrite_bytes)
+    return 0;
+
+  switch (l3_type) {
+#define _(a,b) case VNET_L3_PACKET_TYPE_##a: type = ETHERNET_TYPE_##b; break
+    _ (IP4, IP4);
+    _ (IP6, IP6);
+    _ (MPLS_UNICAST, MPLS_UNICAST);
+    _ (MPLS_MULTICAST, MPLS_MULTICAST);
+#undef _
+  default:
+    return 0;
+  }
+
+  ei = pool_elt_at_index (em->interfaces, hw->hw_instance);
+  memcpy (h->src_address, ei->address, sizeof (h->src_address));
+  memset (h->dst_address, 0, sizeof (h->dst_address));
+
+  if (sub_sw != sup_sw)
+    {
+      ethernet_vlan_header_t * vh = (void *) (h + 1);
+
+      h->type = clib_host_to_net_u16 (ETHERNET_TYPE_VLAN);
+      ASSERT (sub_sw->sub.id < 4096);
+      vh->priority_cfi_and_id = clib_host_to_net_u16 (sub_sw->sub.id);
+      vh->type = clib_host_to_net_u16 (type);
+    }
+  else
+    h->type = clib_host_to_net_u16 (type);
+
+  return n_bytes;
+}
 
 VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
   .name = "Ethernet",
@@ -40,6 +92,7 @@ VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
   .hw_address_len = 6,
   .unformat_hw_address = unformat_ethernet_address,
   .unformat_header = unformat_ethernet_header,
+  .set_rewrite = ethernet_set_rewrite,
 };
 
 uword unformat_ethernet_interface (unformat_input_t * input, va_list * args)

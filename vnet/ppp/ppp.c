@@ -154,9 +154,11 @@ unformat_ppp_header (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-static uword ppp_set_rewrite (void * rewrite,
-			      uword max_rewrite_bytes,
-			      uword l3_type)
+static uword ppp_set_rewrite (vlib_main_t * vm,
+			      u32 sw_if_index,
+			      u32 l3_type,
+			      void * rewrite,
+			      uword max_rewrite_bytes)
 {
   ppp_header_t * h = rewrite;
   ppp_protocol_t protocol;

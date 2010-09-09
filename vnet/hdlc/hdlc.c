@@ -154,9 +154,11 @@ unformat_hdlc_header (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-static uword hdlc_set_rewrite (void * rewrite,
-			      uword max_rewrite_bytes,
-			      uword l3_type)
+static uword hdlc_set_rewrite (vlib_main_t * vm,
+			       u32 sw_if_index,
+			       u32 l3_type,
+			       void * rewrite,
+			       uword max_rewrite_bytes)
 {
   hdlc_header_t * h = rewrite;
   hdlc_protocol_t protocol;
