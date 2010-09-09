@@ -173,7 +173,7 @@ void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
       vec_resize (rw_tmp, max_rewrite_bytes);
 
       ASSERT (hc->set_rewrite);
-      n_rw_tmp = hc->set_rewrite (rw_tmp, max_rewrite_bytes, packet_type);
+      n_rw_tmp = hc->set_rewrite (vm, sw_if_index, packet_type, rw_tmp, max_rewrite_bytes);
 
       ASSERT (n_rw_tmp > 0 && n_rw_tmp < max_rewrite_bytes);
       vnet_rewrite_set_data_internal (rw, max_rewrite_bytes, rw_tmp, n_rw_tmp);
