@@ -27,6 +27,7 @@
 #define included_vnet_rewrite_h
 
 #include <vlib/vlib.h>
+#include <vnet/vnet/l3_types.h>
 
 /* Not worth using vector unit for unaligned stores for Altivec. */
 #if defined (__ALTIVEC__)
@@ -233,6 +234,13 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
 			     (p0), (p1),				\
 			     sizeof ((rw0).rewrite_data),		\
 			     (most_likely_size))
+
+void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
+				    vnet_l3_packet_type_t packet_type,
+				    u32 sw_if_index,
+				    u32 node_index,
+				    vnet_rewrite_header_t * rw,
+				    u32 max_rewrite_bytes);
 
 /* Parser for unformat header & rewrite string. */
 unformat_function_t unformat_vnet_rewrite;
