@@ -26,6 +26,7 @@
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ppp/ppp.h>
+#include <vnet/hdlc/hdlc.h>
 
 typedef struct {
   u8 packet_data[64];
@@ -414,6 +415,8 @@ static clib_error_t * ip4_init (vlib_main_t * vm)
 				ip4_input_node.index);
   ppp_register_input_protocol (vm, PPP_PROTOCOL_ip4,
 			       ip4_input_node.index);
+  hdlc_register_input_protocol (vm, HDLC_PROTOCOL_ip4,
+				ip4_input_node.index);
 
   {
     pg_node_t * pn;
