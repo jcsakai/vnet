@@ -1121,12 +1121,16 @@ void serialize_vnet_ip4_main (serialize_main_t * m, va_list * va)
   ip4_main_t * i4m = &ip4_main;
   ip4_interface_address_t * as = 0, * a;
 
+  /* Download adjacency tables & multipath stuff. */
   serialize (m, serialize_ip_lookup_main, &i4m->lookup_main);
 
+  /* FIBs. */
   vec_serialize (m, i4m->fibs, serialize_vec_ip4_fib);
 
+  /* FIB interface config. */
   vec_serialize (m, i4m->fib_index_by_sw_if_index, serialize_vec_32);
 
+  /* Interface ip4 addresses. */
   pool_foreach (si, vim->sw_interfaces, ({
     u32 sw_if_index = si->sw_if_index;
     ip4_address_t x = vec_elt (i4m->ip4_address_by_sw_if_index, sw_if_index);

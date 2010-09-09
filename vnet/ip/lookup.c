@@ -528,6 +528,10 @@ void serialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
 	  serialize_integer (m, a[i].local_index, sizeof (a[i].local_index));
 	  break;
 
+	case IP_LOOKUP_NEXT_ARP:
+	  serialize_integer (m, a[i].rewrite_header.sw_if_index, sizeof (a[i].rewrite_header.sw_if_index));
+	  break;
+
 	case IP_LOOKUP_NEXT_REWRITE:
 	  serialize (m, serialize_vnet_rewrite, &a[i].rewrite_header, sizeof (a[i].rewrite_data));
 	  break;
@@ -544,6 +548,7 @@ void unserialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
   ip_adjacency_t * a = va_arg (*va, ip_adjacency_t *);
   u32 n = va_arg (*va, u32);
   u32 i;
+  ip_poison_adjacencies (a, n);
   for (i = 0; i < n; i++)
     {
       unserialize_integer (m, &a[i].heap_handle, sizeof (a[i].heap_handle));
@@ -553,6 +558,10 @@ void unserialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
 	{
 	case IP_LOOKUP_NEXT_LOCAL:
 	  unserialize_integer (m, &a[i].local_index, sizeof (a[i].local_index));
+	  break;
+
+	case IP_LOOKUP_NEXT_ARP:
+	  unserialize_integer (m, &a[i].rewrite_header.sw_if_index, sizeof (a[i].rewrite_header.sw_if_index));
 	  break;
 
 	case IP_LOOKUP_NEXT_REWRITE:
