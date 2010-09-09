@@ -63,7 +63,7 @@ typedef struct {
   u16 n_adj;
 
   /* Next hop after ip4-lookup. */
-  ip_lookup_next_t lookup_next_index : 16;
+  u16 lookup_next_index;
 
   union {
     /* IP_LOOKUP_NEXT_REWRITE adjacencies. */
@@ -154,7 +154,8 @@ typedef struct {
   ip_multipath_next_hop_t * next_hop_hash_lookup_key;
   ip_multipath_next_hop_t * next_hop_hash_lookup_key_normalized;
 
-  /* Hash table mapping multipath adjacency next hops and weights to. */
+  /* Hash table mapping normalized next hops and weights
+     to multipath adjacency index. */
   uword * multipath_adjacency_by_next_hops;
 
   u32 * adjacency_remap_table;
@@ -223,5 +224,7 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
 					 u32 * new_mp_adj_index);
 
 extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
+
+serialize_function_t serialize_ip_lookup_main, unserialize_ip_lookup_main;
 
 #endif /* included_ip_lookup_h */

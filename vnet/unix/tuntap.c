@@ -285,7 +285,7 @@ tuntap_exit (vlib_main_t * vm)
   int sfd;
 
   /* Not present. */
-  if (! tm->dev_net_tun_fd)
+  if (! tm->dev_net_tun_fd || tm->dev_net_tun_fd < 0)
     return 0;
 
   sfd = socket (AF_INET, SOCK_STREAM, 0);

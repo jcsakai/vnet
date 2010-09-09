@@ -260,6 +260,10 @@ ip_multipath_adjacency_get (ip_lookup_main_t * lm,
   memcpy (lm->next_hop_heap + madj->normalized_next_hops.heap_offset,
 	  nhs, vec_bytes (nhs));
 
+  hash_set (lm->multipath_adjacency_by_next_hops,
+	    madj->normalized_next_hops.heap_handle,
+	    madj - lm->multipath_adjacencies);
+
   madj->unnormalized_next_hops.count = vec_len (raw_next_hops);
   madj->unnormalized_next_hops.heap_offset
     = heap_alloc (lm->next_hop_heap, vec_len (raw_next_hops),
@@ -488,6 +492,152 @@ ip_next_hop_hash_key_equal (hash_t * h, uword key0, uword key1)
   k1 = ip_next_hop_hash_key_get_next_hops (lm, key1, &n1);
 
   return n0 == n1 && ! memcmp (k0, k1, n0 * sizeof (k0[0]));
+}
+
+static void serialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
+{
+  ip_adjacency_t * a = va_arg (*va, ip_adjacency_t *);
+  u32 n = va_arg (*va, u32);
+  u32 i;
+  for (i = 0; i < n; i++)
+    {
+      serialize_integer (m, a[i].heap_handle, sizeof (a[i].heap_handle));
+      serialize_integer (m, a[i].n_adj, sizeof (a[i].n_adj));
+      serialize_integer (m, a[i].lookup_next_index, sizeof (a[i].lookup_next_index));
+      switch (a[i].lookup_next_index)
+	{
+	case IP_LOOKUP_NEXT_LOCAL:
+	  serialize_integer (m, a[i].local_index, sizeof (a[i].local_index));
+	  break;
+
+	case IP_LOOKUP_NEXT_REWRITE:
+	  serialize (m, serialize_vnet_rewrite, &a[i].rewrite_header, sizeof (a[i].rewrite_data));
+	  break;
+
+	default:
+	  /* nothing else to serialize. */
+	  break;
+	}
+    }
+}
+
+static void unserialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
+{
+  ip_adjacency_t * a = va_arg (*va, ip_adjacency_t *);
+  u32 n = va_arg (*va, u32);
+  u32 i;
+  for (i = 0; i < n; i++)
+    {
+      unserialize_integer (m, &a[i].heap_handle, sizeof (a[i].heap_handle));
+      unserialize_integer (m, &a[i].n_adj, sizeof (a[i].n_adj));
+      unserialize_integer (m, &a[i].lookup_next_index, sizeof (a[i].lookup_next_index));
+      switch (a[i].lookup_next_index)
+	{
+	case IP_LOOKUP_NEXT_LOCAL:
+	  unserialize_integer (m, &a[i].local_index, sizeof (a[i].local_index));
+	  break;
+
+	case IP_LOOKUP_NEXT_REWRITE:
+	  unserialize (m, unserialize_vnet_rewrite, &a[i].rewrite_header, sizeof (a[i].rewrite_data));
+	  break;
+
+	default:
+	  /* nothing else to unserialize. */
+	  break;
+	}
+    }
+}
+
+static void serialize_vec_ip_multipath_next_hop (serialize_main_t * m, va_list * va)
+{
+  ip_multipath_next_hop_t * nh = va_arg (*va, ip_multipath_next_hop_t *);
+  u32 n = va_arg (*va, u32);
+  u32 i;
+  for (i = 0; i < n; i++)
+    {
+      serialize_integer (m, nh[i].next_hop_adj_index, sizeof (nh[i].next_hop_adj_index));
+      serialize_integer (m, nh[i].weight, sizeof (nh[i].weight));
+    }
+}
+
+static void unserialize_vec_ip_multipath_next_hop (serialize_main_t * m, va_list * va)
+{
+  ip_multipath_next_hop_t * nh = va_arg (*va, ip_multipath_next_hop_t *);
+  u32 n = va_arg (*va, u32);
+  u32 i;
+  for (i = 0; i < n; i++)
+    {
+      unserialize_integer (m, &nh[i].next_hop_adj_index, sizeof (nh[i].next_hop_adj_index));
+      unserialize_integer (m, &nh[i].weight, sizeof (nh[i].weight));
+    }
+}
+
+static void serialize_vec_ip_multipath_adjacency (serialize_main_t * m, va_list * va)
+{
+  ip_multipath_adjacency_t * a = va_arg (*va, ip_multipath_adjacency_t *);
+  u32 n = va_arg (*va, u32);
+  u32 i;
+  for (i = 0; i < n; i++)
+    {
+#define foreach_ip_multipath_adjacency_field		\
+  _ (adj_index) _ (n_adj_in_block) _ (reference_count)	\
+  _ (normalized_next_hops.count)			\
+  _ (normalized_next_hops.heap_offset)			\
+  _ (normalized_next_hops.heap_handle)			\
+  _ (unnormalized_next_hops.count)			\
+  _ (unnormalized_next_hops.heap_offset)		\
+  _ (unnormalized_next_hops.heap_handle)
+
+#define _(f) serialize_integer (m, a[i].f, sizeof (a[i].f));
+      foreach_ip_multipath_adjacency_field;
+#undef _
+    }
+}
+
+static void unserialize_vec_ip_multipath_adjacency (serialize_main_t * m, va_list * va)
+{
+  ip_multipath_adjacency_t * a = va_arg (*va, ip_multipath_adjacency_t *);
+  u32 n = va_arg (*va, u32);
+  u32 i;
+  for (i = 0; i < n; i++)
+    {
+#define _(f) unserialize_integer (m, &a[i].f, sizeof (a[i].f));
+      foreach_ip_multipath_adjacency_field;
+#undef _
+    }
+}
+
+void serialize_ip_lookup_main (serialize_main_t * m, va_list * va)
+{
+  ip_lookup_main_t * lm = va_arg (*va, ip_lookup_main_t *);
+
+  /* If this isn't true you need to call e.g. ip4_maybe_remap_adjacencies
+     to make it true. */
+  ASSERT (lm->n_adjacency_remaps == 0);
+
+  serialize (m, serialize_heap, lm->adjacency_heap, serialize_vec_ip_adjacency);
+  serialize (m, serialize_heap, lm->next_hop_heap, serialize_vec_ip_multipath_next_hop);
+  vec_serialize (m, lm->multipath_adjacencies, serialize_vec_ip_multipath_adjacency);
+}
+
+void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
+{
+  ip_lookup_main_t * lm = va_arg (*va, ip_lookup_main_t *);
+
+  unserialize (m, unserialize_heap, &lm->adjacency_heap, unserialize_vec_ip_adjacency);
+  unserialize (m, unserialize_heap, &lm->next_hop_heap, unserialize_vec_ip_multipath_next_hop);
+  vec_unserialize (m, &lm->multipath_adjacencies, unserialize_vec_ip_multipath_adjacency);
+
+  /* Build hash table from unserialized data. */
+  {
+    ip_multipath_adjacency_t * madj;
+    vec_foreach (madj, lm->multipath_adjacencies)
+      {
+	hash_set (lm->multipath_adjacency_by_next_hops,
+		  madj->normalized_next_hops.heap_handle,
+		  madj - lm->multipath_adjacencies);
+      }
+  }
 }
 
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
@@ -739,22 +889,10 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	{
 	  if (vec_len (ip4_via_next_hops) == 0)
 	    {
-	      u32 adj_index;
-
-	      adj_index = ip4_add_del_route (im4, table_id,
-					     IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
-					     &ip4_dst_address, dst_address_len,
-					     /* adj index */ ~0);
-	      if (adj_index != ~0)
-		ip_del_adjacency (lm, adj_index);
-	      else
-		{
-		  error = clib_error_return
-		    (0, "no such route %U",
-		     format_ip4_address_and_length, &ip4_dst_address, dst_address_len);
-		  goto done;
-		}
-
+	      ip4_add_del_route (im4, table_id,
+				 IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
+				 &ip4_dst_address, dst_address_len,
+				 /* adj index */ ~0);
 	      ip4_maybe_remap_adjacencies (im4, table_id, IP4_ROUTE_FLAG_TABLE_ID);
 	    }
 	  else
@@ -762,14 +900,12 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	      u32 i;
 	      for (i = 0; i < vec_len (ip4_via_next_hops); i++)
 		{
-		  error = ip4_add_del_route_next_hop (im4,
-						      IP4_ROUTE_FLAG_DEL | IP4_ROUTE_FLAG_TABLE_ID,
-						      &ip4_dst_address, dst_address_len,
-						      &ip4_via_next_hops[i],
-						      sw_if_indices[i],
-						      weights[i]);
-		  if (error)
-		    goto done;
+		  ip4_add_del_route_next_hop (im4,
+					      IP4_ROUTE_FLAG_DEL,
+					      &ip4_dst_address, dst_address_len,
+					      &ip4_via_next_hops[i],
+					      sw_if_indices[i],
+					      weights[i]);
 		}
 	    }
 	}
@@ -778,33 +914,26 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	{
 	  if (vec_len (add_adj) > 0)
 	    {
-	      u32 new_ai, old_ai;
-	      ip_adjacency_t * adj;
+	      u32 new_ai;
 
-	      adj = ip_add_adjacency (lm, add_adj, vec_len (add_adj), &new_ai);
-
-	      old_ai = ip4_add_del_route (im4, table_id,
-					  IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
-					  &ip4_dst_address, dst_address_len,
-					  new_ai);
-
-	      /* Delete old adjacency index if present. */
-	      if (old_ai != new_ai && old_ai != ~0)
-		ip_del_adjacency (lm, old_ai);
+	      ip_add_adjacency (lm, add_adj, vec_len (add_adj), &new_ai);
+	      
+	      ip4_add_del_route (im4, table_id,
+				 IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
+				 &ip4_dst_address, dst_address_len,
+				 new_ai);
 	    }
 	  else if (vec_len (ip4_via_next_hops) > 0)
 	    {
 	      u32 i;
 	      for (i = 0; i < vec_len (ip4_via_next_hops); i++)
 		{
-		  error = ip4_add_del_route_next_hop (im4,
-						      IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_TABLE_ID,
-						      &ip4_dst_address, dst_address_len,
-						      &ip4_via_next_hops[i],
-						      sw_if_indices[i],
-						      weights[i]);
-		  if (error)
-		    goto done;
+		  ip4_add_del_route_next_hop (im4,
+					      IP4_ROUTE_FLAG_ADD,
+					      &ip4_dst_address, dst_address_len,
+					      &ip4_via_next_hops[i],
+					      sw_if_indices[i],
+					      weights[i]);
 		}
 	    }
 	}

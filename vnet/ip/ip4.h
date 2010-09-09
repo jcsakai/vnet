@@ -81,19 +81,23 @@ typedef struct ip4_main_t {
 
   u32 fib_masks[33];
 
-  /* Table id indexed by software interface. */
-  u16 * fib_index_by_sw_if_index;
+  /* Table index indexed by software interface. */
+  u32 * fib_index_by_sw_if_index;
 
-  /* Hash table mapping table id to fib index. */
+  /* Hash table mapping table id to fib index.
+     ID space is not necessarily dense; index space is dense. */
   uword * fib_index_by_table_id;
+
+  /* Vector of functions to call when routes are added/deleted. */
+  ip4_add_del_route_callback_t * add_del_route_callbacks;
 
   /* IP4 address and length (e.g. netmask) for interfaces.
      Address of ~0 means interface has no IP4 address. */
   ip4_address_t * ip4_address_by_sw_if_index;
   u8 * ip4_address_length_by_sw_if_index;
 
-  /* Vector of functions to call when routes are added/deleted. */
-  ip4_add_del_route_callback_t * add_del_route_callbacks;
+  /* Hash table mapping interface rewrite adjacency index by sw if index. */
+  uword * interface_adj_index_by_sw_if_index;
 
   /* Functions to call when interface address changes. */
   ip4_set_interface_address_callback_t * set_interface_address_callbacks;
@@ -103,9 +107,6 @@ typedef struct ip4_main_t {
 
   /* Seed for Jenkins hash used to compute ip4 flow hash. */
   u32 flow_hash_seed;
-
-  /* Hash table mapping interface rewrite adjacency index by sw if index. */
-  uword * interface_adj_index_by_sw_if_index;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
@@ -158,22 +159,22 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 #define IP4_ROUTE_FLAG_DEL (1 << 0)
 #define IP4_ROUTE_FLAG_TABLE_ID  (0 << 1)
 #define IP4_ROUTE_FLAG_FIB_INDEX (1 << 1)
+#define IP4_ROUTE_FLAG_NO_MC (1 << 2)
 
-u32 ip4_add_del_route (ip4_main_t * im,
-		       u32 fib_index_or_table_id,
-		       u32 flags,
-		       ip4_address_t * address,
-		       u32 address_length,
-		       u32 adj_index);
+void ip4_add_del_route (ip4_main_t * im,
+			u32 fib_index_or_table_id,
+			u32 flags,
+			ip4_address_t * address,
+			u32 address_length,
+			u32 adj_index);
 
-clib_error_t *
-ip4_add_del_route_next_hop (ip4_main_t * im,
-			    u32 flags,
-			    ip4_address_t * dst_address,
-			    u32 dst_address_length,
-			    ip4_address_t * next_hop,
-			    u32 next_hop_sw_if_index,
-			    u32 next_hop_weight);
+void ip4_add_del_route_next_hop (ip4_main_t * im,
+				 u32 flags,
+				 ip4_address_t * dst_address,
+				 u32 dst_address_length,
+				 ip4_address_t * next_hop,
+				 u32 next_hop_sw_if_index,
+				 u32 next_hop_weight);
 
 void *
 ip4_get_route (ip4_main_t * im,

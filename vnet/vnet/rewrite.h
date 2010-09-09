@@ -240,4 +240,6 @@ unformat_function_t unformat_vnet_rewrite;
 format_function_t format_vnet_rewrite;
 format_function_t format_vnet_rewrite_header;
 
+serialize_function_t serialize_vnet_rewrite, unserialize_vnet_rewrite;
+
 #endif /* included_vnet_rewrite_h */

@@ -150,3 +150,33 @@ uword unformat_vnet_rewrite (unformat_input_t * input, va_list * args)
   vec_free (rw_data);
   return error == 0;
 }
+
+void serialize_vnet_rewrite (serialize_main_t * m, va_list * va)
+{
+  vnet_rewrite_header_t * rw = va_arg (*va, vnet_rewrite_header_t *);
+  u32 max_data_bytes = va_arg (*va, u32);
+  u8 * p;
+
+  serialize_integer (m, rw->sw_if_index, sizeof (rw->sw_if_index));
+  serialize_integer (m, rw->data_bytes, sizeof (rw->data_bytes));
+  serialize_integer (m, rw->max_packet_bytes, sizeof (rw->max_packet_bytes));
+  p = serialize_get (m, rw->data_bytes);
+  memcpy (p, vnet_rewrite_get_data_internal (rw, max_data_bytes), rw->data_bytes);
+}
+
+void unserialize_vnet_rewrite (serialize_main_t * m, va_list * va)
+{
+  vnet_rewrite_header_t * rw = va_arg (*va, vnet_rewrite_header_t *);
+  u32 max_data_bytes = va_arg (*va, u32);
+  u8 * p;
+
+  /* It is up to user to fill these in. */
+  rw->node_index = ~0;
+  rw->next_index = ~0;
+
+  unserialize_integer (m, &rw->sw_if_index, sizeof (rw->sw_if_index));
+  unserialize_integer (m, &rw->data_bytes, sizeof (rw->data_bytes));
+  unserialize_integer (m, &rw->max_packet_bytes, sizeof (rw->max_packet_bytes));
+  p = unserialize_get (m, rw->data_bytes);
+  memcpy (vnet_rewrite_get_data_internal (rw, max_data_bytes), p, rw->data_bytes);
+}
