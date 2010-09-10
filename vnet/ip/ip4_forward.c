@@ -905,6 +905,8 @@ ip4_del_interface_routes (ip4_main_t * im, u32 fib_index,
   a.dst_address = address[0];
   a.dst_address_length = address_length;
   a.adj_index = ~0;
+  a.n_add_adj = 0;
+  a.add_adj = 0;
 
   ASSERT (ip4_interface_address_is_valid (address));
 
