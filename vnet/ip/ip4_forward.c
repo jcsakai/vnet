@@ -309,12 +309,8 @@ static void serialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_l
 static void unserialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_list * va)
 {
   ip4_main_t * im = &ip4_main;
-  u32 flags = va_arg (*va, u32);
-  ip4_address_t dst_address = va_arg (*va, ip4_address_t);
-  u32 dst_address_length = va_arg (*va, u32);
-  ip4_address_t next_hop_address = va_arg (*va, ip4_address_t);
-  u32 next_hop_sw_if_index = va_arg (*va, u32);
-  u32 next_hop_weight = va_arg (*va, u32);
+  u32 flags, dst_address_length, next_hop_sw_if_index, next_hop_weight;
+  ip4_address_t dst_address, next_hop_address;
 
   unserialize_integer (m, &flags, sizeof (flags));
   unserialize_integer (m, &dst_address.data_u32, sizeof (dst_address));
