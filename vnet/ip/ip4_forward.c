@@ -125,22 +125,35 @@ static void serialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * va)
     serialize (m, serialize_vec_ip_adjacency, a->add_adj, a->n_add_adj);
 }
 
+/* Serialized adjacencies for arp/rewrite do not send graph next_index
+   since graph hookup is not guaranteed to be the same for both sides
+   of serialize/unserialize. */
 static void
 unserialize_fixup_ip4_rewrite_adjacencies (vlib_main_t * vm,
 					   ip_adjacency_t * adj,
 					   u32 n_adj)
 {
-  u32 i;
+  u32 i, ni, sw_if_index, is_arp;
+  vlib_hw_interface_t * hw;
 
   for (i = 0; i < n_adj; i++)
-    if (adj[i].lookup_next_index == IP_LOOKUP_NEXT_REWRITE)
-      {
-	u32 sw_if_index = adj[i].rewrite_header.sw_if_index;
-	vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
-	u32 ni = ip4_rewrite_node.index;
-	adj[i].rewrite_header.node_index = ni;
-	adj[i].rewrite_header.next_index = vlib_node_add_next (vm, ni, hw->output_node_index);
-      }
+    {
+      switch (adj[i].lookup_next_index)
+	{
+	case IP_LOOKUP_NEXT_REWRITE:
+	case IP_LOOKUP_NEXT_ARP:
+	  is_arp = adj[i].lookup_next_index == IP_LOOKUP_NEXT_ARP;
+	  sw_if_index = adj[i].rewrite_header.sw_if_index;
+	  hw = vlib_get_sup_hw_interface (vm, sw_if_index);
+	  ni = is_arp ? ip4_arp_node.index : ip4_rewrite_node.index;
+	  adj[i].rewrite_header.node_index = ni;
+	  adj[i].rewrite_header.next_index = vlib_node_add_next (vm, ni, hw->output_node_index);
+	  break;
+
+	default:
+	  break;
+	}
+    }
 }
 
 static void unserialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * va)
@@ -585,10 +598,10 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 	  hash = _hash_unset (hash, to_delete[i].data_u32, fib->old_hash_values);
 	  vec_foreach (cb, im->add_del_route_callbacks)
 	    cb->function (im, cb->function_opaque,
-				    fib, flags | IP4_ROUTE_FLAG_DEL,
-				    &a, l,
-				    fib->old_hash_values,
-				    fib->new_hash_values);
+			  fib, flags | IP4_ROUTE_FLAG_DEL,
+			  &a, l,
+			  fib->old_hash_values,
+			  fib->new_hash_values);
 	}
     }
 
