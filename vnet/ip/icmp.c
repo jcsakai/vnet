@@ -1,0 +1,335 @@
+/*
+ * ip/icmp_init.c: icmp initialization
+ *
+ * Copyright (c) 2008 Eliot Dresselhaus
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ *  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ *  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ *  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+#include <vlib/vlib.h>
+#include <vnet/ip/ip.h>
+#include <vnet/pg/pg.h>
+
+static u8 * format_icmp_type_and_code (u8 * s, va_list * args)
+{
+  icmp_type_t type = va_arg (*args, int);
+  u8 code = va_arg (*args, int);
+  char * t = 0;
+
+#define _(n,f) case n: t = #f; break;
+
+  switch (type)
+    {
+      foreach_icmp_type;
+
+    default:
+      break;
+    }
+
+#undef _
+
+  if (! t)
+    return format (s, "unknown 0x%x", type);
+
+  s = format (s, "%s", t);
+
+  t = 0;
+  switch ((type << 8) | code)
+    {
+#define _(a,n,f) case (ICMP_##a << 8) | (n): t = #f; break;
+
+      foreach_icmp_code;
+
+#undef _
+    }
+
+  if (t)
+    s = format (s, " %s", code);
+
+  return s;
+}
+
+static u8 * format_icmp_header (u8 * s, va_list * args)
+{
+  icmp_header_t * icmp = va_arg (*args, icmp_header_t *);
+  u32 max_header_bytes = va_arg (*args, u32);
+
+  /* Nothing to do. */
+  if (max_header_bytes < sizeof (icmp[0]))
+    return format (s, "ICMP header truncated");
+
+  s = format (s, "ICMP %U",
+	      format_icmp_type_and_code, icmp->type, icmp->code);
+
+  return s;
+}
+
+typedef struct {
+  u8 packet_data[64];
+} icmp_input_trace_t;
+
+static u8 * format_ip4_icmp_input_trace (u8 * s, va_list * va)
+{
+  UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
+  UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
+  icmp_input_trace_t * t = va_arg (*va, icmp_input_trace_t *);
+
+  s = format (s, "%U",
+	      format_ip4_header,
+	      t->packet_data, sizeof (t->packet_data));
+
+  return s;
+}
+
+typedef enum {
+  ICMP_ERROR_UNKNOWN_TYPE,
+  ICMP_N_ERROR,
+} icmp_error_t;
+
+typedef enum {
+  ICMP_INPUT_NEXT_ERROR,
+  ICMP_INPUT_N_NEXT,
+} icmp_input_next_t;
+
+typedef struct {
+  uword * type_and_code_by_name;
+
+  uword * type_by_name;
+
+  /* Vector dispatch table indexed by icmp type. */
+  u8 input_next_index_by_type[256];
+} icmp_main_t;
+
+icmp_main_t icmp_main;
+
+static uword
+ip4_icmp_input (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{
+  icmp_main_t * im = &icmp_main;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  vlib_error_t unknown_type_error;
+  vlib_error_t * to_next_error, to_next_error_dummy[2];
+
+  unknown_type_error =
+    vlib_error_set (node->node_index, ICMP_ERROR_UNKNOWN_TYPE);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
+				   /* stride */ 1,
+				   sizeof (icmp_input_trace_t));
+
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame_transpose (vm, node, next, to_next, n_left_to_next);
+      to_next_error = (next == ICMP_INPUT_NEXT_ERROR
+		       ? vlib_error_for_transpose_buffer_pointer (to_next)
+		       : &to_next_error_dummy[0]);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip4_header_t * ip0;
+	  icmp_header_t * icmp0;
+	  icmp_type_t type0;
+	  u32 bi0, next0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  ip0 = vlib_buffer_get_current (p0);
+	  icmp0 = ip4_next_header (ip0);
+	  type0 = icmp0->type;
+	  next0 = im->input_next_index_by_type[type0];
+
+	  to_next_error[0] = unknown_type_error;
+	  to_next_error += next0 == ICMP_INPUT_NEXT_ERROR;
+
+	  if (PREDICT_FALSE (next0 != next))
+	    {
+	      to_next -= 1;
+	      n_left_to_next += 1;
+
+	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+
+	      next = next0;
+	      vlib_get_next_frame_transpose (vm, node, next,
+					     to_next, n_left_to_next);
+	      to_next_error = (next == ICMP_INPUT_NEXT_ERROR
+			       ? vlib_error_for_transpose_buffer_pointer (to_next)
+			       : &to_next_error_dummy[0]);
+
+	      to_next[0] = bi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	      to_next_error[0] = unknown_type_error;
+	      to_next_error += next0 == ICMP_INPUT_NEXT_ERROR;
+	    }
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+static char * icmp_error_strings[] = {
+  [ICMP_ERROR_UNKNOWN_TYPE] = "unknown type",
+};
+
+static VLIB_REGISTER_NODE (ip4_icmp_input_node) = {
+  .function = ip4_icmp_input,
+  .name = "ip4-icmp-input",
+
+  .vector_size = sizeof (u32),
+
+  .format_trace = format_ip4_icmp_input_trace,
+
+  .n_errors = 1,
+  .error_strings = icmp_error_strings,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [ICMP_INPUT_NEXT_ERROR] = "error-drop-transpose",
+  },
+};
+
+static uword unformat_icmp_type_and_code (unformat_input_t * input, va_list * args)
+{
+  icmp_header_t * h = va_arg (*args, icmp_header_t *);
+  icmp_main_t * cm = &icmp_main;
+  u32 i;
+
+  if (unformat_user (input, unformat_vlib_number_by_name,
+		     cm->type_and_code_by_name, &i))
+    {
+      h->type = (i >> 8) & 0xff;
+      h->code = (i >> 0) & 0xff;
+    }
+  else if (unformat_user (input, unformat_vlib_number_by_name,
+			  cm->type_by_name, &i))
+    {
+      h->type = i;
+      h->code = 0;
+    }
+  else
+    return 0;
+
+  return 1;
+}
+
+typedef struct {
+  pg_edit_t type, code;
+  pg_edit_t checksum;
+} pg_icmp_header_t;
+
+always_inline void
+pg_icmp_header_init (pg_icmp_header_t * p)
+{
+  /* Initialize fields that are not bit fields in the IP header. */
+#define _(f) pg_edit_init (&p->f, icmp_header_t, f);
+  _ (type);
+  _ (code);
+  _ (checksum);
+#undef _
+}
+
+static uword
+unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
+{
+  pg_stream_t * s = va_arg (*args, pg_stream_t *);
+  pg_icmp_header_t * p;
+  u32 group_index;
+  
+  p = pg_create_edit_group (s, sizeof (p[0]), sizeof (icmp_header_t),
+			    &group_index);
+  pg_icmp_header_init (p);
+
+  /* Defaults. */
+  pg_edit_set_fixed (&p->checksum, 0);
+
+  {
+    icmp_header_t tmp;
+
+    if (! unformat (input, "ICMP %U", unformat_icmp_type_and_code, &tmp))
+      goto error;
+
+    pg_edit_set_fixed (&p->type, tmp.type);
+    pg_edit_set_fixed (&p->code, tmp.code);
+  }
+
+  if (! unformat_user (input, unformat_pg_payload, s))
+    goto error;
+
+  return 1;
+
+ error:
+  /* Free up any edits we may have added. */
+  pg_free_edit_group (s);
+  return 0;
+}
+
+static clib_error_t *
+icmp_init (vlib_main_t * vm)
+{
+  ip_main_t * im = &ip_main;
+  ip_protocol_info_t * pi;
+  icmp_main_t * cm = &icmp_main;
+  clib_error_t * error;
+
+  error = vlib_call_init_function (vm, ip_main_init);
+
+  if (error)
+    return error;
+
+  pi = ip_get_protocol_info (im, IP_PROTOCOL_ICMP);
+  pi->format_header = format_icmp_header;
+  pi->unformat_pg_edit = unformat_pg_icmp_header;
+
+  cm->type_by_name = hash_create_string (0, sizeof (uword));
+#define _(n,t) hash_set_mem (cm->type_by_name, #t, (n));
+  foreach_icmp_type;
+#undef _
+
+  cm->type_and_code_by_name = hash_create_string (0, sizeof (uword));
+#define _(a,n,t) hash_set_mem (cm->type_by_name, #t, (n) | (ICMP_##a << 8));
+  foreach_icmp_code;
+#undef _
+
+  memset (cm->input_next_index_by_type,
+	  ICMP_INPUT_NEXT_ERROR,
+	  sizeof (cm->input_next_index_by_type));
+
+  return 0;
+}
+
+VLIB_INIT_FUNCTION (icmp_init);

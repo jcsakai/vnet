@@ -76,6 +76,7 @@ nobase_include_HEADERS +=			\
 ########################################
 libvnet_la_SOURCES +=				\
  vnet/ip/format.c				\
+ vnet/ip/icmp.c					\
  vnet/ip/ip4_cli.c				\
  vnet/ip/ip4_format.c				\
  vnet/ip/ip4_forward.c				\
@@ -95,6 +96,7 @@ libvnet_la_SOURCES +=				\
 
 nobase_include_HEADERS +=			\
  vnet/ip/format.h				\
+ vnet/ip/icmp_packet.h				\
  vnet/ip/ip.h					\
  vnet/ip/ip4.h					\
  vnet/ip/ip4_error.h				\
@@ -145,4 +147,5 @@ lib_LTLIBRARIES = libvnet.la
 noinst_PROGRAMS = vnet_unix
 
 vnet_unix_SOURCES = example/main_stub.c
+vnet_unix_LDFLAGS = -static
 vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm

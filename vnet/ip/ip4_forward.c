@@ -1671,7 +1671,8 @@ ip4_local (vlib_main_t * vm,
 	    {
 	      if (is_tcp_udp0)
 		{
-		  if (! (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
+		  if (is_tcp_udp0
+		      && ! (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
 		    flags0 = ip4_tcp_udp_checksum (p0);
 		  good_tcp_udp0 =
 		    (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
@@ -1679,7 +1680,8 @@ ip4_local (vlib_main_t * vm,
 		}
 	      if (is_tcp_udp1)
 		{
-		  if (! (flags1 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
+		  if (is_tcp_udp1
+		      && ! (flags1 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
 		    flags1 = ip4_tcp_udp_checksum (p1);
 		  good_tcp_udp1 =
 		    (flags1 & IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
@@ -1842,7 +1844,8 @@ ip4_local (vlib_main_t * vm,
 
 	  if (PREDICT_FALSE (! (is_tcp_udp0 & good_tcp_udp0)))
 	    {
-	      if (! (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
+	      if (is_tcp_udp0
+		  && ! (flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
 		flags0 = ip4_tcp_udp_checksum (p0);
 	      good_tcp_udp0 =
 		(flags0 & IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
@@ -1918,6 +1921,7 @@ static VLIB_REGISTER_NODE (ip4_local_node) = {
     [IP_LOCAL_NEXT_PUNT] = "error-punt-transpose",
     [IP_LOCAL_NEXT_TCP_LOOKUP] = "tcp4-lookup",
     [IP_LOCAL_NEXT_UDP_LOOKUP] = "udp4-lookup",
+    [IP_LOCAL_NEXT_ICMP] = "ip4-icmp-input",
   },
 };
 
