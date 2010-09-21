@@ -82,10 +82,11 @@ am_libvnet_la_OBJECTS = vnet/vnet/rewrite.lo vnet/ethernet/arp.lo \
 	vnet/ethernet/node.lo vnet/ethernet/pg.lo vnet/ethernet/phy.lo \
 	vnet/ppp/node.lo vnet/ppp/pg.lo vnet/ppp/ppp.lo \
 	vnet/hdlc/node.lo vnet/hdlc/pg.lo vnet/hdlc/hdlc.lo \
-	vnet/ip/format.lo vnet/ip/ip4_cli.lo vnet/ip/ip4_format.lo \
-	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
-	vnet/ip/ip_checksum.lo vnet/ip/ip_init.lo vnet/ip/lookup.lo \
-	vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
+	vnet/ip/format.lo vnet/ip/icmp.lo vnet/ip/ip4_cli.lo \
+	vnet/ip/ip4_format.lo vnet/ip/ip4_forward.lo \
+	vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo vnet/ip/ip_checksum.lo \
+	vnet/ip/ip_init.lo vnet/ip/lookup.lo vnet/ip/tcp_format.lo \
+	vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
 	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
 	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
 	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
@@ -96,6 +97,9 @@ PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
 vnet_unix_OBJECTS = $(am_vnet_unix_OBJECTS)
 vnet_unix_DEPENDENCIES = libvnet.la
+vnet_unix_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(vnet_unix_LDFLAGS) $(LDFLAGS) -o $@
 DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
@@ -284,11 +288,11 @@ libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/arp.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
 	vnet/ppp/node.c vnet/ppp/pg.c vnet/ppp/ppp.c vnet/hdlc/node.c \
 	vnet/hdlc/pg.c vnet/hdlc/hdlc.c vnet/ip/format.c \
-	vnet/ip/ip4_cli.c vnet/ip/ip4_format.c vnet/ip/ip4_forward.c \
-	vnet/ip/ip4_input.c vnet/ip/ip4_pg.c vnet/ip/ip_checksum.c \
-	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c \
-	vnet/ip/tcp_format.c vnet/ip/tcp_init.c vnet/ip/tcp_pg.c \
-	vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
+	vnet/ip/icmp.c vnet/ip/ip4_cli.c vnet/ip/ip4_format.c \
+	vnet/ip/ip4_forward.c vnet/ip/ip4_input.c vnet/ip/ip4_pg.c \
+	vnet/ip/ip_checksum.c vnet/ip/ip.h vnet/ip/ip_init.c \
+	vnet/ip/lookup.c vnet/ip/tcp_format.c vnet/ip/tcp_init.c \
+	vnet/ip/tcp_pg.c vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
 	vnet/ip/udp_init.c vnet/ip/udp_pg.c vnet/pg/cli.c \
 	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
@@ -299,14 +303,15 @@ nobase_include_HEADERS = vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
 	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
 	vnet/ppp/error.def vnet/ppp/ppp.h vnet/ppp/packet.h \
 	vnet/hdlc/error.def vnet/hdlc/hdlc.h vnet/hdlc/packet.h \
-	vnet/ip/format.h vnet/ip/ip.h vnet/ip/ip4.h \
-	vnet/ip/ip4_error.h vnet/ip/ip4_packet.h vnet/ip/ip6_packet.h \
-	vnet/ip/lookup.h vnet/ip/ip_packet.h vnet/ip/ports.def \
-	vnet/ip/protocols.def vnet/ip/tcp_packet.h \
+	vnet/ip/format.h vnet/ip/icmp_packet.h vnet/ip/ip.h \
+	vnet/ip/ip4.h vnet/ip/ip4_error.h vnet/ip/ip4_packet.h \
+	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
+	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
 	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h \
 	vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
+vnet_unix_LDFLAGS = -static
 vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm
 all: all-am
 
@@ -439,6 +444,8 @@ vnet/ip/$(DEPDIR)/$(am__dirstamp):
 	@: > vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/format.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/icmp.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/ip4_cli.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/ip4_format.lo: vnet/ip/$(am__dirstamp) \
@@ -524,7 +531,7 @@ example/main_stub.$(OBJEXT): example/$(am__dirstamp) \
 	example/$(DEPDIR)/$(am__dirstamp)
 vnet_unix$(EXEEXT): $(vnet_unix_OBJECTS) $(vnet_unix_DEPENDENCIES) 
 	@rm -f vnet_unix$(EXEEXT)
-	$(LINK) $(vnet_unix_OBJECTS) $(vnet_unix_LDADD) $(LIBS)
+	$(vnet_unix_LINK) $(vnet_unix_OBJECTS) $(vnet_unix_LDADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
@@ -555,6 +562,8 @@ mostlyclean-compile:
 	-rm -f vnet/hdlc/pg.lo
 	-rm -f vnet/ip/format.$(OBJEXT)
 	-rm -f vnet/ip/format.lo
+	-rm -f vnet/ip/icmp.$(OBJEXT)
+	-rm -f vnet/ip/icmp.lo
 	-rm -f vnet/ip/ip4_cli.$(OBJEXT)
 	-rm -f vnet/ip/ip4_cli.lo
 	-rm -f vnet/ip/ip4_format.$(OBJEXT)
@@ -625,6 +634,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/hdlc/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/hdlc/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/icmp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_cli.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_forward.Plo@am__quote@
