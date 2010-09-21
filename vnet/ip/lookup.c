@@ -841,7 +841,7 @@ uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 }
 
 static clib_error_t *
-ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
+ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * cmd)
 {
   ip4_main_t * im4 = &ip4_main;
   clib_error_t * error = 0;
@@ -850,21 +850,27 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
   u32 sw_if_index, * sw_if_indices = 0;
   ip4_address_t ip4_addr, ip4_dst_address, * ip4_via_next_hops = 0;
   ip_adjacency_t parse_adj, * add_adj = 0;
+  unformat_input_t _line_input, * line_input = &_line_input;
 
   is_ip4 = 0;
   is_del = 0;
   table_id = 0;
   address_valid = 0;
-  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+
+  /* Get a line of input. */
+  if (! unformat_user (main_input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
     {
-      if (unformat (input, "table %d", &table_id))
+      if (unformat (line_input, "table %d", &table_id))
 	;
-      else if (unformat (input, "del"))
+      else if (unformat (line_input, "del"))
 	is_del = 1;
-      else if (unformat (input, "add"))
+      else if (unformat (line_input, "add"))
 	is_del = 0;
 
-      else if (unformat (input, "%U/%d",
+      else if (unformat (line_input, "%U/%d",
 			 unformat_ip4_address, &ip4_addr,
 			 &dst_address_len))
 	{
@@ -873,7 +879,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	  address_valid = 1;
 	}
 
-      else if (unformat (input, "via %U %U weight %u",
+      else if (unformat (line_input, "via %U %U weight %u",
 			 unformat_ip4_address, &ip4_addr,
 			 unformat_vlib_sw_interface, vm, &sw_if_index,
 			 &weight))
@@ -883,7 +889,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	  vec_add1 (weights, weight);
 	}
 
-      else if (unformat (input, "via %U %U",
+      else if (unformat (line_input, "via %U %U",
 			 unformat_ip4_address, &ip4_addr,
 			 unformat_vlib_sw_interface, vm, &sw_if_index))
 	{
@@ -892,17 +898,19 @@ ip_route (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 	  vec_add1 (weights, 1);
 	}
 			 
-      else if (unformat (input, "via %U",
+      else if (unformat (line_input, "via %U",
 			 unformat_ip_adjacency, vm, &parse_adj, ip4_rewrite_node.index))
 	vec_add1 (add_adj, parse_adj);
 
       else
 	{
-	  error = unformat_parse_error (input);
+	  error = unformat_parse_error (line_input);
 	  goto done;
 	}
     }
     
+  unformat_free (line_input);
+
   if (! address_valid)
     {
       error = clib_error_return (0, "expected ip4/ip6 destination address/length.");

@@ -251,6 +251,71 @@ ip4_icmp_echo_request (vlib_main_t * vm,
     {
       vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
 
+      while (n_left_from > 2 && n_left_to_next > 2)
+	{
+	  vlib_buffer_t * p0, * p1;
+	  ip4_header_t * ip0, * ip1;
+	  icmp_header_t * icmp0, * icmp1;
+	  u32 bi0, src0, dst0;
+	  u32 bi1, src1, dst1;
+	  ip_csum_t sum0, sum1;
+      
+	  bi0 = to_next[0] = from[0];
+	  bi1 = to_next[1] = from[1];
+
+	  from += 2;
+	  n_left_from -= 2;
+	  to_next += 2;
+	  n_left_to_next -= 2;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  p1 = vlib_get_buffer (vm, bi1);
+	  ip0 = vlib_buffer_get_current (p0);
+	  ip1 = vlib_buffer_get_current (p1);
+	  icmp0 = ip4_next_header (ip0);
+	  icmp1 = ip4_next_header (ip1);
+
+	  icmp0->type = ICMP_echo_reply;
+	  icmp1->type = ICMP_echo_reply;
+
+	  src0 = ip0->src_address.data_u32;
+	  src1 = ip1->src_address.data_u32;
+	  dst0 = ip0->dst_address.data_u32;
+	  dst1 = ip1->dst_address.data_u32;
+
+	  /* Swap source and destination address.
+	     Does not change checksum. */
+	  ip0->src_address.data_u32 = dst0;
+	  ip1->src_address.data_u32 = dst1;
+	  ip0->dst_address.data_u32 = src0;
+	  ip1->dst_address.data_u32 = src1;
+
+	  sum0 = ip0->checksum;
+	  sum1 = ip1->checksum;
+
+	  /* Remove old ttl & fragment id from checksum. */
+	  sum0 = ip_csum_sub_even (sum0, ip0->ttl);
+	  sum1 = ip_csum_sub_even (sum1, ip1->ttl);
+	  sum0 = ip_csum_sub_even (sum0, ip0->fragment_id);
+	  sum1 = ip_csum_sub_even (sum1, ip1->fragment_id);
+
+	  /* New ttl. */
+	  ip0->ttl = i4m->host_config.ttl;
+	  ip1->ttl = i4m->host_config.ttl;
+	  sum0 = ip_csum_add_even (sum0, ip0->ttl);
+	  sum1 = ip_csum_add_even (sum1, ip1->ttl);
+
+	  /* New fragment id. */
+	  ip0->fragment_id = fid[0];
+	  ip1->fragment_id = fid[1];
+	  sum0 = ip_csum_add_even (sum0, ip0->fragment_id);
+	  sum1 = ip_csum_add_even (sum1, ip1->fragment_id);
+	  fid += 2;
+
+	  ip0->checksum = ip_csum_fold (sum0);
+	  ip1->checksum = ip_csum_fold (sum1);
+	}
+  
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
@@ -285,7 +350,7 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  sum0 = ip_csum_add_even (sum0, ip0->fragment_id);
 	  fid += 1;
 
-	  ip0->checksum = sum0;
+	  ip0->checksum = ip_csum_fold (sum0);
 
 	  ip0->src_address.data_u32 = dst0;
 	  ip0->dst_address.data_u32 = src0;
