@@ -432,6 +432,9 @@ static clib_error_t * ip4_init (vlib_main_t * vm)
   /* Set flow hash to something non-zero. */
   ip4_main.flow_hash_seed = 0xdeadbeef;
 
+  /* Default TTL for packets we generate. */
+  ip4_main.host_config.ttl = 64;
+
   return error;
 }
 

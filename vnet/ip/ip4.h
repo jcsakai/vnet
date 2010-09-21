@@ -107,6 +107,13 @@ typedef struct ip4_main_t {
 
   /* Seed for Jenkins hash used to compute ip4 flow hash. */
   u32 flow_hash_seed;
+
+  struct {
+    /* TTL to use for host generated packets. */
+    u8 ttl;
+
+    u8 pad[3];
+  } host_config;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
