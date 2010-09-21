@@ -113,8 +113,8 @@ typedef struct {
 
   uword * type_by_name;
 
-  /* Vector dispatch table indexed by icmp type. */
-  u8 input_next_index_by_type[256];
+  /* Vector dispatch table indexed by [icmp type]. */
+  u8 ip4_input_next_index_by_type[256];
 } icmp_main_t;
 
 icmp_main_t icmp_main;
@@ -169,7 +169,7 @@ ip4_icmp_input (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  icmp0 = ip4_next_header (ip0);
 	  type0 = icmp0->type;
-	  next0 = im->input_next_index_by_type[type0];
+	  next0 = im->ip4_input_next_index_by_type[type0];
 
 	  to_next_error[0] = unknown_type_error;
 	  to_next_error += next0 == ICMP_INPUT_NEXT_ERROR;
@@ -220,6 +220,94 @@ static VLIB_REGISTER_NODE (ip4_icmp_input_node) = {
   .n_next_nodes = 1,
   .next_nodes = {
     [ICMP_INPUT_NEXT_ERROR] = "error-drop-transpose",
+  },
+};
+
+static uword
+ip4_icmp_echo_request (vlib_main_t * vm,
+		       vlib_node_runtime_t * node,
+		       vlib_frame_t * frame)
+{
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  ip4_main_t * i4m = &ip4_main;
+  u16 * fragment_ids, * fid;
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
+				   /* stride */ 1,
+				   sizeof (icmp_input_trace_t));
+
+  /* Get random fragment IDs for replies. */
+  fid = fragment_ids = clib_random_buffer_get_data (&vm->random_buffer,
+						    n_packets * sizeof (fragment_ids[0]));
+
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip4_header_t * ip0;
+	  icmp_header_t * icmp0;
+	  u32 bi0, src0, dst0;
+	  ip_csum_t sum0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  ip0 = vlib_buffer_get_current (p0);
+	  icmp0 = ip4_next_header (ip0);
+
+	  icmp0->type = ICMP_echo_reply;
+	  src0 = ip0->src_address.data_u32;
+	  dst0 = ip0->dst_address.data_u32;
+
+	  sum0 = ip0->checksum;
+	  sum0 = ip_csum_sub_even (sum0, ip0->ttl);
+	  sum0 = ip_csum_sub_even (sum0, ip0->fragment_id);
+
+	  ip0->ttl = i4m->host_config.ttl;
+	  sum0 = ip_csum_add_even (sum0, ip0->ttl);
+
+	  ip0->fragment_id = fid[0];
+	  sum0 = ip_csum_add_even (sum0, ip0->fragment_id);
+	  fid += 1;
+
+	  ip0->checksum = sum0;
+
+	  ip0->src_address.data_u32 = dst0;
+	  ip0->dst_address.data_u32 = src0;
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+static VLIB_REGISTER_NODE (ip4_icmp_echo_request_node) = {
+  .function = ip4_icmp_echo_request,
+  .name = "ip4-icmp-echo-request",
+
+  .vector_size = sizeof (u32),
+
+  .format_trace = format_ip4_icmp_input_trace,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
   },
 };
 
@@ -298,6 +386,15 @@ unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
   return 0;
 }
 
+static void ip4_icmp_register_type (vlib_main_t * vm, icmp_type_t type, u32 node_index)
+{
+  icmp_main_t * im = &icmp_main;
+
+  ASSERT (type < ARRAY_LEN (im->ip4_input_next_index_by_type));
+  im->ip4_input_next_index_by_type[type]
+    = vlib_node_add_next (vm, ip4_icmp_input_node.index, node_index);
+}
+
 static clib_error_t *
 icmp_init (vlib_main_t * vm)
 {
@@ -325,9 +422,11 @@ icmp_init (vlib_main_t * vm)
   foreach_icmp_code;
 #undef _
 
-  memset (cm->input_next_index_by_type,
+  memset (cm->ip4_input_next_index_by_type,
 	  ICMP_INPUT_NEXT_ERROR,
-	  sizeof (cm->input_next_index_by_type));
+	  sizeof (cm->ip4_input_next_index_by_type));
+
+  ip4_icmp_register_type (vm, ICMP_echo_request, ip4_icmp_echo_request_node.index);
 
   return 0;
 }
