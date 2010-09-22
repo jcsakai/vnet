@@ -100,7 +100,7 @@ static u8 * format_ip4_icmp_input_trace (u8 * s, va_list * va)
 
 typedef enum {
   ICMP_ERROR_UNKNOWN_TYPE,
-  ICMP_N_ERROR,
+  ICMP_ERROR_ECHO_REPLIES_SENT,
 } icmp_error_t;
 
 typedef enum {
@@ -204,6 +204,7 @@ ip4_icmp_input (vlib_main_t * vm,
 
 static char * icmp_error_strings[] = {
   [ICMP_ERROR_UNKNOWN_TYPE] = "unknown type",
+  [ICMP_ERROR_ECHO_REPLIES_SENT] = "echo replies sent",
 };
 
 static VLIB_REGISTER_NODE (ip4_icmp_input_node) = {
@@ -214,7 +215,7 @@ static VLIB_REGISTER_NODE (ip4_icmp_input_node) = {
 
   .format_trace = format_ip4_icmp_input_trace,
 
-  .n_errors = 1,
+  .n_errors = ARRAY_LEN (icmp_error_strings),
   .error_strings = icmp_error_strings,
 
   .n_next_nodes = 1,
@@ -358,6 +359,10 @@ ip4_icmp_echo_request (vlib_main_t * vm,
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);
     }
+
+  vlib_error_count (vm, ip4_icmp_input_node.index,
+		    ICMP_ERROR_ECHO_REPLIES_SENT,
+		    frame->n_vectors);
 
   return frame->n_vectors;
 }
