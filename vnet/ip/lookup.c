@@ -1169,3 +1169,165 @@ static VLIB_CLI_COMMAND (ip4_show_fib_command) = {
   .function = ip4_show_fib,
   .parent = &vlib_cli_show_ip_command,
 };
+
+typedef struct {
+  ip6_address_t address;
+
+  u32 address_length;
+
+  u32 index;
+} ip6_route_t;
+
+static clib_error_t *
+ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  ip6_main_t * im6 = &ip6_main;
+  ip6_route_t * routes, * r;
+  ip6_fib_t * fib;
+  ip6_fib_mhash_t * mh;
+  ip_lookup_main_t * lm = &im6->lookup_main;
+  uword * results;
+  int verbose;
+
+  routes = 0;
+  results = 0;
+  verbose = 1;
+  if (unformat (input, "brief") || unformat (input, "summary")
+      || unformat (input, "sum"))
+    verbose = 0;
+
+  vec_foreach (fib, im6->fibs)
+    {
+      vlib_cli_output (vm, "Table %d", fib->table_id);
+
+      /* Show summary? */
+      if (! verbose)
+	{
+	  vlib_cli_output (vm, "%=20s%=16s", "Prefix length", "Count");
+	  vec_foreach (mh, fib->non_empty_dst_address_length_mhash)
+	    {
+	      uword n_elts = mhash_elts (&mh->adj_index_by_dst_address);
+	      if (n_elts > 0)
+		vlib_cli_output (vm, "%20d%16d", mh->dst_address_length, n_elts);
+	    }
+	  continue;
+	}
+
+      if (routes)
+	_vec_len (routes) = 0;
+      if (results)
+	_vec_len (results) = 0;
+
+      vec_foreach (mh, fib->non_empty_dst_address_length_mhash)
+	{
+	  ip6_address_t * k;
+	  uword * v;
+	  mhash_foreach (k, v, &mh->adj_index_by_dst_address, ({
+	    ip6_route_t x;
+	    x.address = k[0];
+	    x.address_length = mh->dst_address_length;
+	    if (lm->fib_result_n_words > 1)
+	      {
+		x.index = vec_len (results);
+		vec_add (results, v, lm->fib_result_n_words);
+	      }
+	    else
+	      x.index = v[0];
+
+	    vec_add1 (routes, x);
+	  }));
+	}
+
+      vec_sort (routes, r1, r2,
+		({ int cmp = ip6_address_compare (&r1->address, &r2->address);
+		  cmp ? cmp : ((int) r1->address_length - (int) r2->address_length); }));
+
+      vlib_cli_output (vm, "%=20s%=16s%=16s%=16s",
+		       "Destination", "Packets", "Bytes", "Adjacency");
+      vec_foreach (r, routes)
+	{
+	  vlib_counter_t c, sum;
+	  uword i, j, n_left, n_nhs, adj_index, * result = 0;
+	  ip_adjacency_t * adj;
+	  ip_multipath_next_hop_t * nhs, tmp_nhs[1];
+
+	  adj_index = r->index;
+	  if (lm->fib_result_n_words > 1)
+	    {
+	      result = vec_elt_at_index (results, adj_index);
+	      adj_index = result[0];
+	    }
+
+	  adj = ip_get_adjacency (lm, adj_index);
+	  if (adj->n_adj == 1)
+	    {
+	      nhs = &tmp_nhs[0];
+	      nhs[0].next_hop_adj_index = ~0; /* not used */
+	      nhs[0].weight = 1;
+	      n_nhs = 1;
+	    }
+	  else
+	    {
+	      ip_multipath_adjacency_t * madj;
+	      madj = vec_elt_at_index (lm->multipath_adjacencies, adj->heap_handle);
+	      nhs = heap_elt_at_index (lm->next_hop_heap, madj->normalized_next_hops.heap_offset);
+	      n_nhs = madj->normalized_next_hops.count;
+	    }
+
+	  n_left = nhs[0].weight;
+	  vlib_counter_zero (&sum);
+	  for (i = j = 0; i < adj->n_adj; i++)
+	    {
+	      n_left -= 1;
+	      vlib_get_combined_counter (&lm->adjacency_counters, adj_index + i, &c);
+	      vlib_counter_add (&sum, &c);
+	      if (n_left == 0)
+		{
+		  u8 * msg = 0;
+		  uword indent;
+
+		  if (j == 0)
+		    msg = format (msg, "%-20U",
+				  format_ip6_address_and_length,
+				  r->address.data, r->address_length);
+		  else
+		    msg = format (msg, "%U", format_white_space, 20);
+
+		  msg = format (msg, "%16Ld%16Ld ", sum.packets, sum.bytes);
+
+		  indent = vec_len (msg);
+		  msg = format (msg, "weight %d, index %d\n%U%U",
+				nhs[j].weight, adj_index + i,
+				format_white_space, indent,
+				format_ip_adjacency,
+				vm, lm, adj_index + i);
+
+		  vlib_cli_output (vm, "%v", msg);
+		  vec_free (msg);
+
+		  j++;
+		  if (j < n_nhs)
+		    {
+		      n_left = nhs[j].weight;
+		      vlib_counter_zero (&sum);
+		    }
+		}
+	    }
+
+	  if (result && lm->format_fib_result)
+	    vlib_cli_output (vm, "%20s%U", "", lm->format_fib_result, vm, lm, result, 0);
+	}
+    }
+
+  vec_free (routes);
+  vec_free (results);
+
+  return 0;
+}
+
+static VLIB_CLI_COMMAND (ip6_show_fib_command) = {
+  .name = "fib6",
+  .short_help = "Show IP6 routing table",
+  .function = ip6_show_fib,
+  .parent = &vlib_cli_show_ip_command,
+};

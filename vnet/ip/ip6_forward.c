@@ -919,7 +919,7 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
   a.n_add_adj = 0;
   a.add_adj = 0;
 
-  if (address_length < 32)
+  if (address_length < 128)
     {
       adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			      &a.adj_index);
@@ -927,11 +927,11 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
       ip6_add_del_route (im, &a);
     }
 
-  /* Add e.g. 1.1.1.1/32 as local to this host. */
+  /* Add e.g. ::1/128 as local to this host. */
   adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			  &a.adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
-  a.dst_address_length = 32;
+  a.dst_address_length = 128;
   ip6_add_del_route (im, &a);
 }
 
@@ -954,10 +954,10 @@ ip6_del_interface_routes (ip6_main_t * im, u32 fib_index,
 
   ASSERT (ip6_interface_address_is_valid (address));
 
-  if (address_length < 32)
+  if (address_length < 128)
     ip6_add_del_route (im, &a);
 
-  a.dst_address_length = 32;
+  a.dst_address_length = 128;
   ip6_add_del_route (im, &a);
 
   ip6_delete_matching_routes (im,

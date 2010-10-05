@@ -83,7 +83,7 @@ am_libvnet_la_OBJECTS = vnet/vnet/rewrite.lo vnet/ethernet/arp.lo \
 	vnet/ppp/node.lo vnet/ppp/pg.lo vnet/ppp/ppp.lo \
 	vnet/hdlc/node.lo vnet/hdlc/pg.lo vnet/hdlc/hdlc.lo \
 	vnet/ip/format.lo vnet/ip/icmp4.lo vnet/ip/icmp6.lo \
-	vnet/ip/ip4_cli.lo vnet/ip/ip4_format.lo \
+	vnet/ip/ip46_cli.lo vnet/ip/ip4_format.lo \
 	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
 	vnet/ip/ip6_format.lo vnet/ip/ip6_forward.lo \
 	vnet/ip/ip6_input.lo vnet/ip/ip6_pg.lo vnet/ip/ip_checksum.lo \
@@ -289,7 +289,7 @@ libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/arp.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
 	vnet/ppp/node.c vnet/ppp/pg.c vnet/ppp/ppp.c vnet/hdlc/node.c \
 	vnet/hdlc/pg.c vnet/hdlc/hdlc.c vnet/ip/format.c \
-	vnet/ip/icmp4.c vnet/ip/icmp6.c vnet/ip/ip4_cli.c \
+	vnet/ip/icmp4.c vnet/ip/icmp6.c vnet/ip/ip46_cli.c \
 	vnet/ip/ip4_format.c vnet/ip/ip4_forward.c vnet/ip/ip4_input.c \
 	vnet/ip/ip4_pg.c vnet/ip/ip6_format.c vnet/ip/ip6_forward.c \
 	vnet/ip/ip6_input.c vnet/ip/ip6_pg.c vnet/ip/ip_checksum.c \
@@ -452,7 +452,7 @@ vnet/ip/icmp4.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/icmp6.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
-vnet/ip/ip4_cli.lo: vnet/ip/$(am__dirstamp) \
+vnet/ip/ip46_cli.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/ip4_format.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
@@ -580,8 +580,8 @@ mostlyclean-compile:
 	-rm -f vnet/ip/icmp4.lo
 	-rm -f vnet/ip/icmp6.$(OBJEXT)
 	-rm -f vnet/ip/icmp6.lo
-	-rm -f vnet/ip/ip4_cli.$(OBJEXT)
-	-rm -f vnet/ip/ip4_cli.lo
+	-rm -f vnet/ip/ip46_cli.$(OBJEXT)
+	-rm -f vnet/ip/ip46_cli.lo
 	-rm -f vnet/ip/ip4_format.$(OBJEXT)
 	-rm -f vnet/ip/ip4_format.lo
 	-rm -f vnet/ip/ip4_forward.$(OBJEXT)
@@ -660,7 +660,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/icmp4.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/icmp6.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_cli.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip46_cli.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_forward.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_input.Plo@am__quote@

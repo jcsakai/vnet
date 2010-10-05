@@ -28,18 +28,31 @@
 int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2)
 { return clib_net_to_host_u32 (a1->data_u32) - clib_net_to_host_u32 (a2->data_u32); }
 
-static VLIB_CLI_COMMAND (set_interface_ip4_command) = {
-  .name = "ip4",
-  .short_help = "IP4 commands",
+int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2)
+{
+  int i;
+  for (i = 0; i < ARRAY_LEN (a1->data_u32); i++)
+    {
+      int cmp = clib_net_to_host_u32 (a1->data_u32) - clib_net_to_host_u32 (a2->data_u32);
+      if (cmp != 0)
+	return cmp;
+    }
+  return 0;
+}
+
+static VLIB_CLI_COMMAND (set_interface_ip_command) = {
+  .name = "ip",
+  .short_help = "IP4/IP6 commands",
   .parent = &vlib_cli_set_interface_command,
 };
 
 static clib_error_t *
-set_ip4_address (vlib_main_t * vm,
-		 unformat_input_t * input,
-		 vlib_cli_command_t * cmd)
+set_ip_address (vlib_main_t * vm,
+		unformat_input_t * input,
+		vlib_cli_command_t * cmd)
 {
-  ip4_address_t a;
+  ip4_address_t a4;
+  ip6_address_t a6;
   clib_error_t * error = 0;
   u32 sw_if_index, length;
 
@@ -51,14 +64,17 @@ set_ip4_address (vlib_main_t * vm,
       goto done;
     }
 
-  if (! unformat (input, "%U/%d", unformat_ip4_address, &a, &length))
+  if (unformat (input, "%U/%d", unformat_ip4_address, &a4, &length))
+    ip4_set_interface_address (vm, sw_if_index, &a4, length);
+  else if (unformat (input, "%U/%d", unformat_ip6_address, &a6, &length))
+    ip6_set_interface_address (vm, sw_if_index, &a6, length);
+  else
     {
-      error = clib_error_return (0, "expected IP4 address A.B.C.D/L `%U'",
+      error = clib_error_return (0, "expected IP4/IP6 address/length `%U'",
 				 format_unformat_error, input);
       goto done;
     }
 
-  ip4_set_interface_address (vm, sw_if_index, &a, length);
 
  done:
   return error;
@@ -66,9 +82,9 @@ set_ip4_address (vlib_main_t * vm,
 
 static VLIB_CLI_COMMAND (set_interface_ip4_address_command) = {
   .name = "address",
-  .function = set_ip4_address,
-  .short_help = "Set IP4 address for interface",
-  .parent = &set_interface_ip4_command,
+  .function = set_ip_address,
+  .short_help = "Set IP4/IP6 address for interface",
+  .parent = &set_interface_ip_command,
 };
 
 /* Dummy init function to get us linked in. */
