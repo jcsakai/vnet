@@ -94,7 +94,13 @@ do {						\
     if ((error = vlib_call_init_function (vm, ip4_init)))
       return error;
 
-    if ((error = vlib_call_init_function (vm, icmp_init)))
+    if ((error = vlib_call_init_function (vm, ip6_init)))
+      return error;
+
+    if ((error = vlib_call_init_function (vm, icmp4_init)))
+      return error;
+
+    if ((error = vlib_call_init_function (vm, icmp6_init)))
       return error;
 
     if ((error = vlib_call_init_function (vm, tcp_udp_lookup_init)))

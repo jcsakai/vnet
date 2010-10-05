@@ -33,6 +33,24 @@ typedef union {
   u64 data_u64[2];
 } ip6_address_t;
 
+always_inline void
+ip6_address_mask (ip6_address_t * a, ip6_address_t * mask)
+{
+  int i;
+  for (i = 0; i < ARRAY_LEN (a->data_u32); i++)
+    a->data_u32[i] &= mask->data_u32[i];
+}
+
+always_inline uword
+ip6_address_is_zero (ip6_address_t * a)
+{
+  int i;
+  for (i = 0; i < ARRAY_LEN (a->data_u32); i++)
+    if (a->data_u32[i] != 0)
+      return 0;
+  return 1;
+}
+
 typedef struct {
   /* 4 bit version, 8 bit traffic class and 20 bit flow label. */
   u32 ip_version_traffic_class_and_flow_label;
@@ -49,5 +67,9 @@ typedef struct {
   /* Source and destination address. */
   ip6_address_t src_address, dst_address;
 } ip6_header_t;
+
+always_inline void *
+ip6_next_header (ip6_header_t * i)
+{ return (void *) (i + 1); }
 
 #endif /* included_ip6_packet_h */

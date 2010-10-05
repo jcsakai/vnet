@@ -82,9 +82,11 @@ am_libvnet_la_OBJECTS = vnet/vnet/rewrite.lo vnet/ethernet/arp.lo \
 	vnet/ethernet/node.lo vnet/ethernet/pg.lo vnet/ethernet/phy.lo \
 	vnet/ppp/node.lo vnet/ppp/pg.lo vnet/ppp/ppp.lo \
 	vnet/hdlc/node.lo vnet/hdlc/pg.lo vnet/hdlc/hdlc.lo \
-	vnet/ip/format.lo vnet/ip/icmp.lo vnet/ip/ip4_cli.lo \
-	vnet/ip/ip4_format.lo vnet/ip/ip4_forward.lo \
-	vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo vnet/ip/ip_checksum.lo \
+	vnet/ip/format.lo vnet/ip/icmp4.lo vnet/ip/icmp6.lo \
+	vnet/ip/ip4_cli.lo vnet/ip/ip4_format.lo \
+	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
+	vnet/ip/ip6_format.lo vnet/ip/ip6_forward.lo \
+	vnet/ip/ip6_input.lo vnet/ip/ip6_pg.lo vnet/ip/ip_checksum.lo \
 	vnet/ip/ip_init.lo vnet/ip/lookup.lo vnet/ip/tcp_format.lo \
 	vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
 	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
@@ -179,7 +181,6 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
-PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -288,11 +289,13 @@ libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/arp.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
 	vnet/ppp/node.c vnet/ppp/pg.c vnet/ppp/ppp.c vnet/hdlc/node.c \
 	vnet/hdlc/pg.c vnet/hdlc/hdlc.c vnet/ip/format.c \
-	vnet/ip/icmp.c vnet/ip/ip4_cli.c vnet/ip/ip4_format.c \
-	vnet/ip/ip4_forward.c vnet/ip/ip4_input.c vnet/ip/ip4_pg.c \
-	vnet/ip/ip_checksum.c vnet/ip/ip.h vnet/ip/ip_init.c \
-	vnet/ip/lookup.c vnet/ip/tcp_format.c vnet/ip/tcp_init.c \
-	vnet/ip/tcp_pg.c vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
+	vnet/ip/icmp4.c vnet/ip/icmp6.c vnet/ip/ip4_cli.c \
+	vnet/ip/ip4_format.c vnet/ip/ip4_forward.c vnet/ip/ip4_input.c \
+	vnet/ip/ip4_pg.c vnet/ip/ip6_format.c vnet/ip/ip6_forward.c \
+	vnet/ip/ip6_input.c vnet/ip/ip6_pg.c vnet/ip/ip_checksum.c \
+	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c \
+	vnet/ip/tcp_format.c vnet/ip/tcp_init.c vnet/ip/tcp_pg.c \
+	vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
 	vnet/ip/udp_init.c vnet/ip/udp_pg.c vnet/pg/cli.c \
 	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
@@ -303,10 +306,11 @@ nobase_include_HEADERS = vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
 	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
 	vnet/ppp/error.def vnet/ppp/ppp.h vnet/ppp/packet.h \
 	vnet/hdlc/error.def vnet/hdlc/hdlc.h vnet/hdlc/packet.h \
-	vnet/ip/format.h vnet/ip/icmp_packet.h vnet/ip/ip.h \
+	vnet/ip/format.h vnet/ip/icmp46_packet.h vnet/ip/ip.h \
 	vnet/ip/ip4.h vnet/ip/ip4_error.h vnet/ip/ip4_packet.h \
-	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
-	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
+	vnet/ip/ip6.h vnet/ip/ip6_error.h vnet/ip/ip6_packet.h \
+	vnet/ip/lookup.h vnet/ip/ip_packet.h vnet/ip/ports.def \
+	vnet/ip/protocols.def vnet/ip/tcp_packet.h \
 	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h \
 	vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
@@ -444,7 +448,9 @@ vnet/ip/$(DEPDIR)/$(am__dirstamp):
 	@: > vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/format.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
-vnet/ip/icmp.lo: vnet/ip/$(am__dirstamp) \
+vnet/ip/icmp4.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/icmp6.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/ip4_cli.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
@@ -455,6 +461,14 @@ vnet/ip/ip4_forward.lo: vnet/ip/$(am__dirstamp) \
 vnet/ip/ip4_input.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/ip4_pg.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip6_format.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip6_forward.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip6_input.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/ip6_pg.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/ip_checksum.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
@@ -562,8 +576,10 @@ mostlyclean-compile:
 	-rm -f vnet/hdlc/pg.lo
 	-rm -f vnet/ip/format.$(OBJEXT)
 	-rm -f vnet/ip/format.lo
-	-rm -f vnet/ip/icmp.$(OBJEXT)
-	-rm -f vnet/ip/icmp.lo
+	-rm -f vnet/ip/icmp4.$(OBJEXT)
+	-rm -f vnet/ip/icmp4.lo
+	-rm -f vnet/ip/icmp6.$(OBJEXT)
+	-rm -f vnet/ip/icmp6.lo
 	-rm -f vnet/ip/ip4_cli.$(OBJEXT)
 	-rm -f vnet/ip/ip4_cli.lo
 	-rm -f vnet/ip/ip4_format.$(OBJEXT)
@@ -574,6 +590,14 @@ mostlyclean-compile:
 	-rm -f vnet/ip/ip4_input.lo
 	-rm -f vnet/ip/ip4_pg.$(OBJEXT)
 	-rm -f vnet/ip/ip4_pg.lo
+	-rm -f vnet/ip/ip6_format.$(OBJEXT)
+	-rm -f vnet/ip/ip6_format.lo
+	-rm -f vnet/ip/ip6_forward.$(OBJEXT)
+	-rm -f vnet/ip/ip6_forward.lo
+	-rm -f vnet/ip/ip6_input.$(OBJEXT)
+	-rm -f vnet/ip/ip6_input.lo
+	-rm -f vnet/ip/ip6_pg.$(OBJEXT)
+	-rm -f vnet/ip/ip6_pg.lo
 	-rm -f vnet/ip/ip_checksum.$(OBJEXT)
 	-rm -f vnet/ip/ip_checksum.lo
 	-rm -f vnet/ip/ip_init.$(OBJEXT)
@@ -634,12 +658,17 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/hdlc/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/hdlc/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/format.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/icmp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/icmp4.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/icmp6.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_cli.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_forward.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_input.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip4_pg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip6_format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip6_forward.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip6_input.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip6_pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip_checksum.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip_init.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/lookup.Plo@am__quote@

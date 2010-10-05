@@ -208,14 +208,14 @@ ip4_get_route (ip4_main_t * im,
 	       u8 * address,
 	       u32 address_length);
 
-ip4_address_t *
+void
 ip4_foreach_matching_route (ip4_main_t * im,
 			    u32 table_index_or_table_id,
 			    u32 flags,
 			    u8 * address,
 			    u32 address_length,
-			    u32 * result_length,
-			    ip4_address_t * results);
+			    ip4_address_t ** results,
+			    u8 ** result_lengths);
 
 void ip4_delete_matching_routes (ip4_main_t * im,
 				 u32 table_index_or_table_id,

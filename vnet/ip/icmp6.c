@@ -1,5 +1,5 @@
 /*
- * ip/icmp_init.c: icmp initialization
+ * ip/icmp6.c: ip6 icmp
  *
  * Copyright (c) 2008 Eliot Dresselhaus
  *
@@ -27,9 +27,9 @@
 #include <vnet/ip/ip.h>
 #include <vnet/pg/pg.h>
 
-static u8 * format_icmp_type_and_code (u8 * s, va_list * args)
+static u8 * format_ip6_icmp_type_and_code (u8 * s, va_list * args)
 {
-  icmp_type_t type = va_arg (*args, int);
+  icmp6_type_t type = va_arg (*args, int);
   u8 code = va_arg (*args, int);
   char * t = 0;
 
@@ -37,7 +37,7 @@ static u8 * format_icmp_type_and_code (u8 * s, va_list * args)
 
   switch (type)
     {
-      foreach_icmp_type;
+      foreach_icmp6_type;
 
     default:
       break;
@@ -53,9 +53,9 @@ static u8 * format_icmp_type_and_code (u8 * s, va_list * args)
   t = 0;
   switch ((type << 8) | code)
     {
-#define _(a,n,f) case (ICMP_##a << 8) | (n): t = #f; break;
+#define _(a,n,f) case (ICMP6_##a << 8) | (n): t = #f; break;
 
-      foreach_icmp_code;
+      foreach_icmp6_code;
 
 #undef _
     }
@@ -66,9 +66,9 @@ static u8 * format_icmp_type_and_code (u8 * s, va_list * args)
   return s;
 }
 
-static u8 * format_icmp_header (u8 * s, va_list * args)
+static u8 * format_ip6_icmp_header (u8 * s, va_list * args)
 {
-  icmp_header_t * icmp = va_arg (*args, icmp_header_t *);
+  icmp46_header_t * icmp = va_arg (*args, icmp46_header_t *);
   u32 max_header_bytes = va_arg (*args, u32);
 
   /* Nothing to do. */
@@ -76,7 +76,7 @@ static u8 * format_icmp_header (u8 * s, va_list * args)
     return format (s, "ICMP header truncated");
 
   s = format (s, "ICMP %U",
-	      format_icmp_type_and_code, icmp->type, icmp->code);
+	      format_ip6_icmp_type_and_code, icmp->type, icmp->code);
 
   return s;
 }
@@ -85,14 +85,14 @@ typedef struct {
   u8 packet_data[64];
 } icmp_input_trace_t;
 
-static u8 * format_ip4_icmp_input_trace (u8 * s, va_list * va)
+static u8 * format_icmp_input_trace (u8 * s, va_list * va)
 {
   UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
   UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   icmp_input_trace_t * t = va_arg (*va, icmp_input_trace_t *);
 
   s = format (s, "%U",
-	      format_ip4_header,
+	      format_ip6_header,
 	      t->packet_data, sizeof (t->packet_data));
 
   return s;
@@ -114,13 +114,13 @@ typedef struct {
   uword * type_by_name;
 
   /* Vector dispatch table indexed by [icmp type]. */
-  u8 ip4_input_next_index_by_type[256];
+  u8 ip6_input_next_index_by_type[256];
 } icmp_main_t;
 
 icmp_main_t icmp_main;
 
 static uword
-ip4_icmp_input (vlib_main_t * vm,
+ip6_icmp_input (vlib_main_t * vm,
 		vlib_node_runtime_t * node,
 		vlib_frame_t * frame)
 {
@@ -153,9 +153,9 @@ ip4_icmp_input (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  ip4_header_t * ip0;
-	  icmp_header_t * icmp0;
-	  icmp_type_t type0;
+	  ip6_header_t * ip0;
+	  icmp46_header_t * icmp0;
+	  icmp6_type_t type0;
 	  u32 bi0, next0;
       
 	  bi0 = to_next[0] = from[0];
@@ -167,9 +167,9 @@ ip4_icmp_input (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, bi0);
 	  ip0 = vlib_buffer_get_current (p0);
-	  icmp0 = ip4_next_header (ip0);
+	  icmp0 = ip6_next_header (ip0);
 	  type0 = icmp0->type;
-	  next0 = im->ip4_input_next_index_by_type[type0];
+	  next0 = im->ip6_input_next_index_by_type[type0];
 
 	  to_next_error[0] = unknown_type_error;
 	  to_next_error += next0 == ICMP_INPUT_NEXT_ERROR;
@@ -207,13 +207,13 @@ static char * icmp_error_strings[] = {
   [ICMP_ERROR_ECHO_REPLIES_SENT] = "echo replies sent",
 };
 
-static VLIB_REGISTER_NODE (ip4_icmp_input_node) = {
-  .function = ip4_icmp_input,
-  .name = "ip4-icmp-input",
+static VLIB_REGISTER_NODE (ip6_icmp_input_node) = {
+  .function = ip6_icmp_input,
+  .name = "ip6-icmp-input",
 
   .vector_size = sizeof (u32),
 
-  .format_trace = format_ip4_icmp_input_trace,
+  .format_trace = format_icmp_input_trace,
 
   .n_errors = ARRAY_LEN (icmp_error_strings),
   .error_strings = icmp_error_strings,
@@ -225,14 +225,14 @@ static VLIB_REGISTER_NODE (ip4_icmp_input_node) = {
 };
 
 static uword
-ip4_icmp_echo_request (vlib_main_t * vm,
+ip6_icmp_echo_request (vlib_main_t * vm,
 		       vlib_node_runtime_t * node,
 		       vlib_frame_t * frame)
 {
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
-  ip4_main_t * i4m = &ip4_main;
+  ip6_main_t * i4m = &ip6_main;
   u16 * fragment_ids, * fid;
 
   from = vlib_frame_vector_args (frame);
@@ -255,11 +255,10 @@ ip4_icmp_echo_request (vlib_main_t * vm,
       while (n_left_from > 2 && n_left_to_next > 2)
 	{
 	  vlib_buffer_t * p0, * p1;
-	  ip4_header_t * ip0, * ip1;
-	  icmp_header_t * icmp0, * icmp1;
-	  u32 bi0, src0, dst0;
-	  u32 bi1, src1, dst1;
-	  ip_csum_t sum0, sum1;
+	  ip6_header_t * ip0, * ip1;
+	  icmp46_header_t * icmp0, * icmp1;
+	  ip6_address_t tmp0, tmp1;
+	  u32 bi0, bi1;
       
 	  bi0 = to_next[0] = from[0];
 	  bi1 = to_next[1] = from[1];
@@ -273,57 +272,34 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  p1 = vlib_get_buffer (vm, bi1);
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
-	  icmp0 = ip4_next_header (ip0);
-	  icmp1 = ip4_next_header (ip1);
+	  icmp0 = ip6_next_header (ip0);
+	  icmp1 = ip6_next_header (ip1);
 
-	  icmp0->type = ICMP_echo_reply;
-	  icmp1->type = ICMP_echo_reply;
+	  icmp0->type = ICMP6_echo_reply;
+	  icmp1->type = ICMP6_echo_reply;
 
-	  src0 = ip0->src_address.data_u32;
-	  src1 = ip1->src_address.data_u32;
-	  dst0 = ip0->dst_address.data_u32;
-	  dst1 = ip1->dst_address.data_u32;
+	  /* Swap source and destination address. */
+	  tmp0 = ip0->src_address;
+	  tmp1 = ip1->src_address;
 
-	  /* Swap source and destination address.
-	     Does not change checksum. */
-	  ip0->src_address.data_u32 = dst0;
-	  ip1->src_address.data_u32 = dst1;
-	  ip0->dst_address.data_u32 = src0;
-	  ip1->dst_address.data_u32 = src1;
+	  ip0->src_address = ip0->dst_address;
+	  ip1->src_address = ip1->dst_address;
 
-	  sum0 = ip0->checksum;
-	  sum1 = ip1->checksum;
-
-	  /* Remove old ttl & fragment id from checksum. */
-	  sum0 = ip_csum_sub_even (sum0, ip0->ttl);
-	  sum1 = ip_csum_sub_even (sum1, ip1->ttl);
-	  sum0 = ip_csum_sub_even (sum0, ip0->fragment_id);
-	  sum1 = ip_csum_sub_even (sum1, ip1->fragment_id);
+	  ip0->dst_address = tmp0;
+	  ip1->dst_address = tmp1;
 
 	  /* New ttl. */
 	  ip0->ttl = i4m->host_config.ttl;
 	  ip1->ttl = i4m->host_config.ttl;
-	  sum0 = ip_csum_add_even (sum0, ip0->ttl);
-	  sum1 = ip_csum_add_even (sum1, ip1->ttl);
-
-	  /* New fragment id. */
-	  ip0->fragment_id = fid[0];
-	  ip1->fragment_id = fid[1];
-	  sum0 = ip_csum_add_even (sum0, ip0->fragment_id);
-	  sum1 = ip_csum_add_even (sum1, ip1->fragment_id);
-	  fid += 2;
-
-	  ip0->checksum = ip_csum_fold (sum0);
-	  ip1->checksum = ip_csum_fold (sum1);
 	}
   
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  ip4_header_t * ip0;
-	  icmp_header_t * icmp0;
-	  u32 bi0, src0, dst0;
-	  ip_csum_t sum0;
+	  ip6_header_t * ip0;
+	  icmp46_header_t * icmp0;
+	  u32 bi0;
+	  ip6_address_t tmp0;
       
 	  bi0 = to_next[0] = from[0];
 
@@ -334,56 +310,45 @@ ip4_icmp_echo_request (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, bi0);
 	  ip0 = vlib_buffer_get_current (p0);
-	  icmp0 = ip4_next_header (ip0);
+	  icmp0 = ip6_next_header (ip0);
 
-	  icmp0->type = ICMP_echo_reply;
-	  src0 = ip0->src_address.data_u32;
-	  dst0 = ip0->dst_address.data_u32;
+	  icmp0->type = ICMP6_echo_reply;
 
-	  sum0 = ip0->checksum;
-	  sum0 = ip_csum_sub_even (sum0, ip0->ttl);
-	  sum0 = ip_csum_sub_even (sum0, ip0->fragment_id);
+	  /* Swap source and destination address. */
+	  tmp0 = ip0->src_address;
+	  ip0->src_address = ip0->dst_address;
+	  ip0->dst_address = tmp0;
 
 	  ip0->ttl = i4m->host_config.ttl;
-	  sum0 = ip_csum_add_even (sum0, ip0->ttl);
-
-	  ip0->fragment_id = fid[0];
-	  sum0 = ip_csum_add_even (sum0, ip0->fragment_id);
-	  fid += 1;
-
-	  ip0->checksum = ip_csum_fold (sum0);
-
-	  ip0->src_address.data_u32 = dst0;
-	  ip0->dst_address.data_u32 = src0;
 	}
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);
     }
 
-  vlib_error_count (vm, ip4_icmp_input_node.index,
+  vlib_error_count (vm, ip6_icmp_input_node.index,
 		    ICMP_ERROR_ECHO_REPLIES_SENT,
 		    frame->n_vectors);
 
   return frame->n_vectors;
 }
 
-static VLIB_REGISTER_NODE (ip4_icmp_echo_request_node) = {
-  .function = ip4_icmp_echo_request,
-  .name = "ip4-icmp-echo-request",
+static VLIB_REGISTER_NODE (ip6_icmp_echo_request_node) = {
+  .function = ip6_icmp_echo_request,
+  .name = "ip6-icmp-echo-request",
 
   .vector_size = sizeof (u32),
 
-  .format_trace = format_ip4_icmp_input_trace,
+  .format_trace = format_icmp_input_trace,
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [0] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+    [0] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
   },
 };
 
 static uword unformat_icmp_type_and_code (unformat_input_t * input, va_list * args)
 {
-  icmp_header_t * h = va_arg (*args, icmp_header_t *);
+  icmp46_header_t * h = va_arg (*args, icmp46_header_t *);
   icmp_main_t * cm = &icmp_main;
   u32 i;
 
@@ -408,13 +373,13 @@ static uword unformat_icmp_type_and_code (unformat_input_t * input, va_list * ar
 typedef struct {
   pg_edit_t type, code;
   pg_edit_t checksum;
-} pg_icmp_header_t;
+} pg_icmp46_header_t;
 
 always_inline void
-pg_icmp_header_init (pg_icmp_header_t * p)
+pg_icmp_header_init (pg_icmp46_header_t * p)
 {
   /* Initialize fields that are not bit fields in the IP header. */
-#define _(f) pg_edit_init (&p->f, icmp_header_t, f);
+#define _(f) pg_edit_init (&p->f, icmp46_header_t, f);
   _ (type);
   _ (code);
   _ (checksum);
@@ -425,10 +390,10 @@ static uword
 unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
 {
   pg_stream_t * s = va_arg (*args, pg_stream_t *);
-  pg_icmp_header_t * p;
+  pg_icmp46_header_t * p;
   u32 group_index;
   
-  p = pg_create_edit_group (s, sizeof (p[0]), sizeof (icmp_header_t),
+  p = pg_create_edit_group (s, sizeof (p[0]), sizeof (icmp46_header_t),
 			    &group_index);
   pg_icmp_header_init (p);
 
@@ -436,7 +401,7 @@ unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
   pg_edit_set_fixed (&p->checksum, 0);
 
   {
-    icmp_header_t tmp;
+    icmp46_header_t tmp;
 
     if (! unformat (input, "ICMP %U", unformat_icmp_type_and_code, &tmp))
       goto error;
@@ -456,17 +421,17 @@ unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
   return 0;
 }
 
-static void ip4_icmp_register_type (vlib_main_t * vm, icmp_type_t type, u32 node_index)
+static void ip6_icmp_register_type (vlib_main_t * vm, icmp6_type_t type, u32 node_index)
 {
   icmp_main_t * im = &icmp_main;
 
-  ASSERT (type < ARRAY_LEN (im->ip4_input_next_index_by_type));
-  im->ip4_input_next_index_by_type[type]
-    = vlib_node_add_next (vm, ip4_icmp_input_node.index, node_index);
+  ASSERT (type < ARRAY_LEN (im->ip6_input_next_index_by_type));
+  im->ip6_input_next_index_by_type[type]
+    = vlib_node_add_next (vm, ip6_icmp_input_node.index, node_index);
 }
 
 static clib_error_t *
-icmp_init (vlib_main_t * vm)
+icmp6_init (vlib_main_t * vm)
 {
   ip_main_t * im = &ip_main;
   ip_protocol_info_t * pi;
@@ -479,26 +444,26 @@ icmp_init (vlib_main_t * vm)
     return error;
 
   pi = ip_get_protocol_info (im, IP_PROTOCOL_ICMP);
-  pi->format_header = format_icmp_header;
+  pi->format_header = format_ip6_icmp_header;
   pi->unformat_pg_edit = unformat_pg_icmp_header;
 
   cm->type_by_name = hash_create_string (0, sizeof (uword));
 #define _(n,t) hash_set_mem (cm->type_by_name, #t, (n));
-  foreach_icmp_type;
+  foreach_icmp6_type;
 #undef _
 
   cm->type_and_code_by_name = hash_create_string (0, sizeof (uword));
-#define _(a,n,t) hash_set_mem (cm->type_by_name, #t, (n) | (ICMP_##a << 8));
-  foreach_icmp_code;
+#define _(a,n,t) hash_set_mem (cm->type_by_name, #t, (n) | (ICMP6_##a << 8));
+  foreach_icmp6_code;
 #undef _
 
-  memset (cm->ip4_input_next_index_by_type,
+  memset (cm->ip6_input_next_index_by_type,
 	  ICMP_INPUT_NEXT_ERROR,
-	  sizeof (cm->ip4_input_next_index_by_type));
+	  sizeof (cm->ip6_input_next_index_by_type));
 
-  ip4_icmp_register_type (vm, ICMP_echo_request, ip4_icmp_echo_request_node.index);
+  ip6_icmp_register_type (vm, ICMP6_echo_request, ip6_icmp_echo_request_node.index);
 
   return 0;
 }
 
-VLIB_INIT_FUNCTION (icmp_init);
+VLIB_INIT_FUNCTION (icmp6_init);
