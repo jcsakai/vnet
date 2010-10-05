@@ -7,21 +7,23 @@
 static clib_error_t *
 vnet_main_init (vlib_main_t * vm)
 {
-    clib_error_t * error = 0;
+  clib_error_t * error = 0;
 
-    if ((error = vlib_call_init_function (vm, pg_init)))
-	return error;
-    if ((error = vlib_call_init_function (vm, ip_main_init)))
-	return error;
-    if ((error = vlib_call_init_function (vm, ethernet_init)))
-	return error;
-    if ((error = vlib_call_init_function (vm, ethernet_arp_init)))
-	return error;
-
-    if ((error = unix_physmem_init (vm, /* fail_if_physical_memory_not_present */ 0)))
-        return error;
-
+  if ((error = vlib_call_init_function (vm, pg_init)))
     return error;
+  if ((error = vlib_call_init_function (vm, ip_main_init)))
+    return error;
+  if ((error = vlib_call_init_function (vm, ethernet_init)))
+    return error;
+  if ((error = vlib_call_init_function (vm, ethernet_arp_init)))
+    return error;
+
+  if ((error = unix_physmem_init (vm, /* fail_if_physical_memory_not_present */ 0)))
+    return error;
+
+  vlib_unix_cli_set_prompt ("VNET: ");
+
+  return error;
 }
 
 static VLIB_INIT_FUNCTION (vnet_main_init);
