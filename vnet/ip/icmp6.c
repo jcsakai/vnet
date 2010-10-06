@@ -115,16 +115,16 @@ typedef struct {
 
   /* Vector dispatch table indexed by [icmp type]. */
   u8 ip6_input_next_index_by_type[256];
-} icmp_main_t;
+} icmp6_main_t;
 
-icmp_main_t icmp_main;
+icmp6_main_t icmp6_main;
 
 static uword
 ip6_icmp_input (vlib_main_t * vm,
 		vlib_node_runtime_t * node,
 		vlib_frame_t * frame)
 {
-  icmp_main_t * im = &icmp_main;
+  icmp6_main_t * im = &icmp6_main;
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
@@ -349,7 +349,7 @@ static VLIB_REGISTER_NODE (ip6_icmp_echo_request_node) = {
 static uword unformat_icmp_type_and_code (unformat_input_t * input, va_list * args)
 {
   icmp46_header_t * h = va_arg (*args, icmp46_header_t *);
-  icmp_main_t * cm = &icmp_main;
+  icmp6_main_t * cm = &icmp6_main;
   u32 i;
 
   if (unformat_user (input, unformat_vlib_number_by_name,
@@ -423,7 +423,7 @@ unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
 
 static void ip6_icmp_register_type (vlib_main_t * vm, icmp6_type_t type, u32 node_index)
 {
-  icmp_main_t * im = &icmp_main;
+  icmp6_main_t * im = &icmp6_main;
 
   ASSERT (type < ARRAY_LEN (im->ip6_input_next_index_by_type));
   im->ip6_input_next_index_by_type[type]
@@ -435,7 +435,7 @@ icmp6_init (vlib_main_t * vm)
 {
   ip_main_t * im = &ip_main;
   ip_protocol_info_t * pi;
-  icmp_main_t * cm = &icmp_main;
+  icmp6_main_t * cm = &icmp6_main;
   clib_error_t * error;
 
   error = vlib_call_init_function (vm, ip_main_init);
@@ -443,7 +443,7 @@ icmp6_init (vlib_main_t * vm)
   if (error)
     return error;
 
-  pi = ip_get_protocol_info (im, IP_PROTOCOL_ICMP);
+  pi = ip_get_protocol_info (im, IP_PROTOCOL_ICMP6);
   pi->format_header = format_ip6_icmp_header;
   pi->unformat_pg_edit = unformat_pg_icmp_header;
 

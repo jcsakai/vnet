@@ -42,7 +42,7 @@ ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
     {
       ip6_address_t * mask = &im->fib_masks[fm->dst_address_length];
       for (i = 0; i < ARRAY_LEN (mask->data_u32); i++)
-	masked_dst.data_u32[i] = clib_mem_unaligned (&dst->data_u32[0], u32) & mask->data_u32[i];
+	masked_dst.data_u32[i] = clib_mem_unaligned (&dst->data_u32[i], u32) & mask->data_u32[i];
 
       p = mhash_get (&fm->adj_index_by_dst_address, &masked_dst);
       if (p)

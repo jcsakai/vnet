@@ -44,7 +44,7 @@ u8 * format_ip6_address (u8 * s, va_list * args)
 	  n_zeros = 0;
 	}
       n_zeros += is_zero;
-      if (! is_zero && n_zeros > max_n_zeros
+      if ((! is_zero && n_zeros > max_n_zeros)
 	  || (i + 1 >= ARRAY_LEN (a->data_u16) && n_zeros > 0))
 	{
 	  i_max_n_zero = i_first_zero;

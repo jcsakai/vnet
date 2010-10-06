@@ -33,7 +33,7 @@ int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2)
   int i;
   for (i = 0; i < ARRAY_LEN (a1->data_u32); i++)
     {
-      int cmp = clib_net_to_host_u32 (a1->data_u32) - clib_net_to_host_u32 (a2->data_u32);
+      int cmp = clib_net_to_host_u32 (a1->data_u32[i]) - clib_net_to_host_u32 (a2->data_u32[i]);
       if (cmp != 0)
 	return cmp;
     }

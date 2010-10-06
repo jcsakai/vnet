@@ -843,19 +843,18 @@ uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 static clib_error_t *
 ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * cmd)
 {
-  ip4_main_t * im4 = &ip4_main;
   clib_error_t * error = 0;
-  u32 address_valid, dst_address_len, is_ip4, table_id, is_del;
+  u32 table_id, is_del;
   u32 weight, * weights = 0;
   u32 sw_if_index, * sw_if_indices = 0;
-  ip4_address_t ip4_addr, ip4_dst_address, * ip4_via_next_hops = 0;
+  ip4_address_t ip4_addr, * ip4_dst_addresses = 0, * ip4_via_next_hops = 0;
+  ip6_address_t ip6_addr, * ip6_dst_addresses = 0, * ip6_via_next_hops = 0;
+  u32 dst_address_length, * dst_address_lengths = 0;
   ip_adjacency_t parse_adj, * add_adj = 0;
   unformat_input_t _line_input, * line_input = &_line_input;
 
-  is_ip4 = 0;
   is_del = 0;
   table_id = 0;
-  address_valid = 0;
 
   /* Get a line of input. */
   if (! unformat_user (main_input, unformat_line_input, line_input))
@@ -872,11 +871,18 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 
       else if (unformat (line_input, "%U/%d",
 			 unformat_ip4_address, &ip4_addr,
-			 &dst_address_len))
+			 &dst_address_length))
 	{
-	  is_ip4 = 1;
-	  ip4_dst_address = ip4_addr;
-	  address_valid = 1;
+	  vec_add1 (ip4_dst_addresses, ip4_addr);
+	  vec_add1 (dst_address_lengths, dst_address_length);
+	}
+
+      else if (unformat (line_input, "%U/%d",
+			 unformat_ip6_address, &ip6_addr,
+			 &dst_address_length))
+	{
+	  vec_add1 (ip6_dst_addresses, ip6_addr);
+	  vec_add1 (dst_address_lengths, dst_address_length);
 	}
 
       else if (unformat (line_input, "via %U %U weight %u",
@@ -885,6 +891,16 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 			 &weight))
 	{
 	  vec_add1 (ip4_via_next_hops, ip4_addr);
+	  vec_add1 (sw_if_indices, sw_if_index);
+	  vec_add1 (weights, weight);
+	}
+
+      else if (unformat (line_input, "via %U %U weight %u",
+			 unformat_ip6_address, &ip6_addr,
+			 unformat_vlib_sw_interface, vm, &sw_if_index,
+			 &weight))
+	{
+	  vec_add1 (ip6_via_next_hops, ip6_addr);
 	  vec_add1 (sw_if_indices, sw_if_index);
 	  vec_add1 (weights, weight);
 	}
@@ -898,8 +914,21 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	  vec_add1 (weights, 1);
 	}
 			 
+      else if (unformat (line_input, "via %U %U",
+			 unformat_ip6_address, &ip6_addr,
+			 unformat_vlib_sw_interface, vm, &sw_if_index))
+	{
+	  vec_add1 (ip6_via_next_hops, ip6_addr);
+	  vec_add1 (sw_if_indices, sw_if_index);
+	  vec_add1 (weights, 1);
+	}
+			 
       else if (unformat (line_input, "via %U",
 			 unformat_ip_adjacency, vm, &parse_adj, ip4_rewrite_node.index))
+	vec_add1 (add_adj, parse_adj);
+
+      else if (unformat (line_input, "via %U",
+			 unformat_ip_adjacency, vm, &parse_adj, ip6_rewrite_node.index))
 	vec_add1 (add_adj, parse_adj);
 
       else
@@ -911,9 +940,27 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
     
   unformat_free (line_input);
 
-  if (! address_valid)
+  if (vec_len (ip4_dst_addresses) + vec_len (ip6_dst_addresses) == 0)
     {
       error = clib_error_return (0, "expected ip4/ip6 destination address/length.");
+      goto done;
+    }
+
+  if (vec_len (ip4_dst_addresses) > 0 && vec_len (ip6_dst_addresses) > 0)
+    {
+      error = clib_error_return (0, "mixed ip4/ip6 address/length.");
+      goto done;
+    }
+
+  if (vec_len (ip4_dst_addresses) > 0 && vec_len (ip6_via_next_hops) > 0)
+    {
+      error = clib_error_return (0, "ip4 destinations with ip6 next hops.");
+      goto done;
+    }
+
+  if (vec_len (ip6_dst_addresses) > 0 && vec_len (ip4_via_next_hops) > 0)
+    {
+      error = clib_error_return (0, "ip6 destinations with ip4 next hops.");
       goto done;
     }
 
@@ -923,70 +970,142 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
       goto done;
     }
 
-  if (is_ip4)
-    {
-      ip4_add_del_route_args_t a;
+  {
+    int i;
+    ip4_main_t * im4 = &ip4_main;
+    ip6_main_t * im6 = &ip6_main;
 
-      memset (&a, 0, sizeof (a));
-      a.flags = IP4_ROUTE_FLAG_TABLE_ID;
-      a.table_index_or_table_id = table_id;
-      a.dst_address = ip4_dst_address;
-      a.dst_address_length = dst_address_len;
-      a.adj_index = ~0;
+    for (i = 0; i < vec_len (ip4_dst_addresses); i++)
+      {
+	ip4_add_del_route_args_t a;
 
-      if (is_del)
-	{
-	  if (vec_len (ip4_via_next_hops) == 0)
-	    {
-	      a.flags |= IP4_ROUTE_FLAG_DEL;
-	      ip4_add_del_route (im4, &a);
-	      ip4_maybe_remap_adjacencies (im4, table_id, IP4_ROUTE_FLAG_TABLE_ID);
-	    }
-	  else
-	    {
-	      u32 i;
-	      for (i = 0; i < vec_len (ip4_via_next_hops); i++)
-		{
-		  ip4_add_del_route_next_hop (im4,
-					      IP4_ROUTE_FLAG_DEL,
-					      &ip4_dst_address, dst_address_len,
-					      &ip4_via_next_hops[i],
-					      sw_if_indices[i],
-					      weights[i]);
-		}
-	    }
-	}
+	memset (&a, 0, sizeof (a));
+	a.flags = IP4_ROUTE_FLAG_TABLE_ID;
+	a.table_index_or_table_id = table_id;
+	a.dst_address = ip4_dst_addresses[i];
+	a.dst_address_length = dst_address_lengths[i];
+	a.adj_index = ~0;
 
-      else
-	{
-	  if (vec_len (add_adj) > 0)
-	    {
-	      a.flags |= IP4_ROUTE_FLAG_ADD;
-	      a.add_adj = add_adj;
-	      a.n_add_adj = vec_len (add_adj);
+	if (is_del)
+	  {
+	    if (vec_len (ip4_via_next_hops) == 0)
+	      {
+		a.flags |= IP4_ROUTE_FLAG_DEL;
+		ip4_add_del_route (im4, &a);
+		ip4_maybe_remap_adjacencies (im4, table_id, IP4_ROUTE_FLAG_TABLE_ID);
+	      }
+	    else
+	      {
+		u32 i;
+		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		  {
+		    ip4_add_del_route_next_hop (im4,
+						IP4_ROUTE_FLAG_DEL,
+						&a.dst_address,
+						a.dst_address_length,
+						&ip4_via_next_hops[i],
+						sw_if_indices[i],
+						weights[i]);
+		  }
+	      }
+	  }
+	else
+	  {
+	    if (vec_len (add_adj) > 0)
+	      {
+		a.flags |= IP4_ROUTE_FLAG_ADD;
+		a.add_adj = add_adj;
+		a.n_add_adj = vec_len (add_adj);
 	      
-	      ip4_add_del_route (im4, &a);
-	    }
-	  else if (vec_len (ip4_via_next_hops) > 0)
-	    {
-	      u32 i;
-	      for (i = 0; i < vec_len (ip4_via_next_hops); i++)
-		{
-		  ip4_add_del_route_next_hop (im4,
-					      IP4_ROUTE_FLAG_ADD,
-					      &ip4_dst_address, dst_address_len,
-					      &ip4_via_next_hops[i],
-					      sw_if_indices[i],
-					      weights[i]);
-		}
-	    }
-	}
-    }
+		ip4_add_del_route (im4, &a);
+	      }
+	    else if (vec_len (ip4_via_next_hops) > 0)
+	      {
+		u32 i;
+		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		  {
+		    ip4_add_del_route_next_hop (im4,
+						IP4_ROUTE_FLAG_ADD,
+						&a.dst_address,
+						a.dst_address_length,
+						&ip4_via_next_hops[i],
+						sw_if_indices[i],
+						weights[i]);
+		  }
+	      }
+	  }
+      }
+
+    for (i = 0; i < vec_len (ip6_dst_addresses); i++)
+      {
+	ip6_add_del_route_args_t a;
+
+	memset (&a, 0, sizeof (a));
+	a.flags = IP6_ROUTE_FLAG_TABLE_ID;
+	a.table_index_or_table_id = table_id;
+	a.dst_address = ip6_dst_addresses[i];
+	a.dst_address_length = dst_address_lengths[i];
+	a.adj_index = ~0;
+
+	if (is_del)
+	  {
+	    if (vec_len (ip6_via_next_hops) == 0)
+	      {
+		a.flags |= IP6_ROUTE_FLAG_DEL;
+		ip6_add_del_route (im6, &a);
+		ip6_maybe_remap_adjacencies (im6, table_id, IP6_ROUTE_FLAG_TABLE_ID);
+	      }
+	    else
+	      {
+		u32 i;
+		for (i = 0; i < vec_len (ip6_via_next_hops); i++)
+		  {
+		    ip6_add_del_route_next_hop (im6,
+						IP6_ROUTE_FLAG_DEL,
+						&a.dst_address,
+						a.dst_address_length,
+						&ip6_via_next_hops[i],
+						sw_if_indices[i],
+						weights[i]);
+		  }
+	      }
+	  }
+	else
+	  {
+	    if (vec_len (add_adj) > 0)
+	      {
+		a.flags |= IP6_ROUTE_FLAG_ADD;
+		a.add_adj = add_adj;
+		a.n_add_adj = vec_len (add_adj);
+	      
+		ip6_add_del_route (im6, &a);
+	      }
+	    else if (vec_len (ip6_via_next_hops) > 0)
+	      {
+		u32 i;
+		for (i = 0; i < vec_len (ip6_via_next_hops); i++)
+		  {
+		    ip6_add_del_route_next_hop (im6,
+						IP6_ROUTE_FLAG_ADD,
+						&a.dst_address,
+						a.dst_address_length,
+						&ip6_via_next_hops[i],
+						sw_if_indices[i],
+						weights[i]);
+		  }
+	      }
+	  }
+      }
+  }
 
  done:
   vec_free (add_adj);
   vec_free (weights);
+  vec_free (dst_address_lengths);
+  vec_free (ip4_dst_addresses);
+  vec_free (ip6_dst_addresses);
   vec_free (ip4_via_next_hops);
+  vec_free (ip6_via_next_hops);
   return error;
 }
 
