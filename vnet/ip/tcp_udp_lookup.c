@@ -576,18 +576,29 @@ ip4_udp_register_listener (vlib_main_t * vm,
 static clib_error_t *
 tcp_udp_lookup_init (vlib_main_t * vm)
 {
-  ip4_main_t * im = &ip4_main;
+  ip4_main_t * im4 = &ip4_main;
+  ip6_main_t * im6 = &ip6_main;
   int i;
 
   /* Setup all IP protocols to be punted. */
   for (i = 0; i < 256; i++)
-    im->lookup_main.local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
+    {
+      im4->lookup_main.local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
+      im6->lookup_main.local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
+    }
 
-  im->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_TCP]
+  im4->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_TCP]
     = IP_LOCAL_NEXT_TCP_LOOKUP;
-  im->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_UDP]
+  im4->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_UDP]
     = IP_LOCAL_NEXT_UDP_LOOKUP;
-  im->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_ICMP]
+  im4->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_ICMP]
+    = IP_LOCAL_NEXT_ICMP;
+
+  im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_TCP]
+    = IP_LOCAL_NEXT_TCP_LOOKUP;
+  im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_UDP]
+    = IP_LOCAL_NEXT_UDP_LOOKUP;
+  im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_ICMP6]
     = IP_LOCAL_NEXT_ICMP;
 
   for (i = 0; i < ARRAY_LEN (ip4_tcp_udp_lookup_mains); i++)
