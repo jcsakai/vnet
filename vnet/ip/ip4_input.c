@@ -243,12 +243,11 @@ ip4_input_inline (vlib_main_t * vm,
 	    }
 	}
     
-      /* FIXME transpose errors. */
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
-	  u32 pi0, sw_if_index0, ip_len0, cur_len0;
+	  u32 pi0, ip_len0, cur_len0;
 	  i32 len_diff0;
 	  u8 error0, is_slow_path, next_present;
 
@@ -261,9 +260,6 @@ ip4_input_inline (vlib_main_t * vm,
 
 	  p0 = vlib_get_buffer (vm, pi0);
 	  ip0 = vlib_buffer_get_current (p0);
-
-	  /* Lookup forwarding table by input interface. */
-	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 
 	  error0 = IP4_ERROR_NONE;
 	  is_slow_path = next_index != IP4_INPUT_NEXT_LOOKUP;

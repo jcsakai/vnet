@@ -253,10 +253,7 @@ tuntap_rx (vlib_main_t * vm,
   }
 
   /* Enqueue to ethernet-input. */
-  {
-    u32 * to_next = vlib_set_next_frame (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT);
-    to_next[0] = bi;
-  }
+  vlib_set_next_frame_buffer (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT, bi);
 
   return 1;
 }

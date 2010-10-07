@@ -28,9 +28,9 @@
 #include <vnet/ppp/ppp.h>
 #include <clib/sparse_vec.h>
 
-#define foreach_ppp_input_next		\
-  _ (PUNT, "error-punt-transpose")		\
-  _ (DROP, "error-drop-transpose")
+#define foreach_ppp_input_next			\
+  _ (PUNT, "error-punt")			\
+  _ (DROP, "error-drop")
 
 typedef enum {
 #define _(s,n) PPP_INPUT_NEXT_##s,
@@ -69,8 +69,6 @@ ppp_input (vlib_main_t * vm,
 {
   ppp_input_runtime_t * rt = (void *) node->runtime_data;
   u32 n_left_from, next_index, i_next, * from, * to_next;
-  vlib_error_t unknown_protocol_error = vlib_error_set (node->node_index, PPP_ERROR_UNKNOWN_PROTOCOL);
-  vlib_error_t * to_next_error, to_next_error_dummy[2];
 
   from = vlib_frame_vector_args (from_frame);
   n_left_from = from_frame->n_vectors;
@@ -89,16 +87,13 @@ ppp_input (vlib_main_t * vm,
     {
       u32 n_left_to_next;
 
-      vlib_get_next_frame_transpose (vm, node, next_index,
-				     to_next, n_left_to_next);
-      to_next_error = (next_index < PPP_INPUT_N_NEXT
-		       ? vlib_error_for_transpose_buffer_pointer (to_next)
-		       : &to_next_error_dummy[0]);
+      vlib_get_next_frame (vm, node, next_index,
+			   to_next, n_left_to_next);
 
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
-	  u32 pi0, pi1;
-	  vlib_buffer_t * p0, * p1;
+	  u32 bi0, bi1;
+	  vlib_buffer_t * b0, * b1;
 	  ppp_header_t * h0, * h1;
 	  u32 i0, i1, protocol0, protocol1, enqueue_code;
 
@@ -116,88 +111,69 @@ ppp_input (vlib_main_t * vm,
 	    CLIB_PREFETCH (p3->data, sizeof (h1[0]), LOAD);
 	  }
 
-	  pi0 = from[0];
-	  pi1 = from[1];
-	  to_next[0] = pi0;
-	  to_next[1] = pi1;
-	  to_next_error[0] = unknown_protocol_error;
-	  to_next_error[1] = unknown_protocol_error;
+	  bi0 = from[0];
+	  bi1 = from[1];
+	  to_next[0] = bi0;
+	  to_next[1] = bi1;
 	  from += 2;
 	  to_next += 2;
 	  n_left_to_next -= 2;
 	  n_left_from -= 2;
 
-	  p0 = vlib_get_buffer (vm, pi0);
-	  p1 = vlib_get_buffer (vm, pi1);
+	  b0 = vlib_get_buffer (vm, bi0);
+	  b1 = vlib_get_buffer (vm, bi1);
 
-	  h0 = (void *) (p0->data + p0->current_data);
-	  h1 = (void *) (p1->data + p1->current_data);
+	  h0 = (void *) (b0->data + b0->current_data);
+	  h1 = (void *) (b1->data + b1->current_data);
 
-	  p0->current_data += sizeof (h0[0]);
-	  p1->current_data += sizeof (h1[0]);
+	  b0->current_data += sizeof (h0[0]);
+	  b1->current_data += sizeof (h1[0]);
 
-	  p0->current_length -= sizeof (h0[0]);
-	  p1->current_length -= sizeof (h1[0]);
+	  b0->current_length -= sizeof (h0[0]);
+	  b1->current_length -= sizeof (h1[0]);
 
 	  /* Index sparse array with network byte order. */
 	  protocol0 = h0->protocol;
 	  protocol1 = h1->protocol;
 	  sparse_vec_index2 (rt->next_by_protocol, protocol0, protocol1, &i0, &i1);
 
-	  to_next_error += (i0 == SPARSE_VEC_INVALID_INDEX) + (i1 == SPARSE_VEC_INVALID_INDEX);
+	  b0->error = node->errors[i0 == SPARSE_VEC_INVALID_INDEX ? PPP_ERROR_UNKNOWN_PROTOCOL : PPP_ERROR_NONE];
+	  b1->error = node->errors[i1 == SPARSE_VEC_INVALID_INDEX ? PPP_ERROR_UNKNOWN_PROTOCOL : PPP_ERROR_NONE];
 
 	  enqueue_code = (i0 != i_next) + 2*(i1 != i_next);
 
 	  if (PREDICT_FALSE (enqueue_code != 0))
 	    {
-	      u32 * p;
 	      switch (enqueue_code)
 		{
 		case 1:
 		  /* A B A */
-		  to_next[-2] = pi1;
+		  to_next[-2] = bi1;
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_protocol, i0));
-		  p[0] = pi0;
-		  if (i0 == 0)
-		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_protocol_error;
+		  vlib_set_next_frame_buffer (vm, node, vec_elt (rt->next_by_protocol, i0), bi0);
 		  break;
 
 		case 2:
 		  /* A A B */
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_protocol, i1));
-		  p[0] = pi1;
-		  if (i1 == 0)
-		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_protocol_error;
+		  vlib_set_next_frame_buffer (vm, node, vec_elt (rt->next_by_protocol, i1), bi1);
 		  break;
 
 		case 3:
 		  /* A B B or A B C */
 		  to_next -= 2;
 		  n_left_to_next += 2;
-		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_protocol, i0));
-		  p[0] = pi0;
-		  if (i0 == 0)
-		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_protocol_error;
-
-		  p = vlib_set_next_frame (vm, node, vec_elt (rt->next_by_protocol, i1));
-		  p[0] = pi1;
-		  if (i1 == 0)
-		    *vlib_error_for_transpose_buffer_pointer (p) = unknown_protocol_error;
-
+		  vlib_set_next_frame_buffer (vm, node, vec_elt (rt->next_by_protocol, i0), bi0);
+		  vlib_set_next_frame_buffer (vm, node, vec_elt (rt->next_by_protocol, i1), bi1);
 		  if (i0 == i1)
 		    {
 		      vlib_put_next_frame (vm, node, next_index,
 					   n_left_to_next);
 		      i_next = i1;
 		      next_index = vec_elt (rt->next_by_protocol, i_next);
-		      vlib_get_next_frame_transpose (vm, node, next_index, to_next, n_left_to_next);
-		      to_next_error = (next_index < PPP_INPUT_N_NEXT
-				       ? vlib_error_for_transpose_buffer_pointer (to_next)
-				       : &to_next_error_dummy[0]);
+		      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 		    }
 		}
 	    }
@@ -205,30 +181,29 @@ ppp_input (vlib_main_t * vm,
     
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
-	  u32 pi0;
-	  vlib_buffer_t * p0;
+	  u32 bi0;
+	  vlib_buffer_t * b0;
 	  ppp_header_t * h0;
-	  u32 i0, protocol0, is_error0;
+	  u32 i0, protocol0;
 
-	  pi0 = from[0];
-	  to_next[0] = pi0;
-	  to_next_error[0] = unknown_protocol_error;
+	  bi0 = from[0];
+	  to_next[0] = bi0;
 	  from += 1;
 	  to_next += 1;
 	  n_left_from -= 1;
 	  n_left_to_next -= 1;
 
-	  p0 = vlib_get_buffer (vm, pi0);
+	  b0 = vlib_get_buffer (vm, bi0);
 
-	  h0 = (void *) (p0->data + p0->current_data);
+	  h0 = (void *) (b0->data + b0->current_data);
 
-	  p0->current_data += sizeof (h0[0]);
-	  p0->current_length -= sizeof (h0[0]);
+	  b0->current_data += sizeof (h0[0]);
+	  b0->current_length -= sizeof (h0[0]);
 
 	  protocol0 = h0->protocol;
 	  i0 = sparse_vec_index (rt->next_by_protocol, protocol0);
-	  is_error0 = i0 == SPARSE_VEC_INVALID_INDEX;
-	  to_next_error += is_error0;
+
+	  b0->error = node->errors[i0 == SPARSE_VEC_INVALID_INDEX ? PPP_ERROR_UNKNOWN_PROTOCOL : PPP_ERROR_NONE];
 	  
 	  /* Sent packet to wrong next? */
 	  if (PREDICT_FALSE (i0 != i_next))
@@ -239,16 +214,10 @@ ppp_input (vlib_main_t * vm,
 	      /* Send to correct next. */
 	      i_next = i0;
 	      next_index = vec_elt (rt->next_by_protocol, i_next);
-	      vlib_get_next_frame_transpose (vm, node, next_index,
-					     to_next, n_left_to_next);
-	      to_next_error = (next_index < PPP_INPUT_N_NEXT
-			       ? vlib_error_for_transpose_buffer_pointer (to_next)
-			       : &to_next_error_dummy[0]);
-
-	      to_next[0] = pi0;
-	      to_next_error[0] = unknown_protocol_error;
+	      vlib_get_next_frame (vm, node, next_index,
+				   to_next, n_left_to_next);
+	      to_next[0] = bi0;
 	      to_next += 1;
-	      to_next_error += is_error0;
 	      n_left_to_next -= 1;
 	    }
 	}

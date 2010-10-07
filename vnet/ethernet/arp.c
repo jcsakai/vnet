@@ -453,24 +453,17 @@ arp_input (vlib_main_t * vm,
 	  continue;
 
 	drop1:
-	  {
-            vlib_error_t * e;
-              
-            next0 = ARP_INPUT_NEXT_DROP;
-            if (next0 != next_index)
-              {
-                vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
-
-                next_index = next0;
-                vlib_get_next_frame (vm, node, next_index,
-                                     to_next, n_left_to_next);
-                to_next[0] = pi0;
-                n_left_to_next -= 1;
-              }
-
-            e = vlib_error_for_transpose_buffer_pointer (to_next - 1);
-            e[0] = vlib_error_set (node->node_index, error0);
-	  }
+	  next0 = ARP_INPUT_NEXT_DROP;
+	  p0->error = node->errors[error0];
+	  if (next0 != next_index)
+	    {
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
+	      next_index = next0;
+	      vlib_get_next_frame (vm, node, next_index,
+				   to_next, n_left_to_next);
+	      to_next[0] = pi0;
+	      n_left_to_next -= 1;
+	    }
 	}
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
@@ -503,7 +496,7 @@ static VLIB_REGISTER_NODE (arp_input_node) = {
 
   .n_next_nodes = ARP_INPUT_N_NEXT,
   .next_nodes = {
-    [ARP_INPUT_NEXT_DROP] = "error-drop-transpose",
+    [ARP_INPUT_NEXT_DROP] = "error-drop",
   },
 
   .format_buffer = format_ethernet_arp_header,

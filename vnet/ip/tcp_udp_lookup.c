@@ -69,9 +69,6 @@ typedef struct {
   /* CPU cycle counter of last packet received. */
   u64 cpu_time_last_packet;
 
-  /* Source/destination address/ports. */
-  ip4_tcp_udp_address_t address;
-
   /* Number of bytes pending processing. */
   u32 n_bytes_pending;
 
@@ -85,14 +82,19 @@ typedef struct {
   u16 next_index;
 
   u16 listener_index;
+} ip_tcp_udp_connection_header_t;
+
+typedef struct {
+  /* Source/destination address/ports. */
+  ip4_tcp_udp_address_t address;
+
+  ip_tcp_udp_connection_header_t header;
 
   /* User's per-connection data follows.
      Should be aligned to 64 bits. */
   u8 user_data[64
-	       - 1*sizeof (u64)
 	       - 1*sizeof (ip4_tcp_udp_address_t)
-	       - 4*sizeof (u32)
-	       - 2*sizeof (u16)];
+	       - 1*sizeof (ip_tcp_udp_connection_header_t)];
 } ip4_tcp_udp_connection_t;
 
 typedef struct {
@@ -152,7 +154,7 @@ static inline ip4_tcp_udp_lookup_main_t *
 ip4_tcp_udp_main_for_connection (ip4_tcp_udp_connection_t * c)
 {
   return ip4_tcp_udp_lookup_mains
-    + ((c->flags & IP4_TCP_UDP_CONNECTION_IS_UDP)
+    + ((c->header.flags & IP4_TCP_UDP_CONNECTION_IS_UDP)
        ? IP4_LOOKUP_UDP : IP4_LOOKUP_TCP);
 }
 
@@ -189,9 +191,9 @@ static u8 * format_ip4_tcp_udp_connection (u8 * s, va_list * args)
 
   s = format (s, "%U, next %U",
 	      format_ip4_tcp_udp_address, &c->address,
-	      format_vlib_node_name, lm->vlib_main, lm->node_index, c->next_index);
+	      format_vlib_node_name, lm->vlib_main, lm->node_index, c->header.next_index);
 	      
-  if (c->n_bytes_pending > 0)
+  if (c->header.n_bytes_pending > 0)
     /* FIXME */;
 
   return s;
@@ -270,16 +272,12 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
+  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip4_input_node.index);
   vlib_error_t unknown_port_error;
-  vlib_error_t * to_next_error, to_next_error_dummy[2];
 
   lm = ip4_tcp_udp_lookup_mains + (is_udp ? IP4_LOOKUP_UDP : IP4_LOOKUP_TCP);
 
-  unknown_port_error =
-    vlib_error_set (ip4_input_node.index,
-		    (is_udp
-		     ? IP4_ERROR_UNKNOWN_UDP_PORT
-		     : IP4_ERROR_UNKNOWN_TCP_PORT));
+  unknown_port_error = error_node->errors[is_udp ? IP4_ERROR_UNKNOWN_UDP_PORT : IP4_ERROR_UNKNOWN_TCP_PORT];
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
@@ -287,10 +285,7 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
   
   while (n_left_from > 0)
     {
-      vlib_get_next_frame_transpose (vm, node, next, to_next, n_left_to_next);
-      to_next_error = (next == TCP_UDP_LOOKUP_NEXT_ERROR
-		       ? vlib_error_for_transpose_buffer_pointer (to_next)
-		       : &to_next_error_dummy[0]);
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
 
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
@@ -334,10 +329,9 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	  i0 = ci0 ? ci0 : li0;
 	  i0 = listener_is_valid0 ? i0 : unknown_port_error;
 
-	  next0 = ci0 ? c0->next_index : l0->next_index;
+	  next0 = ci0 ? c0->header.next_index : l0->next_index;
 
-	  to_next_error[0] = i0;
-	  to_next_error += ! listener_is_valid0;
+	  p0->error = i0;
 
 	  if (PREDICT_FALSE (p0->flags & VLIB_BUFFER_IS_TRACED))
 	    {
@@ -356,17 +350,10 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	      vlib_put_next_frame (vm, node, next, n_left_to_next);
 
 	      next = next0;
-	      vlib_get_next_frame_transpose (vm, node, next,
-					     to_next, n_left_to_next);
-	      to_next_error = (next == TCP_UDP_LOOKUP_NEXT_ERROR
-			       ? vlib_error_for_transpose_buffer_pointer (to_next)
-			       : &to_next_error_dummy[0]);
-
+	      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
 	      to_next[0] = bi0;
 	      to_next += 1;
 	      n_left_to_next -= 1;
-	      to_next_error[0] = i0;
-	      to_next_error += ! listener_is_valid0;
 	    }
 	}
   
@@ -401,7 +388,7 @@ static VLIB_REGISTER_NODE (tcp4_lookup_node) = {
 
   .n_next_nodes = TCP_UDP_LOOKUP_N_NEXT,
   .next_nodes = {
-    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-drop-transpose",
+    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-drop",
   },
 };
 
@@ -415,7 +402,7 @@ static VLIB_REGISTER_NODE (udp4_lookup_node) = {
 
   .n_next_nodes = TCP_UDP_LOOKUP_N_NEXT,
   .next_nodes = {
-    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-drop-transpose",
+    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-drop",
   },
 };
 
@@ -598,7 +585,7 @@ tcp_udp_lookup_init (vlib_main_t * vm)
     = IP_LOCAL_NEXT_TCP_LOOKUP;
   im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_UDP]
     = IP_LOCAL_NEXT_UDP_LOOKUP;
-  im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_ICMP6]
+  im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_ICMP]
     = IP_LOCAL_NEXT_ICMP;
 
   for (i = 0; i < ARRAY_LEN (ip4_tcp_udp_lookup_mains); i++)

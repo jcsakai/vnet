@@ -128,11 +128,6 @@ ip6_icmp_input (vlib_main_t * vm,
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
-  vlib_error_t unknown_type_error;
-  vlib_error_t * to_next_error, to_next_error_dummy[2];
-
-  unknown_type_error =
-    vlib_error_set (node->node_index, ICMP_ERROR_UNKNOWN_TYPE);
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
@@ -145,14 +140,11 @@ ip6_icmp_input (vlib_main_t * vm,
 
   while (n_left_from > 0)
     {
-      vlib_get_next_frame_transpose (vm, node, next, to_next, n_left_to_next);
-      to_next_error = (next == ICMP_INPUT_NEXT_ERROR
-		       ? vlib_error_for_transpose_buffer_pointer (to_next)
-		       : &to_next_error_dummy[0]);
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
 
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
-	  vlib_buffer_t * p0;
+	  vlib_buffer_t * b0;
 	  ip6_header_t * ip0;
 	  icmp46_header_t * icmp0;
 	  icmp6_type_t type0;
@@ -165,14 +157,13 @@ ip6_icmp_input (vlib_main_t * vm,
 	  to_next += 1;
 	  n_left_to_next -= 1;
       
-	  p0 = vlib_get_buffer (vm, bi0);
-	  ip0 = vlib_buffer_get_current (p0);
+	  b0 = vlib_get_buffer (vm, bi0);
+	  ip0 = vlib_buffer_get_current (b0);
 	  icmp0 = ip6_next_header (ip0);
 	  type0 = icmp0->type;
 	  next0 = im->ip6_input_next_index_by_type[type0];
 
-	  to_next_error[0] = unknown_type_error;
-	  to_next_error += next0 == ICMP_INPUT_NEXT_ERROR;
+	  b0->error = node->errors[ICMP_ERROR_UNKNOWN_TYPE];
 
 	  if (PREDICT_FALSE (next0 != next))
 	    {
@@ -182,17 +173,12 @@ ip6_icmp_input (vlib_main_t * vm,
 	      vlib_put_next_frame (vm, node, next, n_left_to_next);
 
 	      next = next0;
-	      vlib_get_next_frame_transpose (vm, node, next,
-					     to_next, n_left_to_next);
-	      to_next_error = (next == ICMP_INPUT_NEXT_ERROR
-			       ? vlib_error_for_transpose_buffer_pointer (to_next)
-			       : &to_next_error_dummy[0]);
+	      vlib_get_next_frame (vm, node, next,
+				   to_next, n_left_to_next);
 
 	      to_next[0] = bi0;
 	      to_next += 1;
 	      n_left_to_next -= 1;
-	      to_next_error[0] = unknown_type_error;
-	      to_next_error += next0 == ICMP_INPUT_NEXT_ERROR;
 	    }
 	}
   
@@ -220,7 +206,7 @@ static VLIB_REGISTER_NODE (ip6_icmp_input_node) = {
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [ICMP_INPUT_NEXT_ERROR] = "error-drop-transpose",
+    [ICMP_INPUT_NEXT_ERROR] = "error-drop",
   },
 };
 
