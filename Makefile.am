@@ -9,10 +9,12 @@ nobase_include_HEADERS =
 ########################################
 # Generic stuff
 ########################################
-libvnet_la_SOURCES += \
+libvnet_la_SOURCES +=					\
+  vnet/vnet/config.c					\
   vnet/vnet/rewrite.c				
 
 nobase_include_HEADERS +=			\
+  vnet/vnet/config.h				\
   vnet/vnet/l3_types.h				\
   vnet/vnet/rewrite.h
 

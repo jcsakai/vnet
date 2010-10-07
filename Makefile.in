@@ -76,19 +76,19 @@ am__installdirs = "$(DESTDIR)$(libdir)" "$(DESTDIR)$(includedir)"
 LTLIBRARIES = $(lib_LTLIBRARIES)
 libvnet_la_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
-am_libvnet_la_OBJECTS = vnet/vnet/rewrite.lo vnet/ethernet/arp.lo \
-	vnet/ethernet/cli.lo vnet/ethernet/format.lo \
-	vnet/ethernet/init.lo vnet/ethernet/interface.lo \
-	vnet/ethernet/node.lo vnet/ethernet/pg.lo vnet/ethernet/phy.lo \
-	vnet/ppp/node.lo vnet/ppp/pg.lo vnet/ppp/ppp.lo \
-	vnet/hdlc/node.lo vnet/hdlc/pg.lo vnet/hdlc/hdlc.lo \
-	vnet/ip/format.lo vnet/ip/icmp4.lo vnet/ip/icmp6.lo \
-	vnet/ip/ip46_cli.lo vnet/ip/ip4_format.lo \
-	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
-	vnet/ip/ip6_format.lo vnet/ip/ip6_forward.lo \
-	vnet/ip/ip6_input.lo vnet/ip/ip6_pg.lo vnet/ip/ip_checksum.lo \
-	vnet/ip/ip_init.lo vnet/ip/lookup.lo vnet/ip/tcp_format.lo \
-	vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
+am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
+	vnet/ethernet/arp.lo vnet/ethernet/cli.lo \
+	vnet/ethernet/format.lo vnet/ethernet/init.lo \
+	vnet/ethernet/interface.lo vnet/ethernet/node.lo \
+	vnet/ethernet/pg.lo vnet/ethernet/phy.lo vnet/ppp/node.lo \
+	vnet/ppp/pg.lo vnet/ppp/ppp.lo vnet/hdlc/node.lo \
+	vnet/hdlc/pg.lo vnet/hdlc/hdlc.lo vnet/ip/format.lo \
+	vnet/ip/icmp4.lo vnet/ip/icmp6.lo vnet/ip/ip46_cli.lo \
+	vnet/ip/ip4_format.lo vnet/ip/ip4_forward.lo \
+	vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo vnet/ip/ip6_format.lo \
+	vnet/ip/ip6_forward.lo vnet/ip/ip6_input.lo vnet/ip/ip6_pg.lo \
+	vnet/ip/ip_checksum.lo vnet/ip/ip_init.lo vnet/ip/lookup.lo \
+	vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
 	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
 	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
 	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
@@ -283,8 +283,8 @@ AM_CFLAGS = -Wall
 ########################################
 # Unix kernel related
 ########################################
-libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/arp.c \
-	vnet/ethernet/cli.c vnet/ethernet/format.c \
+libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
+	vnet/ethernet/arp.c vnet/ethernet/cli.c vnet/ethernet/format.c \
 	vnet/ethernet/init.c vnet/ethernet/interface.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
 	vnet/ppp/node.c vnet/ppp/pg.c vnet/ppp/ppp.c vnet/hdlc/node.c \
@@ -300,17 +300,17 @@ libvnet_la_SOURCES = vnet/vnet/rewrite.c vnet/ethernet/arp.c \
 	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
 	vnet/unix/tuntap.c
-nobase_include_HEADERS = vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
-	vnet/ethernet/error.def vnet/ethernet/ethernet.h \
-	vnet/ethernet/packet.h vnet/ethernet/phy.h \
-	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
-	vnet/ppp/error.def vnet/ppp/ppp.h vnet/ppp/packet.h \
-	vnet/hdlc/error.def vnet/hdlc/hdlc.h vnet/hdlc/packet.h \
-	vnet/ip/format.h vnet/ip/icmp46_packet.h vnet/ip/ip.h \
-	vnet/ip/ip4.h vnet/ip/ip4_error.h vnet/ip/ip4_packet.h \
-	vnet/ip/ip6.h vnet/ip/ip6_error.h vnet/ip/ip6_packet.h \
-	vnet/ip/lookup.h vnet/ip/ip_packet.h vnet/ip/ports.def \
-	vnet/ip/protocols.def vnet/ip/tcp_packet.h \
+nobase_include_HEADERS = vnet/vnet/config.h vnet/vnet/l3_types.h \
+	vnet/vnet/rewrite.h vnet/ethernet/error.def \
+	vnet/ethernet/ethernet.h vnet/ethernet/packet.h \
+	vnet/ethernet/phy.h vnet/ethernet/phy_reg.h \
+	vnet/ethernet/types.def vnet/ppp/error.def vnet/ppp/ppp.h \
+	vnet/ppp/packet.h vnet/hdlc/error.def vnet/hdlc/hdlc.h \
+	vnet/hdlc/packet.h vnet/ip/format.h vnet/ip/icmp46_packet.h \
+	vnet/ip/ip.h vnet/ip/ip4.h vnet/ip/ip4_error.h \
+	vnet/ip/ip4_packet.h vnet/ip/ip6.h vnet/ip/ip6_error.h \
+	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
+	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
 	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h \
 	vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
@@ -392,6 +392,8 @@ vnet/vnet/$(am__dirstamp):
 vnet/vnet/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/vnet/$(DEPDIR)
 	@: > vnet/vnet/$(DEPDIR)/$(am__dirstamp)
+vnet/vnet/config.lo: vnet/vnet/$(am__dirstamp) \
+	vnet/vnet/$(DEPDIR)/$(am__dirstamp)
 vnet/vnet/rewrite.lo: vnet/vnet/$(am__dirstamp) \
 	vnet/vnet/$(DEPDIR)/$(am__dirstamp)
 vnet/ethernet/$(am__dirstamp):
@@ -638,6 +640,8 @@ mostlyclean-compile:
 	-rm -f vnet/ppp/ppp.lo
 	-rm -f vnet/unix/tuntap.$(OBJEXT)
 	-rm -f vnet/unix/tuntap.lo
+	-rm -f vnet/vnet/config.$(OBJEXT)
+	-rm -f vnet/vnet/config.lo
 	-rm -f vnet/vnet/rewrite.$(OBJEXT)
 	-rm -f vnet/vnet/rewrite.lo
 
@@ -689,6 +693,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/ppp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/tuntap.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/config.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/rewrite.Plo@am__quote@
 
 .c.o:
