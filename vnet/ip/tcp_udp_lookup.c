@@ -585,7 +585,7 @@ tcp_udp_lookup_init (vlib_main_t * vm)
     = IP_LOCAL_NEXT_TCP_LOOKUP;
   im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_UDP]
     = IP_LOCAL_NEXT_UDP_LOOKUP;
-  im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_ICMP]
+  im6->lookup_main.local_next_by_ip_protocol[IP_PROTOCOL_ICMP6]
     = IP_LOCAL_NEXT_ICMP;
 
   for (i = 0; i < ARRAY_LEN (ip4_tcp_udp_lookup_mains); i++)
