@@ -51,8 +51,8 @@ typedef struct {
   /* Sorted vector of features for this configuration. */
   vnet_config_feature_t * features;
 
-  /* Config string for placing in VLIB buffers. */
-  u8 * buffer_config;
+  /* Config string including all next indices and feature data as a vector. */
+  u8 * config_string;
 
   /* Index in main pool. */
   u32 index;
@@ -68,23 +68,29 @@ vnet_config_free (vnet_config_t * c)
   vec_foreach (f, c->features)
     vnet_config_feature_free (f);
   vec_free (c->features);
-  vec_free (c->buffer_config);
+  vec_free (c->config_string);
 }
 
 typedef struct {
   /* Pool of configs.  Index 0 is always null config and is never deleted. */
   vnet_config_t * config_pool;
 
-  /* Node index which starts feature processing. */
-  u32 main_node_index;
+  /* Node index which starts/ends feature processing. */
+  u32 start_node_index, end_node_index;
 
+  /* Next index relative to start node of end node. */
+  u32 end_node_next_index;
+
+  /* Interior feature processing nodes (not including start and end nodes). */
   u32 * node_index_by_feature_index;
 
   mhash_t config_string_hash;
 } vnet_config_main_t;
 
-void vnet_config_init (vnet_config_main_t * cm,
-		       u32 main_node_index,
+void vnet_config_init (vlib_main_t * vm,
+		       vnet_config_main_t * cm,
+		       u32 start_node_index,
+		       u32 end_node_index,
 		       u32 * feature_node_indices,
 		       u32 n_features);
 

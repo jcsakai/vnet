@@ -25,8 +25,10 @@
 
 #include <vnet/vnet/config.h>
 
-void vnet_config_init (vnet_config_main_t * cm,
-		       u32 main_node_index,
+void vnet_config_init (vlib_main_t * vm,
+		       vnet_config_main_t * cm,
+		       u32 start_node_index,
+		       u32 end_node_index,
 		       u32 * feature_node_indices,
 		       u32 n_features)
 {
@@ -42,7 +44,9 @@ void vnet_config_init (vnet_config_main_t * cm,
     memset (null, 0, sizeof (null[0]));
   }
 
-  cm->main_node_index = main_node_index;
+  cm->start_node_index = start_node_index;
+  cm->end_node_index = end_node_index;
+  cm->end_node_next_index = vlib_node_add_next (vm, start_node_index, end_node_index);
 
   mhash_init_vec_string (&cm->config_string_hash, sizeof (uword));
 
@@ -76,7 +80,7 @@ find_config_with_features (vlib_main_t * vm,
 			   vnet_config_main_t * cm,
 			   vnet_config_feature_t * feature_vector)
 {
-  u32 last_node_index = cm->main_node_index;
+  u32 last_node_index = cm->start_node_index;
   vnet_config_feature_t * f;
   u8 * config_string = 0;
   uword * p;
@@ -88,6 +92,11 @@ find_config_with_features (vlib_main_t * vm,
       f->next_index = vlib_node_add_next (vm, last_node_index, f->node_index);
       last_node_index = f->node_index;
 
+      /* Truncate config string if it does not fit. */
+      if (vec_len (config_string) + 1 + vec_len (f->feature_config) + 1 /* final termination */
+	  > STRUCT_SIZE_OF (vlib_buffer_t, opaque))
+	break;
+
       /* Store next index in config string. */
       ASSERT (f->next_index < (1 << BITS (config_string[0])));
       vec_add1 (config_string, f->next_index);
@@ -95,6 +104,13 @@ find_config_with_features (vlib_main_t * vm,
       /* Store feature config. */
       vec_add (config_string, f->feature_config, vec_len (f->feature_config));
     }
+
+  /* Terminate config string with next for end node. */
+  {
+    u32 next_index = vlib_node_add_next (vm, last_node_index, cm->end_node_index);
+    ASSERT (next_index < (1 << BITS (config_string[0])));
+    vec_add1 (config_string, next_index);
+  }
 
   /* See if config string is unique. */
   p = mhash_get (&cm->config_string_hash, config_string);
@@ -110,7 +126,7 @@ find_config_with_features (vlib_main_t * vm,
       pool_get (cm->config_pool, result);
       result->index = result - cm->config_pool;
       result->features = feature_vector;
-      result->buffer_config = config_string;
+      result->config_string = config_string;
       result->reference_count = 0; /* will be incremented by caller. */
       mhash_set (&cm->config_string_hash, config_string, result->index,
 		 /* old_value */ 0);
@@ -127,7 +143,7 @@ remove_reference (vnet_config_main_t * cm, vnet_config_t * c)
   c->reference_count -= 1;
   if (c->reference_count == 0)
     {
-      mhash_unset (&cm->config_string_hash, c->buffer_config, /* old_value */ 0);
+      mhash_unset (&cm->config_string_hash, c->config_string, /* old_value */ 0);
       vnet_config_free (c);
       pool_put (cm->config_pool, c);
     }
