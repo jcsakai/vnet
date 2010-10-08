@@ -1282,6 +1282,47 @@ ip6_sw_interface_admin_up_down (vlib_main_t * vm,
   return 0;
 }
 
+static clib_error_t *
+ip6_sw_interface_add_del (vlib_main_t * vm,
+			  u32 sw_if_index,
+			  u32 is_add)
+{
+  ip6_main_t * im = &ip6_main;
+  vnet_config_main_t * rx_cm = &im->config_mains[VLIB_RX];
+  u32 ci;
+
+  if (! rx_cm->node_index_by_feature_index)
+    {
+      char * start_nodes[] = { "ip6-input", };
+      char * feature_nodes[] = {
+	[IP6_RX_FEATURE_LOOKUP] = "ip6-lookup",
+      };
+      vnet_config_init (vm, &im->config_mains[VLIB_RX],
+			start_nodes, ARRAY_LEN (start_nodes),
+			feature_nodes, ARRAY_LEN (feature_nodes));
+    }
+
+  vec_validate_init_empty (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
+  ci = im->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
+
+  if (is_add)
+    ci = vnet_config_add_feature (vm, rx_cm,
+				  ci,
+				  IP6_RX_FEATURE_LOOKUP,
+				  /* config data */ 0,
+				  /* # bytes of config data */ 0);
+  else
+    ci = vnet_config_del_feature (vm, rx_cm,
+				  ci,
+				  IP6_RX_FEATURE_LOOKUP,
+				  /* config data */ 0,
+				  /* # bytes of config data */ 0);
+
+  im->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
+
+  return /* no error */ 0;
+}
+
 static VLIB_REGISTER_NODE (ip6_lookup_node) = {
   .function = ip6_lookup,
   .name = "ip6-lookup",
@@ -1298,6 +1339,7 @@ static VLIB_REGISTER_NODE (ip6_lookup_node) = {
   },
 
   .sw_interface_admin_up_down_function = ip6_sw_interface_admin_up_down,
+  .sw_interface_add_del_function = ip6_sw_interface_add_del,
 };
 
 /* Global IP6 main. */

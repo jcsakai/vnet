@@ -58,6 +58,7 @@ ip6_input (vlib_main_t * vm,
 	   vlib_node_runtime_t * node,
 	   vlib_frame_t * frame)
 {
+  ip6_main_t * im = &ip6_main;
   u32 n_left_from, * from, * to_next;
   ip6_input_next_t next_index;
   vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip6_input_node.index);
@@ -82,9 +83,9 @@ ip6_input (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0, * p1;
 	  ip6_header_t * ip0, * ip1;
-	  ip6_input_next_t next0, next1;
-	  u32 pi0, pi1;
-	  u8 error0, error1, enqueue_code;
+	  ip_buffer_opaque_t * i0, * i1;
+	  u32 pi0, sw_if_index0, next0, error0;
+	  u32 pi1, sw_if_index1, next1, error1;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -116,6 +117,24 @@ ip6_input (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
+	  i0 = vlib_get_buffer_opaque (p0);
+	  i1 = vlib_get_buffer_opaque (p1);
+
+	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
+	  sw_if_index1 = p1->sw_if_index[VLIB_RX];
+
+	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  i1->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
+
+	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+				&i0->current_config_index,
+				&next0,
+				/* # bytes of config data */ 0);
+	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+				&i1->current_config_index,
+				&next1,
+				/* # bytes of config data */ 0);
+
 	  error0 = error1 = IP6_ERROR_NONE;
 
 	  /* Version != 6?  Drop it. */
@@ -130,57 +149,23 @@ ip6_input (vlib_main_t * vm,
 	  error0 = p0->current_length < sizeof (ip0[0]) ? IP6_ERROR_TOO_SHORT : error0;
 	  error1 = p1->current_length < sizeof (ip1[0]) ? IP6_ERROR_TOO_SHORT : error1;
 
-	  next0 = error0 != IP6_ERROR_NONE ? IP6_INPUT_NEXT_DROP : IP6_INPUT_NEXT_LOOKUP;
-	  next1 = error1 != IP6_ERROR_NONE ? IP6_INPUT_NEXT_DROP : IP6_INPUT_NEXT_LOOKUP;
+	  next0 = error0 != IP6_ERROR_NONE ? IP6_INPUT_NEXT_DROP : next0;
+	  next1 = error1 != IP6_ERROR_NONE ? IP6_INPUT_NEXT_DROP : next1;
 
 	  p0->error = error_node->errors[error0];
 	  p1->error = error_node->errors[error1];
 
-	  enqueue_code = (next0 != next_index) + 2*(next1 != next_index);
-
-	  if (PREDICT_FALSE (enqueue_code != 0))
-	    {
-	      switch (enqueue_code)
-		{
-		case 1:
-		  /* A B A */
-		  to_next[-2] = pi1;
-		  to_next -= 1;
-		  n_left_to_next += 1;
-		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
-		  break;
-
-		case 2:
-		  /* A A B */
-		  to_next -= 1;
-		  n_left_to_next += 1;
-		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
-		  break;
-
-		case 3:
-		  /* A B B or A B C */
-		  to_next -= 2;
-		  n_left_to_next += 2;
-		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
-		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
-		  if (next0 == next1)
-		    {
-		      vlib_put_next_frame (vm, node, next_index,
-					   n_left_to_next);
-		      next_index = next1;
-		      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-		    }
-		}
-	    }
+	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, pi1, next0, next1);
 	}
     
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
 	  ip6_header_t * ip0;
-	  ip6_input_next_t next0;
-	  u32 pi0;
-	  u8 error0;
+	  ip_buffer_opaque_t * i0;
+	  u32 pi0, sw_if_index0, next0, error0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -191,6 +176,14 @@ ip6_input (vlib_main_t * vm,
 
 	  p0 = vlib_get_buffer (vm, pi0);
 	  ip0 = vlib_buffer_get_current (p0);
+	  i0 = vlib_get_buffer_opaque (p0);
+
+	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
+	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+				&i0->current_config_index,
+				&next0,
+				/* # bytes of config data */ 0);
 
 	  error0 = IP6_ERROR_NONE;
 
@@ -203,21 +196,13 @@ ip6_input (vlib_main_t * vm,
 	  /* L2 length must be at least minimal IP header. */
 	  error0 = p0->current_length < sizeof (ip0[0]) ? IP6_ERROR_TOO_SHORT : error0;
 
-	  next0 = error0 != IP6_ERROR_NONE ? IP6_INPUT_NEXT_DROP : IP6_INPUT_NEXT_LOOKUP;
+	  next0 = error0 != IP6_ERROR_NONE ? IP6_INPUT_NEXT_DROP : next0;
 
 	  p0->error = error_node->errors[error0];
 
-	  if (PREDICT_FALSE (next0 != next_index))
-	    {
-	      n_left_to_next += 1;
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-
-	      next_index = next0;
-	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-	      to_next[0] = pi0;
-	      to_next += 1;
-	      n_left_to_next -= 1;
-	    }
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, next0);
 	}
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);

@@ -93,6 +93,22 @@ typedef struct {
   uword function_opaque;
 } ip6_set_interface_address_callback_t;
 
+typedef enum {
+  /* First check access list to either permit or deny this
+     packet based on classification. */
+  IP6_RX_FEATURE_CHECK_ACCESS,
+
+  /* RPF check: verify that source address is reachable via
+     RX interface or via any interface. */
+  IP6_RX_FEATURE_CHECK_SOURCE_REACHABLE_VIA_RX,
+  IP6_RX_FEATURE_CHECK_SOURCE_REACHABLE_VIA_ANY,
+
+  /* Must be last: perform forwarding lookup. */
+  IP6_RX_FEATURE_LOOKUP,
+
+  IP6_N_RX_FEATURE,
+} ip6_rx_feature_type_t;
+
 typedef struct ip6_main_t {
   ip_lookup_main_t lookup_main;
 
@@ -107,6 +123,11 @@ typedef struct ip6_main_t {
   /* Hash table mapping table id to fib index.
      ID space is not necessarily dense; index space is dense. */
   uword * fib_index_by_table_id;
+
+  /* rx/tx interface/feature configuration. */
+  vnet_config_main_t config_mains[VLIB_N_RX_TX];
+
+  u32 * config_index_by_sw_if_index[VLIB_N_RX_TX];
 
   /* Vector of functions to call when routes are added/deleted. */
   ip6_add_del_route_callback_t * add_del_route_callbacks;

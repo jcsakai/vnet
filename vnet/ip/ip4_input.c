@@ -52,46 +52,6 @@ typedef enum {
   IP4_INPUT_N_NEXT,
 } ip4_input_next_t;
 
-#define vlib_validate_enqueue_two_buffers(vm,node,next_index,to_next,n_left_to_next,bi0,bi1,next0,next1) \
-do {									\
-  int enqueue_code = (next0 != next_index) + 2*(next1 != next_index);	\
-									\
-  if (PREDICT_FALSE (enqueue_code != 0))				\
-    {									\
-      switch (enqueue_code)						\
-	{								\
-	case 1:								\
-	  /* A B A */							\
-	  to_next[-2] = bi1;						\
-	  to_next -= 1;							\
-	  n_left_to_next += 1;						\
-	  vlib_set_next_frame_buffer (vm, node, next0, bi0);		\
-	  break;							\
-									\
-	case 2:								\
-	  /* A A B */							\
-	  to_next -= 1;							\
-	  n_left_to_next += 1;						\
-	  vlib_set_next_frame_buffer (vm, node, next1, bi1);		\
-	  break;							\
-									\
-	case 3:								\
-	  /* A B B or A B C */						\
-	  to_next -= 2;							\
-	  n_left_to_next += 2;						\
-	  vlib_set_next_frame_buffer (vm, node, next0, bi0);		\
-	  vlib_set_next_frame_buffer (vm, node, next1, bi1);		\
-	  if (next0 == next1)						\
-	    {								\
-	      vlib_put_next_frame (vm, node, next_index,		\
-				   n_left_to_next);			\
-	      next_index = next1;					\
-	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next); \
-	    }								\
-	}								\
-    }									\
-} while (0)
-
 /* Validate IP v4 packets and pass them either to forwarding code
    or drop/punt exception packets. */
 always_inline uword
@@ -222,9 +182,9 @@ ip4_input_inline (vlib_main_t * vm,
 		      : IP4_INPUT_NEXT_DROP)
 		   : next1);
 
-	  vlib_validate_enqueue_two_buffers (vm, node, next_index,
-					     to_next, n_left_to_next,
-					     pi0, pi1, next0, next1);
+	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, pi1, next0, next1);
 	}
     
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -293,16 +253,9 @@ ip4_input_inline (vlib_main_t * vm,
 		      : IP4_INPUT_NEXT_DROP)
 		   : next0);
 
-	  if (PREDICT_FALSE (next0 != next_index))
-	    {
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
-	      next_index = next0;
-	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-
-	      to_next[0] = pi0;
-	      to_next += 1;
-	      n_left_to_next -= 1;
-	    }
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, next0);
 	}
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
