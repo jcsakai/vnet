@@ -25,34 +25,6 @@
 
 #include <vnet/vnet/config.h>
 
-void vnet_config_init (vlib_main_t * vm,
-		       vnet_config_main_t * cm,
-		       u32 start_node_index,
-		       u32 end_node_index,
-		       u32 * feature_node_indices,
-		       u32 n_features)
-{
-  memset (cm, 0, sizeof (cm[0]));
-
-  /* Allocate null config which will never be deleted. */
-  {
-    vnet_config_t * null;
-
-    pool_get (cm->config_pool, null); 
-
-    ASSERT (null - cm->config_pool == 0);
-    memset (null, 0, sizeof (null[0]));
-  }
-
-  cm->start_node_index = start_node_index;
-  cm->end_node_index = end_node_index;
-  cm->end_node_next_index = vlib_node_add_next (vm, start_node_index, end_node_index);
-
-  mhash_init_vec_string (&cm->config_string_hash, sizeof (uword));
-
-  vec_add (cm->node_index_by_feature_index, feature_node_indices, n_features);
-}
-
 static vnet_config_feature_t *
 duplicate_feature_vector (vnet_config_feature_t * feature_vector)
 {
@@ -75,30 +47,53 @@ free_feature_vector (vnet_config_feature_t * feature_vector)
   vec_free (feature_vector);
 }
 
+static u32
+add_next (vlib_main_t * vm,
+	  vnet_config_main_t * cm,
+	  u32 last_node_index,
+	  u32 this_node_index)
+{
+  u32 i, ni = ~0;
+
+  if (last_node_index != ~0)
+    return vlib_node_add_next (vm, last_node_index, this_node_index);
+
+  for (i = 0; i < vec_len (cm->start_node_indices); i++)
+    {
+      u32 tmp;
+      tmp = vlib_node_add_next (vm, cm->start_node_indices[i], this_node_index);
+      if (ni == ~0)
+	ni = tmp;
+      /* Start nodes to first must agree on next indices. */
+      ASSERT (ni == tmp);
+    }
+
+  return ni;
+}
+
 static vnet_config_t *
 find_config_with_features (vlib_main_t * vm,
 			   vnet_config_main_t * cm,
 			   vnet_config_feature_t * feature_vector)
 {
-  u32 last_node_index = cm->start_node_index;
+  u32 last_node_index = ~0;
   vnet_config_feature_t * f;
-  u8 * config_string = 0;
+  u32 * config_string;
   uword * p;
-  vnet_config_t * result;
+  vnet_config_t * c;
+
+  config_string = cm->config_string_temp;
+  cm->config_string_temp = 0;
+  if (config_string)
+    _vec_len (config_string) = 0;
 
   vec_foreach (f, feature_vector)
     {
       /* Connect node graph. */
-      f->next_index = vlib_node_add_next (vm, last_node_index, f->node_index);
+      f->next_index = add_next (vm, cm, last_node_index, f->node_index);
       last_node_index = f->node_index;
 
-      /* Truncate config string if it does not fit. */
-      if (vec_len (config_string) + 1 + vec_len (f->feature_config) + 1 /* final termination */
-	  > STRUCT_SIZE_OF (vlib_buffer_t, opaque))
-	break;
-
       /* Store next index in config string. */
-      ASSERT (f->next_index < (1 << BITS (config_string[0])));
       vec_add1 (config_string, f->next_index);
 
       /* Store feature config. */
@@ -106,45 +101,97 @@ find_config_with_features (vlib_main_t * vm,
     }
 
   /* Terminate config string with next for end node. */
-  {
-    u32 next_index = vlib_node_add_next (vm, last_node_index, cm->end_node_index);
-    ASSERT (next_index < (1 << BITS (config_string[0])));
-    vec_add1 (config_string, next_index);
-  }
+  if (last_node_index == ~0 || last_node_index != cm->end_node_index)
+    {
+      u32 next_index = add_next (vm, cm, last_node_index, cm->end_node_index);
+      vec_add1 (config_string, next_index);
+    }
 
   /* See if config string is unique. */
-  p = mhash_get (&cm->config_string_hash, config_string);
+  p = hash_get_mem (cm->config_string_hash, config_string);
   if (p)
     {
       /* Not unique.  Share existing config. */
-      vec_free (config_string);
+      cm->config_string_temp = config_string; /* we'll use it again later. */
       free_feature_vector (feature_vector);
-      result = pool_elt_at_index (cm->config_pool, p[0]);
+      c = pool_elt_at_index (cm->config_pool, p[0]);
     }
   else
     {
-      pool_get (cm->config_pool, result);
-      result->index = result - cm->config_pool;
-      result->features = feature_vector;
-      result->config_string = config_string;
-      result->reference_count = 0; /* will be incremented by caller. */
-      mhash_set (&cm->config_string_hash, config_string, result->index,
-		 /* old_value */ 0);
+      pool_get (cm->config_pool, c);
+      c->index = c - cm->config_pool;
+      c->features = feature_vector;
+      c->config_string_vector = config_string;
+
+      /* Allocate copy of config string in heap.
+	 VLIB buffers will maintain pointers to heap as they read out
+	 configuration data. */
+      c->config_string_heap_index
+	= heap_alloc (cm->config_string_heap, vec_len (config_string),
+		      c->config_string_heap_handle);
+      memcpy (heap_elt_at_index (cm->config_string_heap, c->config_string_heap_index),
+	      config_string,
+	      vec_bytes (config_string));
+
+      c->reference_count = 0; /* will be incremented by caller. */
+      hash_set_mem (cm->config_string_hash, config_string, c->index);
     }
 
-  return result;
+  return c;
+}
+
+void vnet_config_init (vlib_main_t * vm,
+		       vnet_config_main_t * cm,
+		       char * start_node_names[],
+		       int n_start_node_names,
+		       char * feature_node_names[],
+		       int n_feature_node_names)
+{
+  vlib_node_t * n;
+  u32 i;
+
+  memset (cm, 0, sizeof (cm[0]));
+
+  cm->config_string_hash = hash_create_vec (0, STRUCT_SIZE_OF (vnet_config_t, config_string_vector[0]), sizeof (uword));
+
+  ASSERT (n_start_node_names >= 1);
+  ASSERT (n_feature_node_names >= 1);
+
+  vec_resize (cm->start_node_indices, n_start_node_names);
+  for (i = 0; i < n_start_node_names; i++)
+    {
+      n = vlib_get_node_by_name (vm, (u8 *) start_node_names[i]);
+      /* Given node name must exist. */
+      ASSERT (n != 0);
+      cm->start_node_indices[i] = n->index;
+    }
+
+  vec_resize (cm->node_index_by_feature_index, n_feature_node_names);
+  for (i = 0; i < n_feature_node_names; i++)
+    {
+      if (! feature_node_names[i])
+	cm->node_index_by_feature_index[i] = ~0;
+      else
+	{
+	  n = vlib_get_node_by_name (vm, (u8 *) feature_node_names[i]);
+	  /* Given node name must exist. */
+	  ASSERT (n != 0);
+	  if (i + 1 == n_feature_node_names)
+	    cm->end_node_index = n->index;
+	  cm->node_index_by_feature_index[i] = n->index;
+	}
+    }
 }
 
 static void
 remove_reference (vnet_config_main_t * cm, vnet_config_t * c)
 {
   ASSERT (c->reference_count > 0);
-  ASSERT (c->index != 0);
   c->reference_count -= 1;
   if (c->reference_count == 0)
     {
-      mhash_unset (&cm->config_string_hash, c->config_string, /* old_value */ 0);
-      vnet_config_free (c);
+      hash_unset (cm->config_string_hash, c->config_string_vector);
+      vnet_config_free (cm, c);
       pool_put (cm->config_pool, c);
     }
 }
@@ -159,15 +206,24 @@ u32 vnet_config_add_feature (vlib_main_t * vm,
   vnet_config_t * old, * new;
   vnet_config_feature_t * new_features, * f;
 
-  old = pool_elt_at_index (cm->config_pool, config_id);
-  new_features = old->features;
-  if (new_features)
-    new_features = duplicate_feature_vector (new_features);
+  if (config_id == ~0)
+    {
+      old = 0;
+      new_features = 0;
+    }
+  else
+    {
+      old = pool_elt_at_index (cm->config_pool, config_id);
+      new_features = old->features;
+      if (new_features)
+	new_features = duplicate_feature_vector (new_features);
+    }
 
   vec_add2 (new_features, f, 1);
   f->feature_index = feature_index;
   f->node_index = vec_elt (cm->node_index_by_feature_index, feature_index);
-  vec_add (f->feature_config, feature_config, n_feature_config_bytes);
+  vec_add (f->feature_config, feature_config,
+	   round_pow2 (n_feature_config_bytes, sizeof (f->feature_config[0])) / sizeof (f->feature_config[0]));
   
   /* Sort (prioritize) features. */
   if (vec_len (new_features) > 1)
@@ -175,7 +231,7 @@ u32 vnet_config_add_feature (vlib_main_t * vm,
 
   new = find_config_with_features (vm, cm, new_features);
 
-  if (old->index != 0)
+  if (old)
     remove_reference (cm, old);
 
   new->reference_count += 1;
@@ -217,21 +273,8 @@ u32 vnet_config_del_feature (vlib_main_t * vm,
   vnet_config_feature_free (f);
   vec_delete (new_features, 1, f - new_features);
 
-  /* New config is now empty? */
-  if (vec_len (new_features) == 0)
-    {
-      vec_free (new_features);
-      new = pool_elt_at_index (cm->config_pool, 0);
-    }
-  else
-    {
-      new = find_config_with_features (vm, cm, new_features);
-      new->reference_count += 1;
-    }
-
-  if (new->index != 0)
-    new->reference_count += 1;
-
+  new = find_config_with_features (vm, cm, new_features);
+  new->reference_count += 1;
   remove_reference (cm, old);
 
   return new->index;

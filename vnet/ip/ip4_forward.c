@@ -30,7 +30,7 @@
 #include <vnet/vnet/l3_types.h>
 
 /* This is really, really simple but stupid fib. */
-u32
+static u32
 ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
@@ -740,9 +740,11 @@ ip4_lookup (vlib_main_t * vm,
 	  i0->dst_adj_index = adj_index0;
 	  i1->dst_adj_index = adj_index1;
 
-	  vlib_buffer_increment_two_counters (vm, cm,
-					      adj_index0, adj_index1,
-					      p0, p1);
+	  vlib_increment_combined_counter (cm, adj_index0, 1,
+					   vlib_buffer_length_in_chain2 (vm, p0, pi0));
+	  vlib_increment_combined_counter (cm, adj_index1, 1,
+					   vlib_buffer_length_in_chain2 (vm, p1, pi1));
+
 	  from += 2;
 	  to_next += 2;
 	  n_left_to_next -= 2;
@@ -817,7 +819,9 @@ ip4_lookup (vlib_main_t * vm,
 
 	  i0->dst_adj_index = adj_index0;
 
-	  vlib_buffer_increment_counter (vm, cm, adj_index0, p0);
+	  vlib_increment_combined_counter (cm, adj_index0, 1,
+					   vlib_buffer_length_in_chain2 (vm, p0, pi0));
+
 	  from += 1;
 	  to_next += 1;
 	  n_left_to_next -= 1;
@@ -1237,6 +1241,47 @@ ip4_sw_interface_admin_up_down (vlib_main_t * vm,
   return 0;
 }
 
+static clib_error_t *
+ip4_sw_interface_add_del (vlib_main_t * vm,
+			  u32 sw_if_index,
+			  u32 is_add)
+{
+  ip4_main_t * im = &ip4_main;
+  vnet_config_main_t * rx_cm = &im->config_mains[VLIB_RX];
+  u32 ci;
+
+  if (! rx_cm->node_index_by_feature_index)
+    {
+      char * start_nodes[] = { "ip4-input", "ip4-input-no-csum", };
+      char * feature_nodes[] = {
+	[IP4_RX_FEATURE_LOOKUP] = "ip4-lookup",
+      };
+      vnet_config_init (vm, &im->config_mains[VLIB_RX],
+			start_nodes, ARRAY_LEN (start_nodes),
+			feature_nodes, ARRAY_LEN (feature_nodes));
+    }
+
+  vec_validate_init_empty (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
+  ci = im->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
+
+  if (is_add)
+    ci = vnet_config_add_feature (vm, rx_cm,
+				  ci,
+				  IP4_RX_FEATURE_LOOKUP,
+				  /* config data */ 0,
+				  /* # bytes of config data */ 0);
+  else
+    ci = vnet_config_del_feature (vm, rx_cm,
+				  ci,
+				  IP4_RX_FEATURE_LOOKUP,
+				  /* config data */ 0,
+				  /* # bytes of config data */ 0);
+
+  im->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
+
+  return /* no error */ 0;
+}
+
 static VLIB_REGISTER_NODE (ip4_lookup_node) = {
   .function = ip4_lookup,
   .name = "ip4-lookup",
@@ -1253,6 +1298,7 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
   },
 
   .sw_interface_admin_up_down_function = ip4_sw_interface_admin_up_down,
+  .sw_interface_add_del_function = ip4_sw_interface_add_del,
 };
 
 /* Global IP4 main. */

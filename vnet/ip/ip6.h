@@ -144,9 +144,6 @@ extern vlib_node_registration_t ip6_input_node;
 extern vlib_node_registration_t ip6_rewrite_node;
 extern vlib_node_registration_t ip6_arp_node;
 
-u32
-ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst);
-
 always_inline ip6_address_t *
 ip6_get_interface_address (ip6_main_t * im, u32 sw_if_index)
 { return vec_elt_at_index (im->ip6_address_by_sw_if_index, sw_if_index); }

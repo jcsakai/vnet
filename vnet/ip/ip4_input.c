@@ -52,6 +52,46 @@ typedef enum {
   IP4_INPUT_N_NEXT,
 } ip4_input_next_t;
 
+#define vlib_validate_enqueue_two_buffers(vm,node,next_index,to_next,n_left_to_next,bi0,bi1,next0,next1) \
+do {									\
+  int enqueue_code = (next0 != next_index) + 2*(next1 != next_index);	\
+									\
+  if (PREDICT_FALSE (enqueue_code != 0))				\
+    {									\
+      switch (enqueue_code)						\
+	{								\
+	case 1:								\
+	  /* A B A */							\
+	  to_next[-2] = bi1;						\
+	  to_next -= 1;							\
+	  n_left_to_next += 1;						\
+	  vlib_set_next_frame_buffer (vm, node, next0, bi0);		\
+	  break;							\
+									\
+	case 2:								\
+	  /* A A B */							\
+	  to_next -= 1;							\
+	  n_left_to_next += 1;						\
+	  vlib_set_next_frame_buffer (vm, node, next1, bi1);		\
+	  break;							\
+									\
+	case 3:								\
+	  /* A B B or A B C */						\
+	  to_next -= 2;							\
+	  n_left_to_next += 2;						\
+	  vlib_set_next_frame_buffer (vm, node, next0, bi0);		\
+	  vlib_set_next_frame_buffer (vm, node, next1, bi1);		\
+	  if (next0 == next1)						\
+	    {								\
+	      vlib_put_next_frame (vm, node, next_index,		\
+				   n_left_to_next);			\
+	      next_index = next1;					\
+	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next); \
+	    }								\
+	}								\
+    }									\
+} while (0)
+
 /* Validate IP v4 packets and pass them either to forwarding code
    or drop/punt exception packets. */
 always_inline uword
@@ -60,8 +100,10 @@ ip4_input_inline (vlib_main_t * vm,
 		  vlib_frame_t * frame,
 		  int verify_checksum)
 {
+  ip4_main_t * im = &ip4_main;
   u32 n_left_from, * from, * to_next;
   ip4_input_next_t next_index;
+  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip4_input_node.index);
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -79,50 +121,47 @@ ip4_input_inline (vlib_main_t * vm,
       vlib_get_next_frame (vm, node, next_index,
 			   to_next, n_left_to_next);
 
-      while (0 && n_left_from >= 4 && n_left_to_next >= 2)
+      while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
-	  u32 pi0, sw_if_index0, ip_len0, cur_len0;
-	  u32 pi1, sw_if_index1, ip_len1, cur_len1;
+	  ip_buffer_opaque_t * i0, * i1;
+	  u32 sw_if_index0, pi0, ip_len0, cur_len0, next0, error0;
+	  u32 sw_if_index1, pi1, ip_len1, cur_len1, next1, error1;
 	  i32 len_diff0, len_diff1;
-	  u8 is_slow_path, next_present, error0, error1;
 
-	  /* Prefetch next iteration. */
-	  {
-	    vlib_buffer_t * p2, * p3;
-
-	    p2 = vlib_get_buffer (vm, from[2]);
-	    p3 = vlib_get_buffer (vm, from[3]);
-
-	    vlib_prefetch_buffer_header (p2, LOAD);
-	    vlib_prefetch_buffer_header (p3, LOAD);
-
-	    CLIB_PREFETCH (p2->data, sizeof (ip0[0]), LOAD);
-	    CLIB_PREFETCH (p3->data, sizeof (ip1[0]), LOAD);
-	  }
-
-	  pi0 = from[0];
-	  pi1 = from[1];
-	  to_next[0] = pi0;
-	  to_next[1] = pi1;
+	  to_next[0] = pi0 = from[0];
+	  to_next[1] = pi1 = from[1];
 	  from += 2;
 	  to_next += 2;
-	  n_left_to_next -= 2;
 	  n_left_from -= 2;
+	  n_left_to_next -= 2;
 
 	  p0 = vlib_get_buffer (vm, pi0);
 	  p1 = vlib_get_buffer (vm, pi1);
 
-	  ip0 = (void *) (p0->data + p0->current_data);
-	  ip1 = (void *) (p1->data + p1->current_data);
+	  ip0 = vlib_buffer_get_current (p0);
+	  ip1 = vlib_buffer_get_current (p1);
 
-	  /* Lookup forwarding table by input interface. */
+	  i0 = vlib_get_buffer_opaque (p0);
+	  i1 = vlib_get_buffer_opaque (p1);
+
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 	  sw_if_index1 = p1->sw_if_index[VLIB_RX];
 
+	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  i1->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
+
+	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+				&i0->current_config_index,
+				&next0,
+				/* # bytes of config data */ 0);
+	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+				&i1->current_config_index,
+				&next1,
+				/* # bytes of config data */ 0);
+
 	  error0 = error1 = IP4_ERROR_NONE;
-	  is_slow_path = next_index != IP4_INPUT_NEXT_LOOKUP;
 
 	  /* Punt packets with options. */
 	  error0 = (ip0->ip_version_and_header_length & 0xf) != 5 ? IP4_ERROR_OPTIONS : error0;
@@ -137,7 +176,9 @@ ip4_input_inline (vlib_main_t * vm,
 	    {
 	      ip_csum_t sum0, sum1;
 
-	      ip4_partial_header_checksum_x2 (ip0, ip1, sum0, sum1);
+	      ip4_partial_header_checksum_x1 (ip0, sum0);
+	      ip4_partial_header_checksum_x1 (ip1, sum1);
+
 	      error0 = 0xffff != ip_csum_fold (sum0) ? IP4_ERROR_BAD_CHECKSUM : error0;
 	      error1 = 0xffff != ip_csum_fold (sum1) ? IP4_ERROR_BAD_CHECKSUM : error1;
 	    }
@@ -158,98 +199,41 @@ ip4_input_inline (vlib_main_t * vm,
 	  error0 = ip_len0 < sizeof (ip0[0]) ? IP4_ERROR_TOO_SHORT : error0;
 	  error1 = ip_len1 < sizeof (ip1[0]) ? IP4_ERROR_TOO_SHORT : error1;
 
-	  /* Take slow path if current buffer length
-	     is not equal to packet length. */
-	  next_present = (p0->flags | p1->flags) & VLIB_BUFFER_NEXT_PRESENT;
-	  is_slow_path += next_present;
-
-	  cur_len0 = p0->current_length;
-	  cur_len1 = p1->current_length;
+	  cur_len0 = vlib_buffer_length_in_chain2 (vm, p0, pi0);
+	  cur_len1 = vlib_buffer_length_in_chain2 (vm, p1, pi1);
 
 	  len_diff0 = cur_len0 - ip_len0;
 	  len_diff1 = cur_len1 - ip_len1;
 
-	  /* L2 length must be >= L3 length. */
-	  error0 = len_diff0 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error0;
-	  error1 = len_diff1 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error1;
+	  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
+	  error1 = len_diff1 < 0 ? IP4_ERROR_BAD_LENGTH : error1;
 
-	  /* Trim padding at end of packet. */
-	  p0->current_length = ip_len0;
-	  p1->current_length = ip_len1;
+	  p0->error = error_node->errors[error0];
+	  p1->error = error_node->errors[error1];
 
-	  is_slow_path += error0 != IP4_ERROR_NONE || error1 != IP4_ERROR_NONE;
+	  next0 = (error0 != IP4_ERROR_NONE
+		   ? (error0 == IP4_ERROR_OPTIONS
+		      ? IP4_INPUT_NEXT_PUNT
+		      : IP4_INPUT_NEXT_DROP)
+		   : next0);
+	  next1 = (error1 != IP4_ERROR_NONE
+		   ? (error1 == IP4_ERROR_OPTIONS
+		      ? IP4_INPUT_NEXT_PUNT
+		      : IP4_INPUT_NEXT_DROP)
+		   : next1);
 
-	  if (PREDICT_FALSE (is_slow_path))
-	    {
-	      ip4_input_next_t next0, next1;
-
-	      to_next -= 2;
-	      n_left_to_next += 2;
-
-	      /* Restore lengths over-written in fast path. */
-	      p0->current_length = cur_len0;
-	      p1->current_length = cur_len1;
-
-	      /* Re-do length check for packets with multiple buffers. */
-	      if (p0->flags & VLIB_BUFFER_NEXT_PRESENT)
-		{
-		  u32 l2_len0 = vlib_buffer_n_bytes_in_chain (vm, pi0);
-		  len_diff0 = l2_len0 - ip_len0;
-		  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
-		  p0->current_length = cur_len0 - (error0 ? 0 : len_diff0);
-		}
-	      if (p1->flags & VLIB_BUFFER_NEXT_PRESENT)
-		{
-		  u32 l2_len1 = vlib_buffer_n_bytes_in_chain (vm, pi1);
-		  len_diff1 = l2_len1 - ip_len1;
-		  error1 = len_diff1 < 0 ? IP4_ERROR_BAD_LENGTH : error1;
-		  p1->current_length = cur_len1 - (error1 ? 0 : len_diff1);
-		}
-
-	      next0 = (error0 == IP4_ERROR_NONE
-		       ? IP4_INPUT_NEXT_LOOKUP
-		       : (error0 == IP4_ERROR_OPTIONS
-			  ? IP4_INPUT_NEXT_PUNT
-			  : IP4_INPUT_NEXT_DROP));
-	      next1 = (error1 == IP4_ERROR_NONE
-		       ? IP4_INPUT_NEXT_LOOKUP
-		       : (error1 == IP4_ERROR_OPTIONS
-			  ? IP4_INPUT_NEXT_PUNT
-			  : IP4_INPUT_NEXT_DROP));
-
-	      if (next0 != next_index)
-		{
-		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-		  vlib_get_next_frame (vm, node, next0, to_next, n_left_to_next);
-		  next_index = next0;
-		}
-
-	      to_next[0] = pi0;
-	      to_next[1] = vlib_error_set (ip4_input_node.index, error0);
-	      to_next += 1 + (error0 != IP4_ERROR_NONE);
-	      n_left_to_next -= 1;
-
-	      if (next1 != next_index)
-		{
-		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-		  vlib_get_next_frame (vm, node, next1, to_next, n_left_to_next);
-		  next_index = next1;
-		}
-
-	      to_next[0] = pi1;
-	      to_next[1] = vlib_error_set (ip4_input_node.index, error1);
-	      to_next += 1 + (error1 != IP4_ERROR_NONE);
-	      n_left_to_next -= 1;
-	    }
+	  vlib_validate_enqueue_two_buffers (vm, node, next_index,
+					     to_next, n_left_to_next,
+					     pi0, pi1, next0, next1);
 	}
     
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
-	  u32 pi0, ip_len0, cur_len0;
+	  ip_buffer_opaque_t * i0;
+	  u32 sw_if_index0, pi0, ip_len0, cur_len0, next0, error0;
 	  i32 len_diff0;
-	  u8 error0, is_slow_path, next_present;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -260,9 +244,16 @@ ip4_input_inline (vlib_main_t * vm,
 
 	  p0 = vlib_get_buffer (vm, pi0);
 	  ip0 = vlib_buffer_get_current (p0);
+	  i0 = vlib_get_buffer_opaque (p0);
+
+	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
+	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+				&i0->current_config_index,
+				&next0,
+				/* # bytes of config data */ 0);
 
 	  error0 = IP4_ERROR_NONE;
-	  is_slow_path = next_index != IP4_INPUT_NEXT_LOOKUP;
 
 	  /* Punt packets with options. */
 	  error0 = (ip0->ip_version_and_header_length & 0xf) != 5 ? IP4_ERROR_OPTIONS : error0;
@@ -291,51 +282,25 @@ ip4_input_inline (vlib_main_t * vm,
 	  /* IP length must be at least minimal IP header. */
 	  error0 = ip_len0 < sizeof (ip0[0]) ? IP4_ERROR_TOO_SHORT : error0;
 
-	  /* Take slow path if current buffer length
-	     is not equal to packet length. */
-	  next_present = p0->flags & VLIB_BUFFER_NEXT_PRESENT;
-	  is_slow_path += next_present;
-
-	  cur_len0 = p0->current_length;
+	  cur_len0 = vlib_buffer_length_in_chain2 (vm, p0, pi0);
 	  len_diff0 = cur_len0 - ip_len0;
-	  error0 = len_diff0 < 0 && ! next_present ? IP4_ERROR_BAD_LENGTH : error0;
-	  p0->current_length = ip_len0;
+	  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
 
-	  is_slow_path += error0 != IP4_ERROR_NONE;
+	  p0->error = error_node->errors[error0];
+	  next0 = (error0 != IP4_ERROR_NONE
+		   ? (error0 == IP4_ERROR_OPTIONS
+		      ? IP4_INPUT_NEXT_PUNT
+		      : IP4_INPUT_NEXT_DROP)
+		   : next0);
 
-	  if (PREDICT_FALSE (is_slow_path))
+	  if (PREDICT_FALSE (next0 != next_index))
 	    {
-	      ip4_input_next_t next0;
-
-	      to_next -= 1;
-	      n_left_to_next += 1;
-
-	      /* Re-do length check for packets with multiple buffers. */
-	      p0->current_length = cur_len0;
-	      if (p0->flags & VLIB_BUFFER_NEXT_PRESENT)
-		{
-		  u32 l2_len0 = vlib_buffer_n_bytes_in_chain (vm, pi0);
-		  len_diff0 = l2_len0 - ip_len0;
-		  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
-		  p0->current_length = cur_len0 - (error0 ? 0 : len_diff0);
-		}
-
-	      next0 = (error0 == IP4_ERROR_NONE
-		       ? IP4_INPUT_NEXT_LOOKUP
-		       : (error0 == IP4_ERROR_OPTIONS
-			  ? IP4_INPUT_NEXT_PUNT
-			  : IP4_INPUT_NEXT_DROP));
-
-	      if (next0 != next_index)
-		{
-		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-		  vlib_get_next_frame (vm, node, next0, to_next, n_left_to_next);
-		  next_index = next0;
-		}
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
+	      next_index = next0;
+	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 
 	      to_next[0] = pi0;
-	      to_next[1] = vlib_error_set (ip4_input_node.index, error0);
-	      to_next += 1 + (error0 != IP4_ERROR_NONE);
+	      to_next += 1;
 	      n_left_to_next -= 1;
 	    }
 	}

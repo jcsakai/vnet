@@ -29,6 +29,7 @@
 #include <vlib/mc.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/lookup.h>
+#include <vnet/vnet/config.h>
 
 typedef struct {
   /* Hash table for each prefix length mapping. */
@@ -73,6 +74,22 @@ typedef struct {
   uword function_opaque;
 } ip4_set_interface_address_callback_t;
 
+typedef enum {
+  /* First check access list to either permit or deny this
+     packet based on classification. */
+  IP4_RX_FEATURE_CHECK_ACCESS,
+
+  /* RPF check: verify that source address is reachable via
+     RX interface or via any interface. */
+  IP4_RX_FEATURE_CHECK_SOURCE_REACHABLE_VIA_RX,
+  IP4_RX_FEATURE_CHECK_SOURCE_REACHABLE_VIA_ANY,
+
+  /* Must be last: perform forwarding lookup. */
+  IP4_RX_FEATURE_LOOKUP,
+
+  IP4_N_RX_FEATURE,
+} ip4_rx_feature_type_t;
+
 typedef struct ip4_main_t {
   ip_lookup_main_t lookup_main;
 
@@ -87,6 +104,11 @@ typedef struct ip4_main_t {
   /* Hash table mapping table id to fib index.
      ID space is not necessarily dense; index space is dense. */
   uword * fib_index_by_table_id;
+
+  /* rx/tx interface/feature configuration. */
+  vnet_config_main_t config_mains[VLIB_N_RX_TX];
+
+  u32 * config_index_by_sw_if_index[VLIB_N_RX_TX];
 
   /* Vector of functions to call when routes are added/deleted. */
   ip4_add_del_route_callback_t * add_del_route_callbacks;
@@ -123,9 +145,6 @@ extern ip4_main_t ip4_main;
 extern vlib_node_registration_t ip4_input_node;
 extern vlib_node_registration_t ip4_rewrite_node;
 extern vlib_node_registration_t ip4_arp_node;
-
-u32
-ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst);
 
 always_inline ip4_address_t *
 ip4_get_interface_address (ip4_main_t * im, u32 sw_if_index)

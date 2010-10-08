@@ -28,7 +28,7 @@
 #include <vnet/vnet/l3_types.h>
 
 /* This is really, really simple but stupid fib. */
-u32
+static u32
 ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
@@ -768,9 +768,11 @@ ip6_lookup (vlib_main_t * vm,
 	  i0->dst_adj_index = adj_index0;
 	  i1->dst_adj_index = adj_index1;
 
-	  vlib_buffer_increment_two_counters (vm, cm,
-					      adj_index0, adj_index1,
-					      p0, p1);
+	  vlib_increment_combined_counter (cm, adj_index0, 1,
+					   vlib_buffer_length_in_chain2 (vm, p0, pi0));
+	  vlib_increment_combined_counter (cm, adj_index1, 1,
+					   vlib_buffer_length_in_chain2 (vm, p1, pi1));
+
 	  from += 2;
 	  to_next += 2;
 	  n_left_to_next -= 2;
@@ -845,7 +847,9 @@ ip6_lookup (vlib_main_t * vm,
 
 	  i0->dst_adj_index = adj_index0;
 
-	  vlib_buffer_increment_counter (vm, cm, adj_index0, p0);
+	  vlib_increment_combined_counter (cm, adj_index0, 1,
+					   vlib_buffer_length_in_chain2 (vm, p0, pi0));
+
 	  from += 1;
 	  to_next += 1;
 	  n_left_to_next -= 1;
