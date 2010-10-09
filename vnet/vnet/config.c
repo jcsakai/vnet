@@ -87,10 +87,6 @@ find_config_with_features (vlib_main_t * vm,
   if (config_string)
     _vec_len (config_string) = 0;
 
-  /* First element of config string is index into config pool;
-     to be filled in later. */
-  vec_add1 (config_string, ~0);
-
   vec_foreach (f, feature_vector)
     {
       /* Connect node graph. */
@@ -122,6 +118,8 @@ find_config_with_features (vlib_main_t * vm,
     }
   else
     {
+      u32 * d;
+
       pool_get (cm->config_pool, c);
       c->index = c - cm->config_pool;
       c->features = feature_vector;
@@ -131,17 +129,16 @@ find_config_with_features (vlib_main_t * vm,
 	 VLIB buffers will maintain pointers to heap as they read out
 	 configuration data. */
       c->config_string_heap_index
-	= heap_alloc (cm->config_string_heap, vec_len (config_string),
+	= heap_alloc (cm->config_string_heap, vec_len (config_string) + 1,
 		      c->config_string_heap_handle);
-      memcpy (heap_elt_at_index (cm->config_string_heap, c->config_string_heap_index),
-	      config_string,
-	      vec_bytes (config_string));
 
-      c->reference_count = 0; /* will be incremented by caller. */
+      /* First element in heap points back to pool index. */
+      d = vec_elt_at_index (cm->config_string_heap, c->config_string_heap_index);
+      d[0] = c->index;
+      memcpy (d + 1, config_string, vec_bytes (config_string));
       hash_set_mem (cm->config_string_hash, config_string, c->index);
 
-      /* First element of config string is pool index. */
-      config_string[0] = c->index;
+      c->reference_count = 0; /* will be incremented by caller. */
     }
 
   return c;
@@ -240,13 +237,12 @@ u32 vnet_config_add_feature (vlib_main_t * vm,
   
   /* Sort (prioritize) features. */
   if (vec_len (new_features) > 1)
-    vec_sort (new_features, f1, f2, (int) f2->feature_index - f1->feature_index);
-
-  new = find_config_with_features (vm, cm, new_features);
+    vec_sort (new_features, f1, f2, (int) f1->feature_index - f2->feature_index);
 
   if (old)
     remove_reference (cm, old);
 
+  new = find_config_with_features (vm, cm, new_features);
   new->reference_count += 1;
 
   /* User gets pointer to config string first element (which defines the pool index

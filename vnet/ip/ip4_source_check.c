@@ -52,9 +52,12 @@ typedef enum {
   IP4_SOURCE_CHECK_REACHABLE_VIA_ANY,
 } ip4_source_check_type_t;
 
-typedef struct {
-  u32 no_default_route : 1;
-  u32 fib_index : 31;
+typedef union {
+  struct {
+    u32 no_default_route : 1;
+    u32 fib_index : 31;
+  };
+  u32 as_u32[1];
 } ip4_source_check_config_t;
 
 always_inline uword
@@ -185,6 +188,56 @@ VLIB_REGISTER_NODE (ip4_check_source_reachable_via_rx) = {
 
   .format_buffer = format_ip4_header,
   .format_trace = format_ip4_source_check_trace,
+};
+
+static clib_error_t *
+set_ip_source_check (vlib_main_t * vm,
+		     unformat_input_t * input,
+		     vlib_cli_command_t * cmd)
+{
+  ip4_main_t * im = &ip4_main;
+  vnet_config_main_t * rx_cm = &im->config_mains[VLIB_RX];
+  clib_error_t * error = 0;
+  u32 sw_if_index, is_del, ci;
+  ip4_source_check_config_t config;
+  ip4_rx_feature_type_t type;
+
+  sw_if_index = ~0;
+
+  if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
+    {
+      error = clib_error_return (0, "unknown interface `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+
+  is_del = 0;
+  config.no_default_route = 0;
+  config.fib_index = 0;
+  type = IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_RX;
+  if (unformat (input, "del"))
+    is_del = 1;
+
+  ci = im->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
+  ci = (is_del
+	? vnet_config_del_feature
+	: vnet_config_add_feature)
+    (vm, rx_cm,
+     ci,
+     type,
+     &config,
+     sizeof (config));
+  im->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
+
+ done:
+  return error;
+}
+
+static VLIB_CLI_COMMAND (set_interface_ip_address_command) = {
+  .name = "source-check",
+  .function = set_ip_source_check,
+  .short_help = "Set IP4/IP6 interface unicast source check",
+  .parent = &set_interface_ip_command,
 };
 
 /* Dummy init function to get us linked in. */
