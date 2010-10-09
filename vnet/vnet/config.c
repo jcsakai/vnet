@@ -87,6 +87,10 @@ find_config_with_features (vlib_main_t * vm,
   if (config_string)
     _vec_len (config_string) = 0;
 
+  /* First element of config string is index into config pool;
+     to be filled in later. */
+  vec_add1 (config_string, ~0);
+
   vec_foreach (f, feature_vector)
     {
       /* Connect node graph. */
@@ -135,6 +139,9 @@ find_config_with_features (vlib_main_t * vm,
 
       c->reference_count = 0; /* will be incremented by caller. */
       hash_set_mem (cm->config_string_hash, config_string, c->index);
+
+      /* First element of config string is pool index. */
+      config_string[0] = c->index;
     }
 
   return c;
@@ -190,15 +197,20 @@ remove_reference (vnet_config_main_t * cm, vnet_config_t * c)
   c->reference_count -= 1;
   if (c->reference_count == 0)
     {
+      heap_dealloc (cm->config_string_heap, c->config_string_heap_handle);
       hash_unset (cm->config_string_hash, c->config_string_vector);
       vnet_config_free (cm, c);
       pool_put (cm->config_pool, c);
     }
 }
 
+always_inline u32 *
+vnet_get_config_heap (vnet_config_main_t * cm, u32 ci)
+{ return heap_elt_at_index (cm->config_string_heap, ci); }
+
 u32 vnet_config_add_feature (vlib_main_t * vm,
 			     vnet_config_main_t * cm,
-			     u32 config_id,
+			     u32 config_string_heap_index,
 			     u32 feature_index,
 			     void * feature_config,
 			     u32 n_feature_config_bytes)
@@ -206,14 +218,15 @@ u32 vnet_config_add_feature (vlib_main_t * vm,
   vnet_config_t * old, * new;
   vnet_config_feature_t * new_features, * f;
 
-  if (config_id == ~0)
+  if (config_string_heap_index == ~0)
     {
       old = 0;
       new_features = 0;
     }
   else
     {
-      old = pool_elt_at_index (cm->config_pool, config_id);
+      u32 * p = vnet_get_config_heap (cm, config_string_heap_index);
+      old = pool_elt_at_index (cm->config_pool, p[-1]);
       new_features = old->features;
       if (new_features)
 	new_features = duplicate_feature_vector (new_features);
@@ -235,12 +248,15 @@ u32 vnet_config_add_feature (vlib_main_t * vm,
     remove_reference (cm, old);
 
   new->reference_count += 1;
-  return new->index;
+
+  /* User gets pointer to config string first element (which defines the pool index
+     this config string comes from). */
+  return new->config_string_heap_index + 1;
 }
 
 u32 vnet_config_del_feature (vlib_main_t * vm,
 			     vnet_config_main_t * cm,
-			     u32 config_id,
+			     u32 config_string_heap_index,
 			     u32 feature_index,
 			     void * feature_config,
 			     u32 n_feature_config_bytes)
@@ -248,11 +264,11 @@ u32 vnet_config_del_feature (vlib_main_t * vm,
   vnet_config_t * old, * new;
   vnet_config_feature_t * new_features, * f;
 
-  ASSERT (config_id != 0);
-  if (config_id == 0)
-    return ~0;
+  {
+    u32 * p = vnet_get_config_heap (cm, config_string_heap_index);
 
-  old = pool_elt_at_index (cm->config_pool, config_id);
+    old = pool_elt_at_index (cm->config_pool, p[-1]);
+  }
 
   /* Find feature with same index and opaque data. */
   vec_foreach (f, old->features)
