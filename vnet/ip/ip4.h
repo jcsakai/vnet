@@ -81,8 +81,8 @@ typedef enum {
 
   /* RPF check: verify that source address is reachable via
      RX interface or via any interface. */
-  IP4_RX_FEATURE_CHECK_SOURCE_REACHABLE_VIA_RX,
-  IP4_RX_FEATURE_CHECK_SOURCE_REACHABLE_VIA_ANY,
+  IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_RX,
+  IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_ANY,
 
   /* Must be last: perform forwarding lookup. */
   IP4_RX_FEATURE_LOOKUP,
@@ -145,6 +145,9 @@ extern ip4_main_t ip4_main;
 extern vlib_node_registration_t ip4_input_node;
 extern vlib_node_registration_t ip4_rewrite_node;
 extern vlib_node_registration_t ip4_arp_node;
+
+u32 ip4_fib_lookup_with_table (ip4_main_t * im, u32 fib_index, ip4_address_t * dst,
+			       u32 disable_default_route);
 
 always_inline ip4_address_t *
 ip4_get_interface_address (ip4_main_t * im, u32 sw_if_index)

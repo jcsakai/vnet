@@ -54,7 +54,10 @@
 							\
   /* Errors signalled by {tcp4,udp4}-lookup. */		\
   _ (UNKNOWN_UDP_PORT, "no listener for udp port")	\
-  _ (UNKNOWN_TCP_PORT, "no listener for tcp port")
+  _ (UNKNOWN_TCP_PORT, "no listener for tcp port")	\
+							\
+  /* Errors signalled by ip4-source-check. */		\
+  _ (UNICAST_SOURCE_CHECK_FAILS, "ip4 unicast source check fails")	\
 
 typedef enum {
 #define _(sym,str) IP4_ERROR_##sym,

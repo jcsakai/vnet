@@ -30,17 +30,19 @@
 #include <vnet/vnet/l3_types.h>
 
 /* This is really, really simple but stupid fib. */
-static u32
-ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst)
+u32
+ip4_fib_lookup_with_table (ip4_main_t * im, u32 fib_index,
+			   ip4_address_t * dst,
+			   u32 disable_default_route)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
-  u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
   ip4_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
   uword * p, * hash, key;
-  i32 i, dst_address, ai;
+  i32 i, i_min, dst_address, ai;
 
+  i_min = disable_default_route ? 0 : 1;
   dst_address = clib_mem_unaligned (&dst->data_u32, u32);
-  for (i = ARRAY_LEN (fib->adj_index_by_dst_address) - 1; i >= 0; i--)
+  for (i = ARRAY_LEN (fib->adj_index_by_dst_address) - 1; i >= i_min; i--)
     {
       hash = fib->adj_index_by_dst_address[i];
       if (! hash)
@@ -59,6 +61,14 @@ ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst)
 
  done:
   return ai;
+}
+
+always_inline u32
+ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst)
+{
+  u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
+  return ip4_fib_lookup_with_table (im, fib_index, dst,
+				    /* disable_default_route */ 0);
 }
 
 static ip4_fib_t *
@@ -1254,6 +1264,8 @@ ip4_sw_interface_add_del (vlib_main_t * vm,
     {
       char * start_nodes[] = { "ip4-input", "ip4-input-no-csum", };
       char * feature_nodes[] = {
+	[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_RX] = "ip4-source-check-via-rx",
+	[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_ANY] = "ip4-source-check-via-any",
 	[IP4_RX_FEATURE_LOOKUP] = "ip4-lookup",
       };
       vnet_config_init (vm, &im->config_mains[VLIB_RX],
