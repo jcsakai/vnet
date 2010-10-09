@@ -40,7 +40,7 @@ int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2)
   return 0;
 }
 
-static VLIB_CLI_COMMAND (set_interface_ip_command) = {
+VLIB_CLI_COMMAND (set_interface_ip_command) = {
   .name = "ip",
   .short_help = "IP4/IP6 commands",
   .parent = &vlib_cli_set_interface_command,
@@ -80,7 +80,7 @@ set_ip_address (vlib_main_t * vm,
   return error;
 }
 
-static VLIB_CLI_COMMAND (set_interface_ip4_address_command) = {
+static VLIB_CLI_COMMAND (set_interface_ip_address_command) = {
   .name = "address",
   .function = set_ip_address,
   .short_help = "Set IP4/IP6 address for interface",

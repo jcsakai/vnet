@@ -134,4 +134,6 @@ ip_get_tcp_udp_port_info (ip_main_t * im, u32 port)
 #define IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED VLIB_BUFFER_FLAG_USER1
 #define IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT  VLIB_BUFFER_FLAG_USER2
 
+extern vlib_cli_command_t set_interface_ip_command;
+
 #endif /* included_ip_main_h */
