@@ -50,6 +50,9 @@ typedef enum {
      might be another node for further output processing. */
   IP_LOOKUP_NEXT_REWRITE,
 
+  /* This packet is multicast and needs to be replicated. */
+  IP_LOOKUP_NEXT_MULTICAST,
+
   IP_LOOKUP_N_NEXT,
 } ip_lookup_next_t;
 

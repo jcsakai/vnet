@@ -1336,6 +1336,7 @@ static VLIB_REGISTER_NODE (ip6_lookup_node) = {
     [IP_LOOKUP_NEXT_LOCAL] = "ip6-local",
     [IP_LOOKUP_NEXT_ARP] = "ip6-arp",
     [IP_LOOKUP_NEXT_REWRITE] = "ip6-rewrite",
+    [IP_LOOKUP_NEXT_MULTICAST] = "ip6-multicast",
   },
 
   .sw_interface_admin_up_down_function = ip6_sw_interface_admin_up_down,
@@ -1594,6 +1595,19 @@ static VLIB_REGISTER_NODE (ip6_punt_node) = {
 static VLIB_REGISTER_NODE (ip6_miss_node) = {
   .function = ip6_miss,
   .name = "ip6-miss",
+  .vector_size = sizeof (u32),
+
+  .format_trace = format_ip6_forward_next_trace,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = "error-drop",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_multicast_node) = {
+  .function = ip6_drop,
+  .name = "ip6-multicast",
   .vector_size = sizeof (u32),
 
   .format_trace = format_ip6_forward_next_trace,

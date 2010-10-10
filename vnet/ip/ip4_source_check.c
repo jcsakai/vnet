@@ -89,14 +89,84 @@ ip4_source_check_inline (vlib_main_t * vm,
       vlib_get_next_frame (vm, node, next_index,
 			   to_next, n_left_to_next);
 
-#if 0
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
+	  vlib_buffer_t * p0, * p1;
+	  ip4_header_t * ip0, * ip1;
+	  ip_buffer_opaque_t * i0, * i1;
+	  ip4_source_check_config_t * c0, * c1;
+	  ip_adjacency_t * adj0, * adj1;
+	  u32 pi0, next0, pass0, adj_index0;
+	  u32 pi1, next1, pass1, adj_index1;
+
+	  /* Prefetch next iteration. */
+	  {
+	    vlib_buffer_t * p2, * p3;
+
+	    p2 = vlib_get_buffer (vm, from[2]);
+	    p3 = vlib_get_buffer (vm, from[3]);
+
+	    vlib_prefetch_buffer_header (p2, LOAD);
+	    vlib_prefetch_buffer_header (p3, LOAD);
+
+	    CLIB_PREFETCH (p2->data, sizeof (ip0[0]), LOAD);
+	    CLIB_PREFETCH (p3->data, sizeof (ip1[0]), LOAD);
+	  }
+
+	  pi0 = to_next[0] = from[0];
+	  pi1 = to_next[1] = from[1];
+	  from += 2;
+	  to_next += 2;
+	  n_left_from -= 2;
+	  n_left_to_next -= 2;
+
+	  p0 = vlib_get_buffer (vm, pi0);
+	  p1 = vlib_get_buffer (vm, pi1);
+
+	  ip0 = vlib_buffer_get_current (p0);
+	  ip1 = vlib_buffer_get_current (p1);
+
+	  i0 = vlib_get_buffer_opaque (p0);
+	  i1 = vlib_get_buffer_opaque (p1);
+
+	  c0 = vnet_get_config_data (cm, &i0->current_config_index,
+				     &next0,
+				     sizeof (c0[0]));
+	  c1 = vnet_get_config_data (cm, &i1->current_config_index,
+				     &next1,
+				     sizeof (c1[0]));
+
+	  adj_index0 = ip4_fib_lookup_with_table (im, c0->fib_index,
+						  &ip0->src_address,
+						  c0->no_default_route);
+	  adj_index1 = ip4_fib_lookup_with_table (im, c1->fib_index,
+						  &ip1->src_address,
+						  c1->no_default_route);
+
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+	  adj1 = ip_get_adjacency (lm, adj_index1);
+
+	  pass0 = (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
+		   && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
+		       || p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
+	  pass1 = (adj1->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
+		   && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
+		       || p1->sw_if_index[VLIB_RX] == adj1->rewrite_header.sw_if_index));
+
+	  /* Pass multicast. */
+	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_MULTICAST);
+	  pass1 |= (adj1->lookup_next_index == IP_LOOKUP_NEXT_MULTICAST);
+	    
+	  next0 = (pass0 ? next0 : IP4_SOURCE_CHECK_NEXT_DROP);
+	  next1 = (pass1 ? next1 : IP4_SOURCE_CHECK_NEXT_DROP);
+
+	  p0->error = error_node->errors[IP4_ERROR_UNICAST_SOURCE_CHECK_FAILS];
+	  p1->error = error_node->errors[IP4_ERROR_UNICAST_SOURCE_CHECK_FAILS];
+
 	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
 					   to_next, n_left_to_next,
 					   pi0, pi1, next0, next1);
 	}
-#endif
     
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
@@ -105,7 +175,7 @@ ip4_source_check_inline (vlib_main_t * vm,
 	  ip_buffer_opaque_t * i0;
 	  ip4_source_check_config_t * c0;
 	  ip_adjacency_t * adj0;
-	  u32 pi0, next0, adj_index0;
+	  u32 pi0, next0, pass0, adj_index0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -127,12 +197,14 @@ ip4_source_check_inline (vlib_main_t * vm,
 						  c0->no_default_route);
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
-	  /* FIXME accept if multicast. */
-	  next0 = ((adj0->rewrite_header.next_index == IP_LOOKUP_NEXT_REWRITE
+	  pass0 = (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
 		   && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
-		       || p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index))
-		   ? next0
-		   : IP4_SOURCE_CHECK_NEXT_DROP);
+		       || p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
+
+	  /* Pass multicast. */
+	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_MULTICAST);
+	    
+	  next0 = (pass0 ? next0 : IP4_SOURCE_CHECK_NEXT_DROP);
 	  p0->error = error_node->errors[IP4_ERROR_UNICAST_SOURCE_CHECK_FAILS];
 
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,

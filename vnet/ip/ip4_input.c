@@ -90,6 +90,20 @@ ip4_input_inline (vlib_main_t * vm,
 	  u32 sw_if_index1, pi1, ip_len1, cur_len1, next1, error1;
 	  i32 len_diff0, len_diff1;
 
+	  /* Prefetch next iteration. */
+	  {
+	    vlib_buffer_t * p2, * p3;
+
+	    p2 = vlib_get_buffer (vm, from[2]);
+	    p3 = vlib_get_buffer (vm, from[3]);
+
+	    vlib_prefetch_buffer_header (p2, LOAD);
+	    vlib_prefetch_buffer_header (p3, LOAD);
+
+	    CLIB_PREFETCH (p2->data, sizeof (ip0[0]), LOAD);
+	    CLIB_PREFETCH (p3->data, sizeof (ip1[0]), LOAD);
+	  }
+
 	  to_next[0] = pi0 = from[0];
 	  to_next[1] = pi1 = from[1];
 	  from += 2;

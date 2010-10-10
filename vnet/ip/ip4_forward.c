@@ -1307,6 +1307,7 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
     [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
     [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
     [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
+    [IP_LOOKUP_NEXT_MULTICAST] = "ip4-multicast",
   },
 
   .sw_interface_admin_up_down_function = ip4_sw_interface_admin_up_down,
@@ -1559,6 +1560,19 @@ static VLIB_REGISTER_NODE (ip4_punt_node) = {
 static VLIB_REGISTER_NODE (ip4_miss_node) = {
   .function = ip4_miss,
   .name = "ip4-miss",
+  .vector_size = sizeof (u32),
+
+  .format_trace = format_ip4_forward_next_trace,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = "error-drop",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip4_multicast_node) = {
+  .function = ip4_drop,
+  .name = "ip4-multicast",
   .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
