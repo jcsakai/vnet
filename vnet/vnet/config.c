@@ -194,7 +194,6 @@ remove_reference (vnet_config_main_t * cm, vnet_config_t * c)
   c->reference_count -= 1;
   if (c->reference_count == 0)
     {
-      heap_dealloc (cm->config_string_heap, c->config_string_heap_handle);
       hash_unset (cm->config_string_hash, c->config_string_vector);
       vnet_config_free (cm, c);
       pool_put (cm->config_pool, c);
@@ -214,6 +213,7 @@ u32 vnet_config_add_feature (vlib_main_t * vm,
 {
   vnet_config_t * old, * new;
   vnet_config_feature_t * new_features, * f;
+  u32 n_feature_config_u32s;
 
   if (config_string_heap_index == ~0)
     {
@@ -232,8 +232,9 @@ u32 vnet_config_add_feature (vlib_main_t * vm,
   vec_add2 (new_features, f, 1);
   f->feature_index = feature_index;
   f->node_index = vec_elt (cm->node_index_by_feature_index, feature_index);
-  vec_add (f->feature_config, feature_config,
-	   round_pow2 (n_feature_config_bytes, sizeof (f->feature_config[0])) / sizeof (f->feature_config[0]));
+
+  n_feature_config_u32s = round_pow2 (n_feature_config_bytes, sizeof (f->feature_config[0])) / sizeof (f->feature_config[0]);
+  vec_add (f->feature_config, feature_config, n_feature_config_u32s);
   
   /* Sort (prioritize) features. */
   if (vec_len (new_features) > 1)
@@ -259,6 +260,7 @@ u32 vnet_config_del_feature (vlib_main_t * vm,
 {
   vnet_config_t * old, * new;
   vnet_config_feature_t * new_features, * f;
+  u32 n_feature_config_u32s;
 
   {
     u32 * p = vnet_get_config_heap (cm, config_string_heap_index);
@@ -266,12 +268,14 @@ u32 vnet_config_del_feature (vlib_main_t * vm,
     old = pool_elt_at_index (cm->config_pool, p[-1]);
   }
 
+  n_feature_config_u32s = round_pow2 (n_feature_config_bytes, sizeof (f->feature_config[0])) / sizeof (f->feature_config[0]);
+
   /* Find feature with same index and opaque data. */
   vec_foreach (f, old->features)
     {
       if (f->feature_index == feature_index
-	  && vec_len (f->feature_config) == n_feature_config_bytes
-	  && (n_feature_config_bytes == 0
+	  && vec_len (f->feature_config) == n_feature_config_u32s
+	  && (n_feature_config_u32s == 0
 	      || ! memcmp (f->feature_config, feature_config, n_feature_config_bytes)))
 	break;
     }

@@ -122,7 +122,8 @@ uword unformat_vnet_rewrite (unformat_input_t * input, va_list * args)
       && unformat_user (input, next->unformat_buffer, &rw_data))
     ;
 
-  else if (unformat_user (input, unformat_hex_string, &rw_data))
+  else if (unformat_user (input, unformat_hex_string, &rw_data)
+	   || unformat (input, "0x%U", unformat_hex_string, &rw_data))
     ;
       
   else
