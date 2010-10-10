@@ -36,6 +36,10 @@ typedef union {
   u32 data_u32;
 } ip4_address_t;
 
+always_inline uword
+ip4_address_is_multicast (ip4_address_t * a)
+{ return (a->data[0] & 0xf0) == 0xe0; }
+
 typedef union {
   struct {
     /* 4 bit packet length (in 32bit units) and version VVVVLLLL.

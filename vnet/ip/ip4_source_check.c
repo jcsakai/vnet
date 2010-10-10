@@ -146,17 +146,17 @@ ip4_source_check_inline (vlib_main_t * vm,
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
 
-	  pass0 = (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
-		   && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
-		       || p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
-	  pass1 = (adj1->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
-		   && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
-		       || p1->sw_if_index[VLIB_RX] == adj1->rewrite_header.sw_if_index));
-
 	  /* Pass multicast. */
-	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_MULTICAST);
-	  pass1 |= (adj1->lookup_next_index == IP_LOOKUP_NEXT_MULTICAST);
-	    
+	  pass0 = ip4_address_is_multicast (&ip0->src_address);
+	  pass1 = ip4_address_is_multicast (&ip1->src_address);
+
+	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
+		    && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
+			|| p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
+	  pass1 |= (adj1->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
+		    && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
+			|| p1->sw_if_index[VLIB_RX] == adj1->rewrite_header.sw_if_index));
+
 	  next0 = (pass0 ? next0 : IP4_SOURCE_CHECK_NEXT_DROP);
 	  next1 = (pass1 ? next1 : IP4_SOURCE_CHECK_NEXT_DROP);
 
@@ -197,13 +197,13 @@ ip4_source_check_inline (vlib_main_t * vm,
 						  c0->no_default_route);
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
-	  pass0 = (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
-		   && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
-		       || p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
-
 	  /* Pass multicast. */
-	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_MULTICAST);
-	    
+	  pass0 = ip4_address_is_multicast (&ip0->src_address);
+
+	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
+		    && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
+			|| p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
+
 	  next0 = (pass0 ? next0 : IP4_SOURCE_CHECK_NEXT_DROP);
 	  p0->error = error_node->errors[IP4_ERROR_UNICAST_SOURCE_CHECK_FAILS];
 
