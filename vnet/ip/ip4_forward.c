@@ -2151,7 +2151,7 @@ ip4_rewrite_slow_path (vlib_main_t * vm,
 
   ip0 = vlib_buffer_get_current (p0) + rw_len0;
   next0 = adj0[0].rewrite_header.next_index;
-  error_code0 = ~0;
+  error_code0 = IP4_ERROR_NONE;
   
   if (ip0->ttl == 0 || ip0->ttl == 255)
     {
@@ -2168,7 +2168,7 @@ ip4_rewrite_slow_path (vlib_main_t * vm,
       /* FIXME fragment packet. */
     }
 
-  next0 = error_code0 != ~0 ? IP4_REWRITE_NEXT_DROP : next0;
+  next0 = error_code0 != IP4_ERROR_NONE ? IP4_REWRITE_NEXT_DROP : next0;
 
   p0->error = vlib_error_set (ip4_input_node.index, error_code0);
 
