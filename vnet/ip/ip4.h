@@ -29,7 +29,6 @@
 #include <vlib/mc.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/lookup.h>
-#include <vnet/vnet/config.h>
 
 typedef struct {
   /* Hash table for each prefix length mapping. */
@@ -104,11 +103,6 @@ typedef struct ip4_main_t {
   /* Hash table mapping table id to fib index.
      ID space is not necessarily dense; index space is dense. */
   uword * fib_index_by_table_id;
-
-  /* rx/tx interface/feature configuration. */
-  vnet_config_main_t config_mains[VLIB_N_RX_TX];
-
-  u32 * config_index_by_sw_if_index[VLIB_N_RX_TX];
 
   /* Vector of functions to call when routes are added/deleted. */
   ip4_add_del_route_callback_t * add_del_route_callbacks;

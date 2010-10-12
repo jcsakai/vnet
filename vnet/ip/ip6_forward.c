@@ -272,7 +272,10 @@ void ip6_add_del_route (ip6_main_t * im, ip6_add_del_route_args_t * a)
 
   /* Either create new adjacency or use given one depending on arguments. */
   if (a->n_add_adj > 0)
-    ip_add_adjacency (lm, a->add_adj, a->n_add_adj, &adj_index);
+    {
+      ip_add_adjacency (lm, a->add_adj, a->n_add_adj, &adj_index);
+      ip_call_add_del_adjacency_callbacks (lm, adj_index, /* is_del */ 0);
+    }
   else
     adj_index = a->adj_index;
 
@@ -1288,7 +1291,8 @@ ip6_sw_interface_add_del (vlib_main_t * vm,
 			  u32 is_add)
 {
   ip6_main_t * im = &ip6_main;
-  vnet_config_main_t * rx_cm = &im->config_mains[VLIB_RX];
+  ip_lookup_main_t * lm = &im->lookup_main;
+  vnet_config_main_t * rx_cm = &lm->config_mains[VLIB_RX];
   u32 ci;
 
   if (! rx_cm->node_index_by_feature_index)
@@ -1297,13 +1301,13 @@ ip6_sw_interface_add_del (vlib_main_t * vm,
       char * feature_nodes[] = {
 	[IP6_RX_FEATURE_LOOKUP] = "ip6-lookup",
       };
-      vnet_config_init (vm, &im->config_mains[VLIB_RX],
+      vnet_config_init (vm, &lm->config_mains[VLIB_RX],
 			start_nodes, ARRAY_LEN (start_nodes),
 			feature_nodes, ARRAY_LEN (feature_nodes));
     }
 
-  vec_validate_init_empty (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
-  ci = im->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
+  vec_validate_init_empty (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
+  ci = lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
 
   if (is_add)
     ci = vnet_config_add_feature (vm, rx_cm,
@@ -1318,7 +1322,7 @@ ip6_sw_interface_add_del (vlib_main_t * vm,
 				  /* config data */ 0,
 				  /* # bytes of config data */ 0);
 
-  im->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
+  lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
 
   return /* no error */ 0;
 }

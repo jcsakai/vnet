@@ -68,7 +68,7 @@ ip4_source_check_inline (vlib_main_t * vm,
 {
   ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
-  vnet_config_main_t * cm = &im->config_mains[VLIB_RX];
+  vnet_config_main_t * cm = &lm->config_mains[VLIB_RX];
   u32 n_left_from, * from, * to_next;
   u32 next_index;
   vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip4_input_node.index);
@@ -268,7 +268,8 @@ set_ip_source_check (vlib_main_t * vm,
 		     vlib_cli_command_t * cmd)
 {
   ip4_main_t * im = &ip4_main;
-  vnet_config_main_t * rx_cm = &im->config_mains[VLIB_RX];
+  ip_lookup_main_t * lm = &im->lookup_main;
+  vnet_config_main_t * rx_cm = &lm->config_mains[VLIB_RX];
   clib_error_t * error = 0;
   u32 sw_if_index, is_del, ci;
   ip4_source_check_config_t config;
@@ -290,7 +291,7 @@ set_ip_source_check (vlib_main_t * vm,
   if (unformat (input, "del"))
     is_del = 1;
 
-  ci = im->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
+  ci = lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
   ci = (is_del
 	? vnet_config_del_feature
 	: vnet_config_add_feature)
@@ -299,7 +300,7 @@ set_ip_source_check (vlib_main_t * vm,
      type,
      &config,
      sizeof (config));
-  im->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
+  lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
 
  done:
   return error;

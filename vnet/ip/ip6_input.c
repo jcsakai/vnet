@@ -59,6 +59,7 @@ ip6_input (vlib_main_t * vm,
 	   vlib_frame_t * frame)
 {
   ip6_main_t * im = &ip6_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
   u32 n_left_from, * from, * to_next;
   ip6_input_next_t next_index;
   vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip6_input_node.index);
@@ -123,14 +124,14 @@ ip6_input (vlib_main_t * vm,
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 	  sw_if_index1 = p1->sw_if_index[VLIB_RX];
 
-	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
-	  i1->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
+	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  i1->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
 
-	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);
-	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i1->current_config_index,
 				&next1,
 				/* # bytes of config data */ 0);
@@ -179,8 +180,8 @@ ip6_input (vlib_main_t * vm,
 	  i0 = vlib_get_buffer_opaque (p0);
 
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
-	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
-	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);
@@ -249,6 +250,9 @@ static clib_error_t * ip6_init (vlib_main_t * vm)
     pn = pg_get_node (ip6_input_node.index);
     pn->unformat_edit = unformat_pg_ip6_header;
   }
+
+  /* Yes we are IP6. */
+  ip6_main.lookup_main.is_ip6 = 1;
 
   /* Set flow hash to something non-zero. */
   ip6_main.flow_hash_seed = 0xdeadbeef;

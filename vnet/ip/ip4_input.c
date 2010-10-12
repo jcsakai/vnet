@@ -61,6 +61,7 @@ ip4_input_inline (vlib_main_t * vm,
 		  int verify_checksum)
 {
   ip4_main_t * im = &ip4_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
   u32 n_left_from, * from, * to_next;
   ip4_input_next_t next_index;
   vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip4_input_node.index);
@@ -123,14 +124,14 @@ ip4_input_inline (vlib_main_t * vm,
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 	  sw_if_index1 = p1->sw_if_index[VLIB_RX];
 
-	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
-	  i1->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
+	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  i1->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
 
-	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);
-	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i1->current_config_index,
 				&next1,
 				/* # bytes of config data */ 0);
@@ -221,8 +222,8 @@ ip4_input_inline (vlib_main_t * vm,
 	  i0 = vlib_get_buffer_opaque (p0);
 
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
-	  i0->current_config_index = vec_elt (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
-	  vnet_get_config_data (&im->config_mains[VLIB_RX],
+	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);

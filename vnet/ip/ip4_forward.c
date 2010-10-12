@@ -262,7 +262,10 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 
   /* Either create new adjacency or use given one depending on arguments. */
   if (a->n_add_adj > 0)
-    ip_add_adjacency (lm, a->add_adj, a->n_add_adj, &adj_index);
+    {
+      ip_add_adjacency (lm, a->add_adj, a->n_add_adj, &adj_index);
+      ip_call_add_del_adjacency_callbacks (lm, adj_index, /* is_del */ 0);
+    }
   else
     adj_index = a->adj_index;
 
@@ -406,6 +409,7 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
 	  adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 				  &nh_adj_index);
 	  ip4_adjacency_set_interface_route (vm, adj, next_hop_sw_if_index);
+	  ip_call_add_del_adjacency_callbacks (lm, nh_adj_index, /* is_del */ 0);
 	  hash_set (im->interface_adj_index_by_sw_if_index, next_hop_sw_if_index, nh_adj_index);
 	}
     }
@@ -909,6 +913,7 @@ ip4_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
       adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			      &a.adj_index);
       ip4_adjacency_set_interface_route (vm, adj, sw_if_index);
+      ip_call_add_del_adjacency_callbacks (lm, a.adj_index, /* is_del */ 0);
       ip4_add_del_route (im, &a);
     }
 
@@ -916,6 +921,7 @@ ip4_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
   adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			  &a.adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
+  ip_call_add_del_adjacency_callbacks (lm, a.adj_index, /* is_del */ 0);
   a.dst_address_length = 32;
   ip4_add_del_route (im, &a);
 }
@@ -1257,7 +1263,8 @@ ip4_sw_interface_add_del (vlib_main_t * vm,
 			  u32 is_add)
 {
   ip4_main_t * im = &ip4_main;
-  vnet_config_main_t * rx_cm = &im->config_mains[VLIB_RX];
+  ip_lookup_main_t * lm = &im->lookup_main;
+  vnet_config_main_t * rx_cm = &lm->config_mains[VLIB_RX];
   u32 ci;
 
   if (! rx_cm->node_index_by_feature_index)
@@ -1268,13 +1275,13 @@ ip4_sw_interface_add_del (vlib_main_t * vm,
 	[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_ANY] = "ip4-source-check-via-any",
 	[IP4_RX_FEATURE_LOOKUP] = "ip4-lookup",
       };
-      vnet_config_init (vm, &im->config_mains[VLIB_RX],
+      vnet_config_init (vm, &lm->config_mains[VLIB_RX],
 			start_nodes, ARRAY_LEN (start_nodes),
 			feature_nodes, ARRAY_LEN (feature_nodes));
     }
 
-  vec_validate_init_empty (im->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
-  ci = im->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
+  vec_validate_init_empty (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
+  ci = lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
 
   if (is_add)
     ci = vnet_config_add_feature (vm, rx_cm,
@@ -1289,7 +1296,7 @@ ip4_sw_interface_add_del (vlib_main_t * vm,
 				  /* config data */ 0,
 				  /* # bytes of config data */ 0);
 
-  im->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
+  lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
 
   return /* no error */ 0;
 }
@@ -2193,8 +2200,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  ip_buffer_opaque_t * i0, * i1;
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
-	  u32 pi0, rw_len0, len0, next0, checksum0, adj_index0;
-	  u32 pi1, rw_len1, len1, next1, checksum1, adj_index1;
+	  u32 pi0, rw_len0, next0, checksum0, adj_index0;
+	  u32 pi1, rw_len1, next1, checksum1, adj_index1;
 	  u8 is_slow_path;
       
 	  /* Prefetch next iteration. */
@@ -2281,14 +2288,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  p0->current_data -= rw_len0;
 	  p1->current_data -= rw_len1;
 
-	  len0 = p0->current_length;
-	  len1 = p1->current_length;
-
-	  len0 += rw_len0;
-	  len1 += rw_len1;
-
-	  p0->current_length = len0;
-	  p1->current_length = len1;
+	  p0->current_length += rw_len0;
+	  p1->current_length += rw_len1;
 
 	  p0->sw_if_index[VLIB_TX] = adj0[0].rewrite_header.sw_if_index;
 	  p1->sw_if_index[VLIB_TX] = adj1[0].rewrite_header.sw_if_index;
@@ -2297,8 +2298,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  next1 = adj1[0].rewrite_header.next_index;
 
 	  /* Check MTU of outgoing interface. */
-	  is_slow_path += ((len0 > adj0[0].rewrite_header.max_packet_bytes)
-			   || (len1 > adj1[0].rewrite_header.max_packet_bytes));
+	  is_slow_path += ((vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes)
+			   || (vlib_buffer_length_in_chain (vm, p1) > adj1[0].rewrite_header.max_packet_bytes));
 
 	  is_slow_path += (next0 != next_index || next1 != next_index);
 
@@ -2329,7 +2330,7 @@ ip4_rewrite (vlib_main_t * vm,
 	  ip_buffer_opaque_t * i0;
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
-	  u32 pi0, rw_len0, len0;
+	  u32 pi0, rw_len0;
 	  u8 is_slow_path;
 	  u32 adj_index0, next0, checksum0;
       
@@ -2374,13 +2375,13 @@ ip4_rewrite (vlib_main_t * vm,
 					   /* byte increment */ rw_len0);
 
 	  p0->current_data -= rw_len0;
-	  len0 = p0->current_length += rw_len0;
+	  p0->current_length += rw_len0;
 	  p0->sw_if_index[VLIB_TX] = adj0[0].rewrite_header.sw_if_index;
       
 	  next0 = adj0[0].rewrite_header.next_index;
 
 	  /* Check MTU of outgoing interface. */
-	  is_slow_path += len0 > adj0[0].rewrite_header.max_packet_bytes;
+	  is_slow_path += vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes;
 
 	  is_slow_path += next0 != next_index;
 

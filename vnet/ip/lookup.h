@@ -26,6 +26,7 @@
 #ifndef included_ip_lookup_h
 #define included_ip_lookup_h
 
+#include <vnet/vnet/config.h>
 #include <vnet/vnet/rewrite.h>
 
 /* Next index stored in adjacency. */
@@ -147,7 +148,11 @@ typedef enum {
   IP_LOCAL_N_NEXT,
 } ip_local_next_t;
 
-typedef struct {
+struct ip_lookup_main_t;
+
+typedef void (* ip_add_del_adjacency_callback_t) (struct ip_lookup_main_t * lm, u32 adj_index, u32 is_del);
+
+typedef struct ip_lookup_main_t {
   /* 1 for ip6; 0 for ip4. */
   u8 is_ip6;
 
@@ -177,6 +182,13 @@ typedef struct {
 
   /* Adjacency index for routing table misses and drops. */
   u32 miss_adj_index, drop_adj_index;
+
+  ip_add_del_adjacency_callback_t * add_del_adjacency_callbacks;
+
+  /* rx/tx interface/feature configuration. */
+  vnet_config_main_t config_mains[VLIB_N_RX_TX];
+
+  u32 * config_index_by_sw_if_index[VLIB_N_RX_TX];
 
   /* Number of bytes in a fib result.  Must be at least
      sizeof (uword).  First word is always adjacency index. */
@@ -209,6 +221,14 @@ do {								\
   ip_adjacency_t * _adj = (lm)->adjacency_heap + (adj_index);	\
   CLIB_PREFETCH (_adj, sizeof (_adj[0]), type);			\
 } while (0)
+
+always_inline void
+ip_call_add_del_adjacency_callbacks (ip_lookup_main_t * lm, u32 adj_index, u32 is_del)
+{
+  uword i;
+  for (i = 0; i < vec_len (lm->add_del_adjacency_callbacks); i++)
+    lm->add_del_adjacency_callbacks[i] (lm, adj_index, is_del);
+}
 
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index);
 

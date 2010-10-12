@@ -124,11 +124,6 @@ typedef struct ip6_main_t {
      ID space is not necessarily dense; index space is dense. */
   uword * fib_index_by_table_id;
 
-  /* rx/tx interface/feature configuration. */
-  vnet_config_main_t config_mains[VLIB_N_RX_TX];
-
-  u32 * config_index_by_sw_if_index[VLIB_N_RX_TX];
-
   /* Vector of functions to call when routes are added/deleted. */
   ip6_add_del_route_callback_t * add_del_route_callbacks;
 
