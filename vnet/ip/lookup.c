@@ -286,6 +286,8 @@ ip_multipath_adjacency_get (ip_lookup_main_t * lm,
   memcpy (lm->next_hop_heap + madj->unnormalized_next_hops.heap_offset,
 	  raw_next_hops, vec_bytes (raw_next_hops));
 
+  ip_call_add_del_adjacency_callbacks (lm, adj_index, /* is_del */ 0);
+
   return adj_heap_handle;
 }
 

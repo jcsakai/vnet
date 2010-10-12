@@ -420,6 +420,7 @@ ip6_add_del_route_next_hop (ip6_main_t * im,
 	  adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 				  &nh_adj_index);
 	  ip6_adjacency_set_interface_route (vm, adj, next_hop_sw_if_index);
+	  ip_call_add_del_adjacency_callbacks (lm, next_hop_sw_if_index, /* is_del */ 0);
 	  hash_set (im->interface_adj_index_by_sw_if_index, next_hop_sw_if_index, nh_adj_index);
 	}
     }
@@ -931,6 +932,7 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
       adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			      &a.adj_index);
       ip6_adjacency_set_interface_route (vm, adj, sw_if_index);
+      ip_call_add_del_adjacency_callbacks (lm, a.adj_index, /* is_del */ 0);
       ip6_add_del_route (im, &a);
     }
 
@@ -938,6 +940,7 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
   adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 			  &a.adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
+  ip_call_add_del_adjacency_callbacks (lm, a.adj_index, /* is_del */ 0);
   a.dst_address_length = 128;
   ip6_add_del_route (im, &a);
 }
