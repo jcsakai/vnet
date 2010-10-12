@@ -1406,8 +1406,8 @@ pg_input_trace (pg_main_t * pg,
       t0->stream_index = stream_index;
       t1->stream_index = stream_index;
 
-      t0->packet_length = vlib_buffer_length_in_chain2 (vm, b0, bi0);
-      t1->packet_length = vlib_buffer_length_in_chain2 (vm, b1, bi1);
+      t0->packet_length = vlib_buffer_length_in_chain (vm, b0);
+      t1->packet_length = vlib_buffer_length_in_chain (vm, b1);
 
       memcpy (&t0->buffer, b0, sizeof (b0[0]) - sizeof (b0->pre_data));
       memcpy (&t1->buffer, b1, sizeof (b1[0]) - sizeof (b1->pre_data));
@@ -1432,7 +1432,7 @@ pg_input_trace (pg_main_t * pg,
       t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
 
       t0->stream_index = stream_index;
-      t0->packet_length = vlib_buffer_length_in_chain2 (vm, b0, bi0);
+      t0->packet_length = vlib_buffer_length_in_chain (vm, b0);
       memcpy (&t0->buffer, b0, sizeof (b0[0]) - sizeof (b0->pre_data));
       memcpy (t0->buffer.pre_data, b0->data, sizeof (t0->buffer.pre_data));
     }

@@ -769,9 +769,9 @@ ip6_lookup (vlib_main_t * vm,
 	  i1->dst_adj_index = adj_index1;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
-					   vlib_buffer_length_in_chain2 (vm, p0, pi0));
+					   vlib_buffer_length_in_chain (vm, p0));
 	  vlib_increment_combined_counter (cm, adj_index1, 1,
-					   vlib_buffer_length_in_chain2 (vm, p1, pi1));
+					   vlib_buffer_length_in_chain (vm, p1));
 
 	  from += 2;
 	  to_next += 2;
@@ -848,7 +848,7 @@ ip6_lookup (vlib_main_t * vm,
 	  i0->dst_adj_index = adj_index0;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
-					   vlib_buffer_length_in_chain2 (vm, p0, pi0));
+					   vlib_buffer_length_in_chain (vm, p0));
 
 	  from += 1;
 	  to_next += 1;

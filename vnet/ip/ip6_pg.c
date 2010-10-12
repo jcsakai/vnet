@@ -52,8 +52,8 @@ ip6_pg_edit_function (pg_main_t * pg,
       ip0 = (void *) (p0->data + ip_header_offset);
       ip1 = (void *) (p1->data + ip_header_offset);
 
-      ip0->payload_length = clib_host_to_net_u16 (vlib_buffer_length_in_chain2 (vm, p0, pi0) - ip_header_offset - sizeof (ip0[0]));
-      ip1->payload_length = clib_host_to_net_u16 (vlib_buffer_length_in_chain2 (vm, p1, pi1) - ip_header_offset - sizeof (ip1[0]));
+      ip0->payload_length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, p0) - ip_header_offset - sizeof (ip0[0]));
+      ip1->payload_length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, p1) - ip_header_offset - sizeof (ip1[0]));
     }
 
   while (n_packets >= 1)
@@ -69,7 +69,7 @@ ip6_pg_edit_function (pg_main_t * pg,
 
       ip0 = (void *) (p0->data + ip_header_offset);
 
-      ip0->payload_length = clib_host_to_net_u16 (vlib_buffer_length_in_chain2 (vm, p0, pi0) - ip_header_offset - sizeof (ip0[0]));
+      ip0->payload_length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, p0) - ip_header_offset - sizeof (ip0[0]));
     }
 }
 

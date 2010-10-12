@@ -173,8 +173,8 @@ ip4_input_inline (vlib_main_t * vm,
 	  error0 = ip_len0 < sizeof (ip0[0]) ? IP4_ERROR_TOO_SHORT : error0;
 	  error1 = ip_len1 < sizeof (ip1[0]) ? IP4_ERROR_TOO_SHORT : error1;
 
-	  cur_len0 = vlib_buffer_length_in_chain2 (vm, p0, pi0);
-	  cur_len1 = vlib_buffer_length_in_chain2 (vm, p1, pi1);
+	  cur_len0 = vlib_buffer_length_in_chain (vm, p0);
+	  cur_len1 = vlib_buffer_length_in_chain (vm, p1);
 
 	  len_diff0 = cur_len0 - ip_len0;
 	  len_diff1 = cur_len1 - ip_len1;
@@ -256,7 +256,7 @@ ip4_input_inline (vlib_main_t * vm,
 	  /* IP length must be at least minimal IP header. */
 	  error0 = ip_len0 < sizeof (ip0[0]) ? IP4_ERROR_TOO_SHORT : error0;
 
-	  cur_len0 = vlib_buffer_length_in_chain2 (vm, p0, pi0);
+	  cur_len0 = vlib_buffer_length_in_chain (vm, p0);
 	  len_diff0 = cur_len0 - ip_len0;
 	  error0 = len_diff0 < 0 ? IP4_ERROR_BAD_LENGTH : error0;
 

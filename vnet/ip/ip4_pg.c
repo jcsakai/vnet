@@ -57,8 +57,8 @@ compute_length_and_or_checksum (vlib_main_t * vm,
 
       if (flags & IP4_PG_EDIT_LENGTH)
 	{
-	  ip0->length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, pi0) - ip_header_offset);
-	  ip1->length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, pi1) - ip_header_offset);
+	  ip0->length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, p0) - ip_header_offset);
+	  ip1->length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, p1) - ip_header_offset);
 	}
 
       if (flags & IP4_PG_EDIT_CHECKSUM)
@@ -93,7 +93,7 @@ compute_length_and_or_checksum (vlib_main_t * vm,
       ip0 = (void *) (p0->data + ip_header_offset);
 
       if (flags & IP4_PG_EDIT_LENGTH)
-	ip0->length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, pi0) - ip_header_offset);
+	ip0->length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, p0) - ip_header_offset);
 
       if (flags & IP4_PG_EDIT_CHECKSUM)
 	{
