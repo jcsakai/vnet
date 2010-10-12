@@ -165,6 +165,7 @@ void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
   rw->sw_if_index = sw_if_index;
   rw->node_index = node_index;
   rw->next_index = vlib_node_add_next (vm, node_index, hw->output_node_index);
+  rw->max_packet_bytes = hw->max_packet_bytes[VLIB_TX];
 
   if (max_rewrite_bytes)
     {
