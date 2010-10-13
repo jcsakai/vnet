@@ -72,8 +72,13 @@ ip_add_adjacency (ip_lookup_main_t * lm,
 
 static void ip_del_adjacency2 (ip_lookup_main_t * lm, u32 adj_index, u32 delete_multipath_adjacency)
 {
-  ip_adjacency_t * adj = ip_get_adjacency (lm, adj_index);
-  uword handle = adj->heap_handle;
+  ip_adjacency_t * adj;
+  uword handle;
+
+  ip_call_add_del_adjacency_callbacks (lm, adj_index, /* is_del */ 1);
+
+  adj = ip_get_adjacency (lm, adj_index);
+  handle = adj->heap_handle;
 
   if (delete_multipath_adjacency)
     ip_multipath_del_adjacency (lm, adj_index);
@@ -1410,7 +1415,7 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 		  if (j == 0)
 		    msg = format (msg, "%-20U",
 				  format_ip6_address_and_length,
-				  r->address.data, r->address_length);
+				  r->address.as_u8, r->address_length);
 		  else
 		    msg = format (msg, "%U", format_white_space, 20);
 
