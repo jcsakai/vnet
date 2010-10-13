@@ -244,3 +244,62 @@ ethernet_interface_link_up_down (vlib_main_t * vm,
   return 0;
 }
 
+#if DEBUG > 0
+static uword
+simulated_ethernet_interface_tx (vlib_main_t * vm,
+				 vlib_node_runtime_t * node,
+				 vlib_frame_t * frame)
+{
+  u32 n_left_from, * from;
+
+  n_left_from = frame->n_vectors;
+  from = vlib_frame_args (frame);
+  vlib_buffer_free (vm, from, /* stride */ 1, n_left_from, /* follow_buffer_next */ 0);
+  return n_left_from;
+}
+
+static u8 * format_simulated_ethernet_name (u8 * s, va_list * args)
+{
+  u32 dev_instance = va_arg (*args, u32);
+  return format (s, "fake-eth%d", dev_instance);
+}
+
+static VLIB_DEVICE_CLASS (ethernet_simulated_device_class) = {
+  .name = "Simulated ethernet",
+  .format_device_name = format_simulated_ethernet_name,
+  .tx_function = simulated_ethernet_interface_tx,
+};
+
+static clib_error_t *
+create_simulated_ethernet_interfaces (vlib_main_t * vm,
+				      unformat_input_t * input,
+				      vlib_cli_command_t * cmd)
+{
+  clib_error_t * error;
+  static u32 instance;
+  u8 address[6];
+  u32 hw_if_index;
+
+  memset (address, 0, sizeof (address));
+  address[0] = 0xde;
+  address[1] = 0xad;
+  address[5] = instance;
+
+  error = ethernet_register_interface
+    (vm,
+     ethernet_simulated_device_class.index,
+     instance++,
+     address,
+     /* phy */ 0,
+     &hw_if_index);
+
+  return error;
+}
+
+static VLIB_CLI_COMMAND (create_simulated_ethernet_interface_command) = {
+  .name = "create-ethernet",
+  .short_help = "Create simulated ethernet interface",
+  .parent = &vlib_cli_interface_command,
+  .function = create_simulated_ethernet_interfaces,
+};
+#endif
