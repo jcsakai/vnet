@@ -37,9 +37,11 @@ typedef union {
 /* Special addresses:
    unspecified		::/128
    loopback		::1/128
-   multicast		ff00::/8
+   global unicast       2000::/3
+   unique local unicast fc00::/7
    link local unicast	fe80::/10
-   global unicast	everything else. */
+   multicast		ff00::/8
+   ietf reserved	everything else. */
    
 #define foreach_ip6_multicast_address_scope	\
   _ (loopback, 0x1)				\
