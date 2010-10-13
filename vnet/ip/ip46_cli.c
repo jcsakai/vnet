@@ -31,9 +31,9 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2)
 int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2)
 {
   int i;
-  for (i = 0; i < ARRAY_LEN (a1->data_u32); i++)
+  for (i = 0; i < ARRAY_LEN (a1->as_uword); i++)
     {
-      int cmp = clib_net_to_host_u32 (a1->data_u32[i]) - clib_net_to_host_u32 (a2->data_u32[i]);
+      int cmp = clib_net_to_host_u32 (a1->as_uword[i]) - clib_net_to_host_u32 (a2->as_uword[i]);
       if (cmp != 0)
 	return cmp;
     }
