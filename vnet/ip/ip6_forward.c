@@ -1352,16 +1352,6 @@ static VLIB_REGISTER_NODE (ip6_lookup_node) = {
 /* Global IP6 main. */
 ip6_main_t ip6_main;
 
-typedef PACKED (struct {
-  ethernet_header_t ethernet;
-  ip6_header_t ip;
-  icmp46_header_t icmp;
-  u32 reserved_must_be_zero;
-  ip6_address_t target_address;
-  icmp6_option_header_t option_header;
-  ip6_address_t src_link_layer_address;
-}) ip6_neighbor_solicitation_packet_t;
-
 static clib_error_t *
 ip6_lookup_init (vlib_main_t * vm)
 {
@@ -1388,32 +1378,29 @@ ip6_lookup_init (vlib_main_t * vm)
   ip_lookup_init (&im->lookup_main, ip6_lookup_node.index);
 
   {
-    ip6_neighbor_solicitation_packet_t p;
+    ip6_icmp_neighbor_header_t p;
 
     memset (&p, 0, sizeof (p));
 
-    /* Send to broadcast address ffff.ffff.ffff */
-    memset (p.ethernet.dst_address, ~0, sizeof (p.ethernet.dst_address));
+    /* Send to broadcast address 0x3333.ffXX.XXXX.  XX will be filled in later. */
+    ip6_multicast_ethernet_address (p.ethernet.dst_address, 0xff000000);
     p.ethernet.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
 
     p.ip.ip_version_traffic_class_and_flow_label = clib_host_to_net_u32 (0x6 << 28);
-    p.ip.payload_length = clib_host_to_net_u16 (sizeof (p) - STRUCT_OFFSET_OF (ip6_neighbor_solicitation_packet_t, icmp));
+    p.ip.payload_length = clib_host_to_net_u16 (sizeof (p) - STRUCT_OFFSET_OF (ip6_icmp_neighbor_header_t, icmp));
     p.ip.protocol = IP_PROTOCOL_ICMP6;
     p.ip.ttl = 255;
-    ip6_set_reserved_multicast_address
-      (&p.ip.dst_address,
-       IP6_MULTICAST_SCOPE_link_local,
-       IP6_MULTICAST_GROUP_ID_all_hosts);
+    ip6_set_solicited_node_multicast_address (&p.ip.dst_address, 0);
 
     p.icmp.type = ICMP6_neighbor_solicitation;
 
     p.option_header.type = ICMP6_NEIGHBOR_DISCOVERY_OPTION_source_link_layer_address;
-    p.option_header.n_data_bytes = sizeof (p.src_link_layer_address);
+    p.option_header.n_data_bytes = sizeof (p.option_header) + sizeof (p.src_ethernet_address);
 
     {
       ip_csum_t sum = ip_incremental_checksum (0, &p.icmp,
 					       sizeof (p)
-					       - STRUCT_OFFSET_OF (ip6_neighbor_solicitation_packet_t, icmp));
+					       - STRUCT_OFFSET_OF (ip6_icmp_neighbor_header_t, icmp));
       p.icmp.checksum = ~ ip_csum_fold (sum);
     }
 
@@ -2118,7 +2105,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
 	  {
 	    u32 bi0;
-	    ip6_neighbor_solicitation_packet_t * h0;
+	    ip6_icmp_neighbor_header_t * h0;
 	    vlib_sw_interface_t * swif0;
 	    ethernet_interface_t * eif0;
 	    u8 * eth_addr0, dummy[6] = { 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, };
@@ -2126,25 +2113,37 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
 	    h0 = vlib_packet_template_get_packet (vm, &im->ip6_discover_neighbor_packet_template, &bi0);
 
+	    /* Build ethernet header. */
 	    swif0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
 	    ASSERT (swif0->type == VLIB_SW_INTERFACE_TYPE_HARDWARE);
 	    eif0 = ethernet_get_interface (&ethernet_main, swif0->hw_if_index);
 	    eth_addr0 = eif0 ? eif0->address : dummy;
 	    memcpy (h0->ethernet.src_address, eth_addr0, sizeof (h0->ethernet.src_address));
 
+	    /* Destination ethernet address is ipv6 multicast 0x3333.ffXX.XXXX where lower
+	       24 bits are from target. */
+	    h0->ethernet.dst_address[3] = ip0->dst_address.as_u8[13];
+	    h0->ethernet.dst_address[4] = ip0->dst_address.as_u8[14];
+	    h0->ethernet.dst_address[5] = ip0->dst_address.as_u8[15];
+
+	    /* Source address is our link local v6 address. */
 	    ip6_link_local_address_from_ethernet_address (&h0->ip.src_address, eth_addr0);
 
-	    h0->src_link_layer_address = h0->ip.src_address;
+	    /* Destination address is a solicited node multicast address.  We need to fill in
+	       the low 24 bits with low 24 bits of target's address. */
+	    h0->ip.dst_address.as_u8[13] = ip0->dst_address.as_u8[13];
+	    h0->ip.dst_address.as_u8[14] = ip0->dst_address.as_u8[14];
+	    h0->ip.dst_address.as_u8[15] = ip0->dst_address.as_u8[15];
+
 	    h0->target_address = ip0->dst_address;
 
+	    /* Update icmp checksum. */
 	    {
 	      int i;
 	      sum0 = h0->icmp.checksum;
 	      for (i = 0; i < ARRAY_LEN (h0->ip.src_address.as_uword); i++)
-		{
-		  sum0 = ip_csum_with_carry (sum0, h0->src_link_layer_address.as_uword[i]);
-		  sum0 = ip_csum_with_carry (sum0, h0->target_address.as_uword[i]);
-		}
+		sum0 = ip_csum_with_carry (sum0, h0->target_address.as_uword[i]);
+	      sum0 = ip_incremental_checksum (sum0, h0->src_ethernet_address, sizeof (h0->src_ethernet_address));
 
 	      h0->icmp.checksum = ~ip_csum_fold (sum0);
 	    }

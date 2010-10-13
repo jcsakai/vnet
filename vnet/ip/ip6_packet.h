@@ -79,6 +79,18 @@ ip6_set_reserved_multicast_address (ip6_address_t * a,
 }
 
 always_inline void
+ip6_set_solicited_node_multicast_address (ip6_address_t * a, u32 id)
+{
+  /* 0xff02::1:ffXX:XXXX. */
+  a->as_u64[0] = a->as_u64[1] = 0;
+  a->as_u16[0] = clib_host_to_net_u16 (0xff02);
+  a->as_u8[11] = 1;
+  ASSERT ((id >> 24) == 0);
+  id |= 0xff << 24;
+  a->as_u32[3] = clib_host_to_net_u32 (id);
+}
+
+always_inline void
 ip6_link_local_address_from_ethernet_address (ip6_address_t * a, u8 * ethernet_address)
 {
   a->as_u64[0] = a->as_u64[1] = 0;
@@ -92,6 +104,17 @@ ip6_link_local_address_from_ethernet_address (ip6_address_t * a, u8 * ethernet_a
   a->as_u8[0xd] = ethernet_address[3];
   a->as_u8[0xe] = ethernet_address[4];
   a->as_u8[0xf] = ethernet_address[5];
+}
+
+always_inline void
+ip6_multicast_ethernet_address (u8 * ethernet_address, u32 group_id)
+{
+  ethernet_address[0] = 0x33;
+  ethernet_address[1] = 0x33;
+  ethernet_address[2] = ((group_id >> 24) & 0xff);
+  ethernet_address[3] = ((group_id >> 16) & 0xff);
+  ethernet_address[4] = ((group_id >>  8) & 0xff);
+  ethernet_address[5] = ((group_id >>  0) & 0xff);
 }
 
 always_inline void

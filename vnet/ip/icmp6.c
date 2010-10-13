@@ -101,6 +101,7 @@ static u8 * format_icmp_input_trace (u8 * s, va_list * va)
 typedef enum {
   ICMP_ERROR_UNKNOWN_TYPE,
   ICMP_ERROR_ECHO_REPLIES_SENT,
+  ICMP_ERROR_NEIGHBOR_ADVERTISEMENTS_SENT,
 } icmp_error_t;
 
 typedef enum {
@@ -191,6 +192,7 @@ ip6_icmp_input (vlib_main_t * vm,
 static char * icmp_error_strings[] = {
   [ICMP_ERROR_UNKNOWN_TYPE] = "unknown type",
   [ICMP_ERROR_ECHO_REPLIES_SENT] = "echo replies sent",
+  [ICMP_ERROR_NEIGHBOR_ADVERTISEMENTS_SENT] = "neighbor advertisements sent",
 };
 
 static VLIB_REGISTER_NODE (ip6_icmp_input_node) = {
@@ -219,7 +221,6 @@ ip6_icmp_echo_request (vlib_main_t * vm,
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
   ip6_main_t * i4m = &ip6_main;
-  u16 * fragment_ids, * fid;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
@@ -229,10 +230,6 @@ ip6_icmp_echo_request (vlib_main_t * vm,
     vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
 				   /* stride */ 1,
 				   sizeof (icmp_input_trace_t));
-
-  /* Get random fragment IDs for replies. */
-  fid = fragment_ids = clib_random_buffer_get_data (&vm->random_buffer,
-						    n_packets * sizeof (fragment_ids[0]));
 
   while (n_left_from > 0)
     {
@@ -321,6 +318,73 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 static VLIB_REGISTER_NODE (ip6_icmp_echo_request_node) = {
   .function = ip6_icmp_echo_request,
   .name = "ip6-icmp-echo-request",
+
+  .vector_size = sizeof (u32),
+
+  .format_trace = format_icmp_input_trace,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+  },
+};
+
+static uword
+ip6_icmp_neighbor_solicitation (vlib_main_t * vm,
+				vlib_node_runtime_t * node,
+				vlib_frame_t * frame)
+{
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
+				   /* stride */ 1,
+				   sizeof (icmp_input_trace_t));
+
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip6_header_t * ip0;
+	  icmp46_header_t * icmp0;
+	  u32 bi0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  ip0 = vlib_buffer_get_current (p0);
+	  icmp0 = ip6_next_header (ip0);
+
+	  ASSERT (0);
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  vlib_error_count (vm, ip6_icmp_input_node.index,
+		    ICMP_ERROR_ECHO_REPLIES_SENT,
+		    frame->n_vectors);
+
+  return frame->n_vectors;
+}
+
+static VLIB_REGISTER_NODE (ip6_icmp_neighbor_solicitation_node) = {
+  .function = ip6_icmp_neighbor_solicitation,
+  .name = "ip6-icmp-neighbor-solicitation",
 
   .vector_size = sizeof (u32),
 
@@ -448,6 +512,7 @@ icmp6_init (vlib_main_t * vm)
 	  sizeof (cm->ip6_input_next_index_by_type));
 
   ip6_icmp_register_type (vm, ICMP6_echo_request, ip6_icmp_echo_request_node.index);
+  ip6_icmp_register_type (vm, ICMP6_neighbor_solicitation, ip6_icmp_neighbor_solicitation_node.index);
 
   return 0;
 }
