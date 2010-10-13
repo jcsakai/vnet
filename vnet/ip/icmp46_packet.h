@@ -200,4 +200,24 @@ typedef PACKED (struct {
   u8 data[0];
 }) icmp6_option_header_t;
 
+#include <vnet/ethernet/packet.h>
+#include <vnet/ip/ip6_packet.h>
+
+typedef PACKED (struct {
+  ethernet_header_t ethernet;
+
+  ip6_header_t ip;
+
+  icmp46_header_t icmp;
+
+  /* Must be zero for solicitations; flags for advertisements. */
+  u32 flags;
+
+  ip6_address_t target_address;
+
+  icmp6_option_header_t option_header;
+
+  u8 src_ethernet_address[6];
+}) ip6_icmp_neighbor_header_t;
+
 #endif /* included_vnet_icmp_h */
