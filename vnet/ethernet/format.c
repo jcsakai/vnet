@@ -97,7 +97,7 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
 	s = format (s, " cfi");
     }
 
-  if (max_header_bytes != 0 && header_bytes > max_header_bytes)
+  if (max_header_bytes != 0 && header_bytes < max_header_bytes)
     {
       ethernet_type_info_t * ti = ethernet_get_type_info (em, type);
       vlib_node_t * node = vlib_get_node (em->vlib_main, ti->node_index);
