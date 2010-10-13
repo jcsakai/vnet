@@ -12,6 +12,6 @@ packet-generator new {
 }
 
 tr add pg-input 100
-set int state pg/stream-0 up
-set int ip address pg/stream-0 ab::/64
-ip route ab::1/128 via arp pg/stream-0
+int create-ethernet
+set int state fake-eth0 up
+set int ip address fake-eth0 ab::/64
