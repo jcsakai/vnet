@@ -183,15 +183,15 @@ typedef PACKED (struct {
   _ (138, card_request)				\
   _ (139, card_reply)
 
-typedef enum icmp6_neighbor_discover_option_type {
-#define _(n,f) ICMP6_NEIGHBOR_DISCOVER_OPTION_##f = n,
+typedef enum icmp6_neighbor_discovery_option_type {
+#define _(n,f) ICMP6_NEIGHBOR_DISCOVERY_OPTION_##f = n,
   foreach_icmp6_neighbor_discovery_option
 #undef _
-} icmp6_neighbor_discover_option_type_t;
+} icmp6_neighbor_discovery_option_type_t;
 
 typedef PACKED (struct {
   /* Option type. */
-  enum icmp6_neighbor_discover_option_type type : 8;
+  u8 type;
 
   /* Number of option data bytes that follow. */
   u8 n_data_bytes;
