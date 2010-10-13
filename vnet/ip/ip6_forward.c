@@ -42,7 +42,7 @@ ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
     {
       ip6_address_t * mask = &im->fib_masks[fm->dst_address_length];
       for (i = 0; i < ARRAY_LEN (mask->as_uword); i++)
-	masked_dst.as_uword[i] = clib_mem_unaligned (&dst->as_uword[i], u32) & mask->as_uword[i];
+	masked_dst.as_uword[i] = clib_mem_unaligned (&dst->as_uword[i], uword) & mask->as_uword[i];
 
       p = mhash_get (&fm->adj_index_by_dst_address, &masked_dst);
       if (p)
@@ -106,7 +106,7 @@ ip6_fib_init_address_length (ip_lookup_main_t * lm, ip6_fib_t * fib, u32 address
   /* Sort so that longest prefix lengths are first. */
   vec_sort (fib->non_empty_dst_address_length_mhash,
 	    m1, m2,
-	    (int) m1->dst_address_length - (int) m2->dst_address_length);
+	    (int) m2->dst_address_length - (int) m1->dst_address_length);
 
   /* Rebuild index. */
   memset (fib->mhash_index_by_dst_address_length, ~0, sizeof (fib->mhash_index_by_dst_address_length));
