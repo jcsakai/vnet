@@ -150,7 +150,10 @@ typedef enum {
 
 struct ip_lookup_main_t;
 
-typedef void (* ip_add_del_adjacency_callback_t) (struct ip_lookup_main_t * lm, u32 adj_index, u32 is_del);
+typedef void (* ip_add_del_adjacency_callback_t) (struct ip_lookup_main_t * lm,
+						  u32 adj_index,
+						  ip_adjacency_t * adj,
+						  u32 is_del);
 
 typedef struct ip_lookup_main_t {
   /* 1 for ip6; 0 for ip4. */
@@ -225,9 +228,11 @@ do {								\
 always_inline void
 ip_call_add_del_adjacency_callbacks (ip_lookup_main_t * lm, u32 adj_index, u32 is_del)
 {
+  ip_adjacency_t * adj;
   uword i;
+  adj = ip_get_adjacency (lm, adj_index);
   for (i = 0; i < vec_len (lm->add_del_adjacency_callbacks); i++)
-    lm->add_del_adjacency_callbacks[i] (lm, adj_index, is_del);
+    lm->add_del_adjacency_callbacks[i] (lm, adj_index, adj, is_del);
 }
 
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index);
