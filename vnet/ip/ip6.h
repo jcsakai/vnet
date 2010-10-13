@@ -139,7 +139,7 @@ typedef struct ip6_main_t {
   ip6_set_interface_address_callback_t * set_interface_address_callbacks;
 
   /* Template used to generate IP6 neighbor solicitation packets. */
-  vlib_packet_template_t ip6_neighbor_solicitation_packet_template;
+  vlib_packet_template_t ip6_discover_neighbor_packet_template;
 
   /* Seed for Jenkins hash used to compute ip6 flow hash. */
   u32 flow_hash_seed;
@@ -158,7 +158,7 @@ extern ip6_main_t ip6_main;
 /* Global ip6 input node.  Errors get attached to ip6 input node. */
 extern vlib_node_registration_t ip6_input_node;
 extern vlib_node_registration_t ip6_rewrite_node;
-extern vlib_node_registration_t ip6_arp_node;
+extern vlib_node_registration_t ip6_discover_neighbor_node;
 
 always_inline ip6_address_t *
 ip6_get_interface_address (ip6_main_t * im, u32 sw_if_index)
@@ -172,8 +172,8 @@ always_inline uword
 ip6_interface_address_is_valid (ip6_address_t * a)
 {
   int i;
-  for (i = 0; i < ARRAY_LEN (a->data_u32); i++)
-    if (a->data_u32[i] != ~0)
+  for (i = 0; i < ARRAY_LEN (a->as_uword); i++)
+    if (a->as_uword[i] != ~0)
       return 1;
   return 0;
 }
@@ -182,8 +182,8 @@ always_inline void
 ip6_interface_address_set_invalid (ip6_address_t * a)
 {
   int i;
-  for (i = 0; i < ARRAY_LEN (a->data_u32); i++)
-    a->data_u32[i] = ~0;
+  for (i = 0; i < ARRAY_LEN (a->as_uword); i++)
+    a->as_uword[i] = ~0;
 }
 
 always_inline uword
@@ -193,9 +193,9 @@ ip6_destination_matches_route (ip6_main_t * im,
 			       uword dest_length)
 {
   int i;
-  for (i = 0; i < ARRAY_LEN (key->data_u32); i++)
+  for (i = 0; i < ARRAY_LEN (key->as_uword); i++)
     {
-      if ((key->data_u32[i] ^ dest->data_u32[i]) & im->fib_masks[dest_length].data_u32[i])
+      if ((key->as_uword[i] ^ dest->as_uword[i]) & im->fib_masks[dest_length].as_uword[i])
 	return 0;
     }
   return 1;
@@ -209,9 +209,9 @@ ip6_unaligned_destination_matches_route (ip6_main_t * im,
 					 uword dest_length)
 {
   int i;
-  for (i = 0; i < ARRAY_LEN (key->data_u32); i++)
+  for (i = 0; i < ARRAY_LEN (key->as_uword); i++)
     {
-      if ((clib_mem_unaligned (&key->data_u32[i], u32) ^ dest->data_u32[i]) & im->fib_masks[dest_length].data_u32[i])
+      if ((clib_mem_unaligned (&key->as_uword[i], uword) ^ dest->as_uword[i]) & im->fib_masks[dest_length].as_uword[i])
 	return 0;
     }
   return 1;
