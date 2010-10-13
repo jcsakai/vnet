@@ -41,6 +41,22 @@ typedef struct {
   u16 type;
 } ethernet_header_t;
 
+#define ETHERNET_ADDRESS_UNICAST 0
+#define ETHERNET_ADDRESS_MULTICAST 1
+
+/* I/G bit: individual (unicast)/group (broadcast/multicast). */
+always_inline uword
+ethernet_address_cast (u8 * a)
+{ return (a[0] >> 7) & 1; }
+
+always_inline uword
+ethernet_address_is_locally_administered (u8 * a)
+{ return (a[0] >> 6) & 1; }
+
+always_inline void
+ethernet_address_set_locally_administered (u8 * a)
+{ a[0] |= 1 << 6; }
+
 /* For VLAN ethernet type. */
 typedef struct {
   /* 3 bit priority, 1 bit CFI and 12 bit vlan id. */
