@@ -642,7 +642,7 @@ void ip4_delete_matching_routes (ip4_main_t * im,
   a.add_adj = 0;
   a.n_add_adj = 0;
 
-  for (l = address_length + 1; l <= 32; )
+  for (l = address_length + 1; l <= 32; l++)
     {
       ip4_foreach_matching_route (im, table_index_or_table_id, flags,
 				  address,
@@ -1347,20 +1347,18 @@ ip4_lookup_init (vlib_main_t * vm)
   ip_lookup_init (&im->lookup_main, ip4_lookup_node.index);
 
   {
-    ethernet_and_arp_header_t h[2];
+    ethernet_and_arp_header_t h;
 
     memset (&h, 0, sizeof (h));
 
     /* Send to broadcast address ffff.ffff.ffff */
-    memset (h[0].ethernet.dst_address, ~0, sizeof (h[0].ethernet.dst_address));
-    memset (h[1].ethernet.dst_address, ~0, sizeof (h[1].ethernet.dst_address));
+    memset (h.ethernet.dst_address, ~0, sizeof (h.ethernet.dst_address));
 
     /* Set target ethernet address to all zeros. */
-    memset (h[0].arp.ip4_over_ethernet[1].ethernet, 0, sizeof (h[0].arp.ip4_over_ethernet[1].ethernet));
-    memset (h[1].arp.ip4_over_ethernet[1].ethernet, ~0, sizeof (h[1].arp.ip4_over_ethernet[1].ethernet));
+    memset (h.arp.ip4_over_ethernet[1].ethernet, 0, sizeof (h.arp.ip4_over_ethernet[1].ethernet));
 
-#define _16(f,v) h[0].f = clib_host_to_net_u16 (v); h[1].f = ~0
-#define _8(f,v) h[0].f = v; h[1].f = ~0
+#define _16(f,v) h.f = clib_host_to_net_u16 (v);
+#define _8(f,v) h.f = v;
     _16 (ethernet.type, ETHERNET_TYPE_ARP);
     _16 (arp.l2_type, ETHERNET_ARP_HARDWARE_TYPE_ethernet);
     _16 (arp.l3_type, ETHERNET_TYPE_IP4);
@@ -1372,9 +1370,8 @@ ip4_lookup_init (vlib_main_t * vm)
 
     vlib_packet_template_init (vm,
 			       &im->ip4_arp_request_packet_template,
-			       /* data */ &h[0],
-			       /* mask */ &h[1],
-			       sizeof (h[0]),
+			       /* data */ &h,
+			       sizeof (h),
 			       /* alloc chunk size */ 8);
   }
 
@@ -2130,55 +2127,6 @@ typedef enum {
 } ip4_rewrite_next_t;
 
 static uword
-ip4_rewrite_slow_path (vlib_main_t * vm,
-		       vlib_node_runtime_t * node,
-		       u32 buffer_index,
-		       u32 adj_index)
-{
-  ip_adjacency_t * adj0;
-  ip_lookup_main_t * lm = &ip4_main.lookup_main;
-  vlib_buffer_t * p0;
-  ip4_header_t * ip0;
-  u32 pi0, next0, rw_len0, error_code0, adj_index0;
-
-  adj_index0 = adj_index;
-  adj0 = ip_get_adjacency (lm, adj_index0);
-      
-  pi0 = buffer_index;
-  p0 = vlib_get_buffer (vm, pi0);
-
-  rw_len0 = adj0[0].rewrite_header.data_bytes;
-
-  ip0 = vlib_buffer_get_current (p0) + rw_len0;
-  next0 = adj0[0].rewrite_header.next_index;
-  error_code0 = IP4_ERROR_NONE;
-  
-  if (ip0->ttl == 0 || ip0->ttl == 255)
-    {
-      error_code0 = IP4_ERROR_TIME_EXPIRED;
-
-      /* FIXME send an ICMP. */
-    }
-
-  else if (p0->current_length > adj0[0].rewrite_header.max_packet_bytes)
-    {
-      /* MTU check failed. */
-      error_code0 = IP4_ERROR_MTU_EXCEEDED;
-
-      /* FIXME fragment packet. */
-    }
-
-  next0 = error_code0 != IP4_ERROR_NONE ? IP4_REWRITE_NEXT_DROP : next0;
-
-  p0->error = vlib_error_set (ip4_input_node.index, error_code0);
-
-  /* Now put the packet on the appropriate next frame. */
-  vlib_set_next_frame_buffer (vm, node, next0, pi0);
-
-  return 0;
-}
-
-static uword
 ip4_rewrite (vlib_main_t * vm,
 	     vlib_node_runtime_t * node,
 	     vlib_frame_t * frame)
@@ -2186,6 +2134,7 @@ ip4_rewrite (vlib_main_t * vm,
   ip_lookup_main_t * lm = &ip4_main.lookup_main;
   u32 * from = vlib_frame_vector_args (frame);
   u32 n_left_from, n_left_to_next, * to_next, next_index;
+  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip4_input_node.index);
 
   n_left_from = frame->n_vectors;
   next_index = node->cached_next_index;
@@ -2200,9 +2149,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  ip_buffer_opaque_t * i0, * i1;
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
-	  u32 pi0, rw_len0, next0, checksum0, adj_index0;
-	  u32 pi1, rw_len1, next1, checksum1, adj_index1;
-	  u8 is_slow_path;
+	  u32 pi0, rw_len0, next0, error0, checksum0, adj_index0;
+	  u32 pi1, rw_len1, next1, error1, checksum1, adj_index1;
       
 	  /* Prefetch next iteration. */
 	  {
@@ -2241,6 +2189,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
+	  error0 = error1 = IP4_ERROR_NONE;
+
 	  /* Decrement TTL & update checksum.
 	     Works either endian, so no need for byte swap. */
 	  {
@@ -2262,7 +2212,8 @@ ip4_rewrite (vlib_main_t * vm,
 	    ip0->ttl = ttl0;
 	    ip1->ttl = ttl1;
 
-	    is_slow_path = ttl0 <= 0 || ttl1 <= 0;
+	    error0 = ttl0 <= 0 ? IP4_ERROR_TIME_EXPIRED : error0;
+	    error1 = ttl1 <= 0 ? IP4_ERROR_TIME_EXPIRED : error1;
 
 	    /* Verify checksum. */
 	    ASSERT (ip0->checksum == ip4_header_checksum (ip0));
@@ -2298,30 +2249,24 @@ ip4_rewrite (vlib_main_t * vm,
 	  next1 = adj1[0].rewrite_header.next_index;
 
 	  /* Check MTU of outgoing interface. */
-	  is_slow_path += ((vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes)
-			   || (vlib_buffer_length_in_chain (vm, p1) > adj1[0].rewrite_header.max_packet_bytes));
+	  error0 = (vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes
+		    ? IP4_ERROR_MTU_EXCEEDED
+		    : error0);
+	  error1 = (vlib_buffer_length_in_chain (vm, p1) > adj1[0].rewrite_header.max_packet_bytes
+		    ? IP4_ERROR_MTU_EXCEEDED
+		    : error1);
 
-	  is_slow_path += (next0 != next_index || next1 != next_index);
+	  p0->error = error_node->errors[error0];
+	  p1->error = error_node->errors[error1];
 
 	  /* Guess we are only writing on simple Ethernet header. */
 	  vnet_rewrite_two_headers (adj0[0], adj1[0],
 				    ip0, ip1,
 				    sizeof (ethernet_header_t));
       
-	  if (PREDICT_FALSE (is_slow_path))
-	    {
-	      to_next -= 2;
-	      n_left_to_next += 2;
-
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-
-	      ip4_rewrite_slow_path (vm, node, from[-2], adj_index0);
-	      ip4_rewrite_slow_path (vm, node, from[-1], adj_index1);
-
-	      next_index = next0 == next1 ? next1 : next_index;
-
-	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-	    }
+	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, pi1, next0, next1);
 	}
 
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -2330,9 +2275,7 @@ ip4_rewrite (vlib_main_t * vm,
 	  ip_buffer_opaque_t * i0;
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
-	  u32 pi0, rw_len0;
-	  u8 is_slow_path;
-	  u32 adj_index0, next0, checksum0;
+	  u32 pi0, rw_len0, adj_index0, next0, error0, checksum0;
       
 	  pi0 = to_next[0] = from[0];
 
@@ -2348,6 +2291,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
 	  ip0->checksum = checksum0 + (checksum0 >= 0xffff);
 
+	  error0 = IP4_ERROR_NONE;
+
 	  /* Check TTL */
 	  {
 	    i32 ttl0 = ip0->ttl;
@@ -2358,10 +2303,12 @@ ip4_rewrite (vlib_main_t * vm,
 
 	    ip0->ttl = ttl0;
 
-	    is_slow_path = ttl0 <= 0;
+	    error0 = ttl0 <= 0 ? IP4_ERROR_TIME_EXPIRED : error0;
 	  }
 
 	  ASSERT (ip0->checksum == ip4_header_checksum (ip0));
+
+	  p0->error = error_node->errors[error0];
 
 	  /* Guess we are only writing on simple Ethernet header. */
 	  vnet_rewrite_one_header (adj0[0], ip0, sizeof (ethernet_header_t));
@@ -2381,24 +2328,18 @@ ip4_rewrite (vlib_main_t * vm,
 	  next0 = adj0[0].rewrite_header.next_index;
 
 	  /* Check MTU of outgoing interface. */
-	  is_slow_path += vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes;
-
-	  is_slow_path += next0 != next_index;
+	  error0 = (vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes
+		    ? IP4_ERROR_MTU_EXCEEDED
+		    : error0);
 
 	  from += 1;
 	  n_left_from -= 1;
 	  to_next += 1;
 	  n_left_to_next -= 1;
       
-	  if (PREDICT_FALSE (is_slow_path))
-	    {
-	      to_next -= 1;
-	      n_left_to_next += 1;
-
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-	      ip4_rewrite_slow_path (vm, node, from[-1], adj_index0);
-	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-	    }
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, next0);
 	}
   
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
