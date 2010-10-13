@@ -1397,7 +1397,7 @@ ip6_lookup_init (vlib_main_t * vm)
     p.ethernet.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
 
     p.ip.ip_version_traffic_class_and_flow_label = clib_host_to_net_u32 (0x6 << 28);
-    p.ip.payload_length = clib_host_to_net_u16 (sizeof (p) - sizeof (p.ip));
+    p.ip.payload_length = clib_host_to_net_u16 (sizeof (p) - STRUCT_OFFSET_OF (ip6_neighbor_solicitation_packet_t, icmp));
     p.ip.protocol = IP_PROTOCOL_ICMP6;
     p.ip.ttl = 255;
     ip6_set_reserved_multicast_address
