@@ -244,8 +244,10 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0, * p1;
 	  ip6_header_t * ip0, * ip1;
+	  ip_buffer_opaque_t * i0, * i1;
 	  icmp46_header_t * icmp0, * icmp1;
 	  ip6_address_t tmp0, tmp1;
+	  ip_csum_t sum0, sum1;
 	  u32 bi0, bi1;
       
 	  bi0 = to_next[0] = from[0];
@@ -260,8 +262,23 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  p1 = vlib_get_buffer (vm, bi1);
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
+	  i0 = vlib_get_buffer_opaque (p0);
+	  i1 = vlib_get_buffer_opaque (p1);
 	  icmp0 = ip6_next_header (ip0);
 	  icmp1 = ip6_next_header (ip1);
+
+	  /* Check icmp type to echo reply and update icmp checksum. */
+	  sum0 = icmp0->checksum;
+	  sum1 = icmp1->checksum;
+
+	  sum0 = ip_csum_sub_even (sum0, icmp0->type << 8);
+	  sum1 = ip_csum_sub_even (sum1, icmp1->type << 8);
+
+	  sum0 = ip_csum_add_even (sum0, ICMP6_echo_reply << 8);
+	  sum1 = ip_csum_add_even (sum1, ICMP6_echo_reply << 8);
+
+	  icmp0->checksum = ip_csum_fold (sum0);
+	  icmp1->checksum = ip_csum_fold (sum1);
 
 	  icmp0->type = ICMP6_echo_reply;
 	  icmp1->type = ICMP6_echo_reply;
@@ -285,9 +302,11 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip6_header_t * ip0;
+	  ip_buffer_opaque_t * i0;
 	  icmp46_header_t * icmp0;
 	  u32 bi0;
 	  ip6_address_t tmp0;
+	  ip_csum_t sum0;
       
 	  bi0 = to_next[0] = from[0];
 
@@ -298,7 +317,14 @@ ip6_icmp_echo_request (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, bi0);
 	  ip0 = vlib_buffer_get_current (p0);
+	  i0 = vlib_get_buffer_opaque (p0);
 	  icmp0 = ip6_next_header (ip0);
+
+	  /* Check icmp type to echo reply and update icmp checksum. */
+	  sum0 = icmp0->checksum;
+	  sum0 = ip_csum_sub_even (sum0, icmp0->type << 8);
+	  sum0 = ip_csum_add_even (sum0, ICMP6_echo_reply << 8);
+	  icmp0->checksum = ip_csum_fold (sum0);
 
 	  icmp0->type = ICMP6_echo_reply;
 
@@ -308,6 +334,7 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  ip0->dst_address = tmp0;
 
 	  ip0->hop_limit = im->host_config.ttl;
+	  i0->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
 	}
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);

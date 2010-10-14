@@ -241,6 +241,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip6_header_t * ip0;
+	  ip_buffer_opaque_t * i0;
 	  icmp6_neighbor_solicitation_or_advertisement_header_t * h0;
 	  icmp6_neighbor_discovery_ethernet_link_layer_address_option_t * o0;
 	  u32 bi0, options_len0, sw_if_index0;
@@ -254,6 +255,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, bi0);
 	  ip0 = vlib_buffer_get_current (p0);
+	  i0 = vlib_get_buffer_opaque (p0);
 	  h0 = ip6_next_header (ip0);
 	  options_len0 = clib_net_to_host_u16 (ip0->payload_length) - sizeof (h0[0]);
 
@@ -292,6 +294,11 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	      h0->advertisement_flags = clib_host_to_net_u32
 		(ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_SOLICITED
 		 | ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_OVERRIDE);
+
+	      /* Don't want forwarding code to decrement hop_limit. */
+	      i0->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
+
+	      h0->icmp.checksum = 0;
 	      h0->icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (ip0);
 	    }
 	}

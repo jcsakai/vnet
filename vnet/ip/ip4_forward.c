@@ -2198,6 +2198,8 @@ ip4_rewrite (vlib_main_t * vm,
 	     Works either endian, so no need for byte swap. */
 	  {
 	    i32 ttl0 = ip0->ttl, ttl1 = ip1->ttl;
+	    u8 decrement0 = (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
+	    u8 decrement1 = (i1->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
 
 	    /* Input node should have reject packets with ttl 0. */
 	    ASSERT (ip0->ttl > 0);
@@ -2206,11 +2208,17 @@ ip4_rewrite (vlib_main_t * vm,
 	    checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
 	    checksum1 = ip1->checksum + clib_host_to_net_u16 (0x0100);
 
-	    ip0->checksum = checksum0 + (checksum0 >= 0xffff);
-	    ip1->checksum = checksum1 + (checksum1 >= 0xffff);
+	    checksum0 += checksum0 >= 0xffff;
+	    checksum1 += checksum1 >= 0xffff;
 
-	    ttl0 -= 1;
-	    ttl1 -= 1;
+	    checksum0 = decrement0 ? checksum0 : ip0->checksum;
+	    checksum1 = decrement1 ? checksum1 : ip1->checksum;
+
+	    ip0->checksum = checksum0;
+	    ip1->checksum = checksum1;
+
+	    ttl0 -= decrement0;
+	    ttl1 -= decrement1;
 
 	    ip0->ttl = ttl0;
 	    ip1->ttl = ttl1;
@@ -2290,19 +2298,24 @@ ip4_rewrite (vlib_main_t * vm,
       
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  /* Decrement TTL & update checksum. */
-	  checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
-	  ip0->checksum = checksum0 + (checksum0 >= 0xffff);
-
 	  error0 = IP4_ERROR_NONE;
 
-	  /* Check TTL */
+	  /* Decrement TTL & update checksum. */
 	  {
 	    i32 ttl0 = ip0->ttl;
+	    u8 decrement0 = (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
+
+	    checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
+
+	    checksum0 += checksum0 >= 0xffff;
+
+	    checksum0 = decrement0 ? checksum0 : ip0->checksum;
+
+	    ip0->checksum = checksum0;
 
 	    ASSERT (ip0->ttl > 0);
 
-	    ttl0 -= 1;
+	    ttl0 -= decrement0;
 
 	    ip0->ttl = ttl0;
 

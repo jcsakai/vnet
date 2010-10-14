@@ -1380,7 +1380,7 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 		({ int cmp = ip6_address_compare (&r1->address, &r2->address);
 		  cmp ? cmp : ((int) r1->address_length - (int) r2->address_length); }));
 
-      vlib_cli_output (vm, "%=20s%=16s%=16s%=16s",
+      vlib_cli_output (vm, "%=45s%=16s%=16s%=16s",
 		       "Destination", "Packets", "Bytes", "Adjacency");
       vec_foreach (r, routes)
 	{
@@ -1425,7 +1425,7 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 		  uword indent;
 
 		  if (j == 0)
-		    msg = format (msg, "%-20U",
+		    msg = format (msg, "%-45U",
 				  format_ip6_address_and_length,
 				  r->address.as_u8, r->address_length);
 		  else

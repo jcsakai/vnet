@@ -1559,20 +1559,20 @@ static VLIB_REGISTER_NODE (ip6_multicast_node) = {
 u16 ip6_tcp_udp_icmp_compute_checksum (ip6_header_t * ip0)
 {
   ip_csum_t sum0;
+  int i;
   u16 sum16, payload_length_host_byte_order;
 
   /* Initialize checksum with ip6 header. */
-  sum0 = clib_mem_unaligned (&ip0->src_address.as_u64[0], u64);
-  sum0 = ip_csum_with_carry (sum0,
-			     clib_mem_unaligned (&ip0->src_address.as_u64[1], u64));
-  sum0 = ip_csum_with_carry (sum0,
-			     clib_mem_unaligned (&ip0->dst_address.as_u64[0], u64));
-  sum0 = ip_csum_with_carry (sum0,
-			     clib_mem_unaligned (&ip0->dst_address.as_u64[1], u64));
-
-  sum0 = ip_csum_with_carry (sum0, ip0->payload_length);
-  sum0 = ip_csum_with_carry (sum0, ip0->protocol << 8);
+  sum0 = ip0->payload_length;
   payload_length_host_byte_order = clib_net_to_host_u16 (ip0->payload_length);
+  sum0 = ip_csum_with_carry (sum0, clib_host_to_net_u16 (ip0->protocol));
+  for (i = 0; i < ARRAY_LEN (ip0->src_address.as_uword); i++)
+    {
+      sum0 = ip_csum_with_carry (sum0,
+				 clib_mem_unaligned (&ip0->src_address.as_uword[i], uword));
+      sum0 = ip_csum_with_carry (sum0,
+				 clib_mem_unaligned (&ip0->dst_address.as_uword[i], uword));
+    }
 
   sum0 = ip_incremental_checksum (sum0, (void *) (ip0 + 1), payload_length_host_byte_order);
   sum16 = ~ ip_csum_fold (sum0);
@@ -2134,8 +2134,8 @@ ip6_rewrite (vlib_main_t * vm,
 	    ASSERT (ip0->hop_limit > 0);
 	    ASSERT (ip1->hop_limit > 0);
 
-	    hop_limit0 -= 1;
-	    hop_limit1 -= 1;
+	    hop_limit0 -= (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
+	    hop_limit1 -= (i1->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
 
 	    ip0->hop_limit = hop_limit0;
 	    ip1->hop_limit = hop_limit1;
@@ -2211,13 +2211,13 @@ ip6_rewrite (vlib_main_t * vm,
 
 	  error0 = IP6_ERROR_NONE;
 
-	  /* Check TTL */
+	  /* Check hop limit */
 	  {
 	    i32 hop_limit0 = ip0->hop_limit;
 
 	    ASSERT (ip0->hop_limit > 0);
 
-	    hop_limit0 -= 1;
+	    hop_limit0 -= (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
 
 	    ip0->hop_limit = hop_limit0;
 

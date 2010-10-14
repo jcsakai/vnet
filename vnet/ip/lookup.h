@@ -132,6 +132,10 @@ typedef struct {
 
   /* Current configuration index. */
   u32 current_config_index;
+
+  u32 flags;
+  /* Set for locally generated IP traffic that needs to be forwarded. */
+#define IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED (1 << 0)
 } ip_buffer_opaque_t;
 
 typedef struct {
