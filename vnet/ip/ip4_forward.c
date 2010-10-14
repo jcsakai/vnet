@@ -1639,9 +1639,9 @@ u32 ip4_tcp_udp_checksum (vlib_buffer_t * p0)
     }
 
  done:
-  p0->flags |= IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED;
+  p0->flags |= IP_BUFFER_L4_CHECKSUM_COMPUTED;
   if (sum16 == 0)
-    p0->flags |= IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT;
+    p0->flags |= IP_BUFFER_L4_CHECKSUM_CORRECT;
 
   return p0->flags;
 }
@@ -1710,8 +1710,8 @@ ip4_local (vlib_main_t * vm,
 	  flags0 = p0->flags;
 	  flags1 = p1->flags;
 
-	  good_tcp_udp0 = (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
-	  good_tcp_udp1 = (flags1 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+	  good_tcp_udp0 = (flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
+	  good_tcp_udp1 = (flags1 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 
 	  udp0 = ip4_next_header (ip0);
 	  udp1 = ip4_next_header (ip1);
@@ -1738,19 +1738,19 @@ ip4_local (vlib_main_t * vm,
 	      if (is_tcp_udp0)
 		{
 		  if (is_tcp_udp0
-		      && ! (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
+		      && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
 		    flags0 = ip4_tcp_udp_checksum (p0);
 		  good_tcp_udp0 =
-		    (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+		    (flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 		  good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
 		}
 	      if (is_tcp_udp1)
 		{
 		  if (is_tcp_udp1
-		      && ! (flags1 & IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
+		      && ! (flags1 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
 		    flags1 = ip4_tcp_udp_checksum (p1);
 		  good_tcp_udp1 =
-		    (flags1 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+		    (flags1 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 		  good_tcp_udp1 |= is_udp1 && udp1->checksum == 0;
 		}
 	    }
@@ -1868,7 +1868,7 @@ ip4_local (vlib_main_t * vm,
 
 	  flags0 = p0->flags;
 
-	  good_tcp_udp0 = (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+	  good_tcp_udp0 = (flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 
 	  udp0 = ip4_next_header (ip0);
 
@@ -1886,10 +1886,10 @@ ip4_local (vlib_main_t * vm,
 	  if (PREDICT_FALSE (! (is_tcp_udp0 & good_tcp_udp0)))
 	    {
 	      if (is_tcp_udp0
-		  && ! (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
+		  && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
 		flags0 = ip4_tcp_udp_checksum (p0);
 	      good_tcp_udp0 =
-		(flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+		(flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 	      good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
 	    }
 
@@ -2068,6 +2068,7 @@ ip4_arp (vlib_main_t * vm,
 
 	  {
 	    u32 bi0;
+	    vlib_buffer_t * b0;
 	    ethernet_and_arp_header_t * h0;
 	    vlib_sw_interface_t * swif0;
 	    ethernet_interface_t * eif0;
@@ -2090,6 +2091,8 @@ ip4_arp (vlib_main_t * vm,
 	    h0->arp.ip4_over_ethernet[1].ip4.data_u32 = ip0->dst_address.data_u32;
 
 	    vlib_buffer_copy_trace_flag (vm, p0, bi0);
+	    b0 = vlib_get_buffer (vm, bi0);
+	    b0->sw_if_index[VLIB_TX] = p0->sw_if_index[VLIB_TX];
 
 	    vlib_set_next_frame_buffer (vm, node, next0, bi0);
 	  }

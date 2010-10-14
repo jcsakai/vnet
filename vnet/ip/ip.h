@@ -46,6 +46,7 @@
 #include <vnet/ip/ip6.h>
 #include <vnet/ip/ip6_packet.h>
 #include <vnet/ip/ip6_error.h>
+#include <vnet/ip/icmp6.h>
 
 /* Per protocol info. */
 typedef struct {
@@ -129,11 +130,13 @@ ip_get_tcp_udp_port_info (ip_main_t * im, u32 port)
       
 /* VLIB buffer flags for ip4 packets.  Set by input interfaces for ip4/ip6
    tcp/udp packets with hardware computed checksums. */
-#define LOG2_IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED LOG2_VLIB_BUFFER_FLAG_USER1
-#define LOG2_IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT  LOG2_VLIB_BUFFER_FLAG_USER2
-#define IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED VLIB_BUFFER_FLAG_USER1
-#define IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT  VLIB_BUFFER_FLAG_USER2
+#define LOG2_IP_BUFFER_L4_CHECKSUM_COMPUTED LOG2_VLIB_BUFFER_FLAG_USER1
+#define LOG2_IP_BUFFER_L4_CHECKSUM_CORRECT  LOG2_VLIB_BUFFER_FLAG_USER2
+#define IP_BUFFER_L4_CHECKSUM_COMPUTED VLIB_BUFFER_FLAG_USER1
+#define IP_BUFFER_L4_CHECKSUM_CORRECT  VLIB_BUFFER_FLAG_USER2
 
 extern vlib_cli_command_t set_interface_ip_command;
+extern vlib_cli_command_t vlib_cli_ip4_command, vlib_cli_show_ip4_command;
+extern vlib_cli_command_t vlib_cli_ip6_command, vlib_cli_show_ip6_command;
 
 #endif /* included_ip_main_h */

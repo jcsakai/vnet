@@ -1,5 +1,8 @@
-#ifndef included_vnet_icmp_h
-#define included_vnet_icmp_h
+#ifndef included_vnet_icmp46_packet_h
+#define included_vnet_icmp46_packet_h
+
+#include <vnet/ethernet/packet.h>
+#include <vnet/ip/ip6_packet.h>
 
 #define foreach_icmp4_type			\
   _ (0, echo_reply)				\
@@ -62,36 +65,36 @@
   _ (parameter_problem, 2, bad_length)
 
 /* ICMPv6 */
-#define foreach_icmp6_type				\
-  _ (1, destination_unreachable)			\
-  _ (2, packet_too_big)					\
-  _ (3, time_exceeded)					\
-  _ (4, parameter_problem)				\
-  _ (128, echo_request)					\
-  _ (129, echo_reply)					\
-  _ (130, multicast_listener_request)			\
-  _ (131, multicast_listener_report)			\
-  _ (132, multicast_listener_done)			\
-  _ (133, router_solicitation)				\
-  _ (134, router_advertisement)				\
-  _ (135, neighbor_solicitation)			\
-  _ (136, neighbor_advertisement)			\
-  _ (137, redirect_message)				\
-  _ (138, router_renumbering)				\
-  _ (139, node_information_request)			\
-  _ (140, node_information_response)			\
-  _ (141, inverse_neighbor_discovery_solicitation)	\
-  _ (142, inverse_neighbor_discovery_advertisement)	\
-  _ (143, multicast_v2_listener_report)			\
-  _ (144, home_agent_address_discovery_request)		\
-  _ (145, home_agent_address_discovery_reply)		\
-  _ (146, mobile_prefix_solicitation)			\
-  _ (147, mobile_prefix_advertisement)			\
-  _ (148, certification_path_solicitation)		\
-  _ (149, certification_path_advertisement)		\
-  _ (151, multicast_router_advertisement)		\
-  _ (152, multicast_router_solicitation)		\
-  _ (153, multicast_router_termination)			\
+#define foreach_icmp6_type			\
+  _ (1, destination_unreachable)		\
+  _ (2, packet_too_big)				\
+  _ (3, time_exceeded)				\
+  _ (4, parameter_problem)			\
+  _ (128, echo_request)				\
+  _ (129, echo_reply)				\
+  _ (130, multicast_listener_request)		\
+  _ (131, multicast_listener_report)		\
+  _ (132, multicast_listener_done)		\
+  _ (133, router_solicitation)			\
+  _ (134, router_advertisement)			\
+  _ (135, neighbor_solicitation)		\
+  _ (136, neighbor_advertisement)		\
+  _ (137, redirect)				\
+  _ (138, router_renumbering)			\
+  _ (139, node_information_request)		\
+  _ (140, node_information_response)		\
+  _ (141, inverse_neighbor_solicitation)	\
+  _ (142, inverse_neighbor_advertisement)	\
+  _ (143, multicast_v2_listener_report)		\
+  _ (144, home_agent_address_discovery_request)	\
+  _ (145, home_agent_address_discovery_reply)	\
+  _ (146, mobile_prefix_solicitation)		\
+  _ (147, mobile_prefix_advertisement)		\
+  _ (148, certification_path_solicitation)	\
+  _ (149, certification_path_advertisement)	\
+  _ (151, multicast_router_advertisement)	\
+  _ (152, multicast_router_solicitation)	\
+  _ (153, multicast_router_termination)		\
   _ (154, fmipv6_messages)
 
 #define foreach_icmp6_code						\
@@ -161,7 +164,7 @@ typedef PACKED (struct {
   _ (8, home_agent_information)			\
   _ (9, source_address_list)			\
   _ (10, target_address_list)			\
-  _ (11, cga)					\
+  _ (11, cryptographically_generated_address)	\
   _ (12, rsa_signature)				\
   _ (13, timestamp)				\
   _ (14, nonce)					\
@@ -169,7 +172,7 @@ typedef PACKED (struct {
   _ (16, certificate)				\
   _ (17, ip_address_and_prefix)			\
   _ (18, new_router_prefix_information)		\
-  _ (19, link_layer_address)			\
+  _ (19, mobile_link_layer_address)		\
   _ (20, neighbor_advertisement_acknowledgment)	\
   _ (23, map)					\
   _ (24, route_information)			\
@@ -193,31 +196,120 @@ typedef PACKED (struct {
   /* Option type. */
   u8 type;
 
-  /* Number of option data bytes that follow. */
-  u8 n_data_bytes;
+  /* Length of this header plus option data in 8 byte units. */
+  u8 n_data_u64s;
 
   /* Option data follows. */
   u8 data[0];
-}) icmp6_option_header_t;
+}) icmp6_neighbor_discovery_option_header_t;
 
-#include <vnet/ethernet/packet.h>
-#include <vnet/ip/ip6_packet.h>
+typedef PACKED (struct {
+  icmp6_neighbor_discovery_option_header_t header;
+  u8 dst_address_length;
+  u8 flags;
+#define ICMP6_NEIGHBOR_DISCOVERY_PREFIX_INFORMATION_FLAG_ON_LINK (1 << 7)
+#define ICMP6_NEIGHBOR_DISCOVERY_PREFIX_INFORMATION_AUTO (1 << 6)
+  u32 valid_time;
+  u32 preferred_time;
+  u32 unused;
+  ip6_address_t dst_address;
+}) icmp6_neighbor_discovery_prefix_information_option_t;
 
+typedef PACKED (struct {
+  icmp6_neighbor_discovery_option_header_t header;
+  u8 reserved[6];
+  /* IP6 header plus payload follows. */
+  u8 data[0];
+}) icmp6_neighbor_discovery_redirected_header_option_t;
+
+typedef PACKED (struct {
+  icmp6_neighbor_discovery_option_header_t header;
+  u16 unused;
+  u32 mtu;
+}) icmp6_neighbor_discovery_mtu_option_t;
+
+typedef PACKED (struct {
+  icmp6_neighbor_discovery_option_header_t header;
+  u8 ethernet_address[6];
+}) icmp6_neighbor_discovery_ethernet_link_layer_address_option_t;
+
+typedef PACKED (struct {
+  icmp6_neighbor_discovery_option_header_t header;
+  u8 max_l2_address[6+8];
+}) icmp6_neighbor_discovery_max_link_layer_address_option_t;
+
+/* Generic neighbor discover header.  Used for router solicitations,
+   etc. */
+typedef PACKED (struct {
+  icmp46_header_t icmp;
+
+  u32 reserved_must_be_zero;
+}) icmp6_neighbor_discovery_header_t;
+
+/* Router advertisement packet formats. */
+typedef PACKED (struct {
+  icmp46_header_t icmp;
+
+  /* Current hop limit to use for outgoing packets. */
+  u8 current_hop_limit;
+
+  u8 flags;
+#define ICMP6_ROUTER_DISCOVERY_FLAG_ADDRESS_CONFIG_VIA_DHCP (1 << 7)
+#define ICMP6_ROUTER_DISCOVERY_FLAG_OTHER_CONFIG_VIA_DHCP (1 << 6)
+
+  /* Zero means unspecified. */
+  u16 router_lifetime_in_sec;
+
+  /* Zero means unspecified. */
+  u32 neighbor_reachable_time_in_msec;
+
+  /* Zero means unspecified. */
+  u32 time_in_msec_between_retransmitted_neighbor_solicitations;
+
+  /* Options that may follow: source_link_layer_address, mtu, prefix_information. */
+}) icmp6_router_advertisement_header_t;
+
+/* Neighbor solicitation/advertisement header. */
+typedef PACKED (struct {
+  icmp46_header_t icmp;
+
+  /* Zero for solicitation; flags for advertisement. */
+  u32 advertisement_flags;
+  /* Set when sent by a router. */
+#define ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_ROUTER (1 << 31)
+  /* Set when response to solicitation. */
+#define ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_SOLICITED (1 << 30)
+#define ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_OVERRIDE (1 << 29)
+
+  ip6_address_t target_address;
+
+  /* Options that may follow: source_link_layer_address
+     (for solicitation) target_link_layer_address (for advertisement). */
+}) icmp6_neighbor_solicitation_or_advertisement_header_t;
+
+typedef PACKED (struct {
+  icmp46_header_t icmp;
+
+  u32 reserved_must_be_zero;
+
+  /* Better next hopt to use for given destination. */
+  ip6_address_t better_next_hop_address;
+
+  ip6_address_t dst_address;
+
+  /* Options that may follow: target_link_layer_address,
+     redirected_header. */
+}) icmp6_redirect_header_t;
+
+/* Solicitation/advertisement packet format for ethernet. */
 typedef PACKED (struct {
   ethernet_header_t ethernet;
 
   ip6_header_t ip;
 
-  icmp46_header_t icmp;
+  icmp6_neighbor_solicitation_or_advertisement_header_t neighbor;
 
-  /* Must be zero for solicitations; flags for advertisements. */
-  u32 flags;
+  icmp6_neighbor_discovery_ethernet_link_layer_address_option_t link_layer_option;
+}) icmp6_neighbor_solicitation_for_ethernet_t;
 
-  ip6_address_t target_address;
-
-  icmp6_option_header_t option_header;
-
-  u8 src_ethernet_address[6];
-}) ip6_icmp_neighbor_header_t;
-
-#endif /* included_vnet_icmp_h */
+#endif /* included_vnet_icmp46_packet_h */

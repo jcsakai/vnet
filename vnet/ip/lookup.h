@@ -204,6 +204,9 @@ typedef struct ip_lookup_main_t {
 
   /* Table mapping ip protocol to ip[46]-local node next index. */
   u8 local_next_by_ip_protocol[256];
+
+  /* IP_BUILTIN_PROTOCOL_{TCP,UDP,ICMP,OTHER} by protocol in IP header. */
+  u8 builtin_protocol_by_ip_protocol[256];
 } ip_lookup_main_t;
 
 always_inline ip_adjacency_t *

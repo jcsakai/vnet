@@ -95,6 +95,7 @@ typedef enum tcp_option_type {
 typedef struct {
   tcp_option_type_t type : 8;
 
+  /* Length of this option in bytes. */
   u8 length;
 } tcp_option_with_length_t;
 

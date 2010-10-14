@@ -147,8 +147,8 @@ typedef struct {
   /* Protocol for next header. */
   u8 protocol;
 
-  /* Time to live decremented by router at each hop. */
-  u8 ttl;
+  /* Hop limit decremented by router at each hop. */
+  u8 hop_limit;
 
   /* Source and destination address. */
   ip6_address_t src_address, dst_address;

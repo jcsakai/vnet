@@ -81,15 +81,11 @@ static u8 * format_ip6_icmp_header (u8 * s, va_list * args)
   return s;
 }
 
-typedef struct {
-  u8 packet_data[64];
-} icmp_input_trace_t;
-
-static u8 * format_icmp_input_trace (u8 * s, va_list * va)
+u8 * format_icmp6_input_trace (u8 * s, va_list * va)
 {
   UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
   UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
-  icmp_input_trace_t * t = va_arg (*va, icmp_input_trace_t *);
+  icmp6_input_trace_t * t = va_arg (*va, icmp6_input_trace_t *);
 
   s = format (s, "%U",
 	      format_ip6_header,
@@ -98,14 +94,14 @@ static u8 * format_icmp_input_trace (u8 * s, va_list * va)
   return s;
 }
 
-typedef enum {
-  ICMP_ERROR_UNKNOWN_TYPE,
-  ICMP_ERROR_ECHO_REPLIES_SENT,
-  ICMP_ERROR_NEIGHBOR_ADVERTISEMENTS_SENT,
-} icmp_error_t;
+static char * icmp_error_strings[] = {
+#define _(f,s) s,
+  foreach_icmp6_error
+#undef _
+};
 
 typedef enum {
-  ICMP_INPUT_NEXT_ERROR,
+  ICMP_INPUT_NEXT_DROP,
   ICMP_INPUT_N_NEXT,
 } icmp_input_next_t;
 
@@ -115,7 +111,15 @@ typedef struct {
   uword * type_by_name;
 
   /* Vector dispatch table indexed by [icmp type]. */
-  u8 ip6_input_next_index_by_type[256];
+  u8 input_next_index_by_type[256];
+
+  /* Max valid code indexed by icmp type. */
+  u8 max_valid_code_by_type[256];
+
+  /* hop_limit must be >= this value for this icmp type. */
+  u8 min_valid_hop_limit_by_type[256];
+
+  u8 min_valid_length_by_type[256];
 } icmp6_main_t;
 
 icmp6_main_t icmp6_main;
@@ -128,20 +132,20 @@ ip6_icmp_input (vlib_main_t * vm,
   icmp6_main_t * im = &icmp6_main;
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
-  u32 n_left_from, n_left_to_next, next;
+  u32 n_left_from, n_left_to_next, next_index;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
-  next = node->cached_next_index;
+  next_index = node->cached_next_index;
   
   if (node->flags & VLIB_NODE_FLAG_TRACE)
     vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
 				   /* stride */ 1,
-				   sizeof (icmp_input_trace_t));
+				   sizeof (icmp6_input_trace_t));
 
   while (n_left_from > 0)
     {
-      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
@@ -149,7 +153,7 @@ ip6_icmp_input (vlib_main_t * vm,
 	  ip6_header_t * ip0;
 	  icmp46_header_t * icmp0;
 	  icmp6_type_t type0;
-	  u32 bi0, next0;
+	  u32 bi0, next0, error0, len0;
       
 	  bi0 = to_next[0] = from[0];
 
@@ -162,53 +166,54 @@ ip6_icmp_input (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (b0);
 	  icmp0 = ip6_next_header (ip0);
 	  type0 = icmp0->type;
-	  next0 = im->ip6_input_next_index_by_type[type0];
 
-	  b0->error = node->errors[ICMP_ERROR_UNKNOWN_TYPE];
+	  error0 = ICMP6_ERROR_NONE;
 
-	  if (PREDICT_FALSE (next0 != next))
-	    {
-	      to_next -= 1;
-	      n_left_to_next += 1;
+	  next0 = im->input_next_index_by_type[type0];
+	  error0 = next0 == ICMP_INPUT_NEXT_DROP ? ICMP6_ERROR_UNKNOWN_TYPE : error0;
 
-	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+	  /* Check code is valid for type. */
+	  error0 = icmp0->code > im->max_valid_code_by_type[type0] ? ICMP6_ERROR_INVALID_CODE_FOR_TYPE : error0;
 
-	      next = next0;
-	      vlib_get_next_frame (vm, node, next,
-				   to_next, n_left_to_next);
+	  /* Checksum is already validated by ip6_local node so we don't need to check that. */
 
-	      to_next[0] = bi0;
-	      to_next += 1;
-	      n_left_to_next -= 1;
-	    }
+	  /* Check that hop limit == 255 for certain types. */
+	  error0 = ip0->hop_limit < im->min_valid_hop_limit_by_type[type0] ? ICMP6_ERROR_INVALID_HOP_LIMIT_FOR_TYPE : error0;
+
+	  len0 = clib_net_to_host_u16 (ip0->payload_length);
+	  error0 = len0 < im->min_valid_length_by_type[type0] ? ICMP6_ERROR_LENGTH_TOO_SMALL_FOR_TYPE : error0;
+
+	  error0 = len0 % 8 ? ICMP6_ERROR_OPTIONS_WITH_ODD_LENGTH : error0;
+
+	  b0->error = node->errors[error0];
+
+	  next0 = error0 != ICMP6_ERROR_NONE ? ICMP_INPUT_NEXT_DROP : next0;
+
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   bi0, next0);
 	}
   
-      vlib_put_next_frame (vm, node, next, n_left_to_next);
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
   return frame->n_vectors;
 }
 
-static char * icmp_error_strings[] = {
-  [ICMP_ERROR_UNKNOWN_TYPE] = "unknown type",
-  [ICMP_ERROR_ECHO_REPLIES_SENT] = "echo replies sent",
-  [ICMP_ERROR_NEIGHBOR_ADVERTISEMENTS_SENT] = "neighbor advertisements sent",
-};
-
-static VLIB_REGISTER_NODE (ip6_icmp_input_node) = {
+VLIB_REGISTER_NODE (ip6_icmp_input_node) = {
   .function = ip6_icmp_input,
   .name = "ip6-icmp-input",
 
   .vector_size = sizeof (u32),
 
-  .format_trace = format_icmp_input_trace,
+  .format_trace = format_icmp6_input_trace,
 
   .n_errors = ARRAY_LEN (icmp_error_strings),
   .error_strings = icmp_error_strings,
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [ICMP_INPUT_NEXT_ERROR] = "error-drop",
+    [ICMP_INPUT_NEXT_DROP] = "error-drop",
   },
 };
 
@@ -220,7 +225,7 @@ ip6_icmp_echo_request (vlib_main_t * vm,
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
-  ip6_main_t * i4m = &ip6_main;
+  ip6_main_t * im = &ip6_main;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
@@ -229,7 +234,7 @@ ip6_icmp_echo_request (vlib_main_t * vm,
   if (node->flags & VLIB_NODE_FLAG_TRACE)
     vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
 				   /* stride */ 1,
-				   sizeof (icmp_input_trace_t));
+				   sizeof (icmp6_input_trace_t));
 
   while (n_left_from > 0)
     {
@@ -271,9 +276,9 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  ip0->dst_address = tmp0;
 	  ip1->dst_address = tmp1;
 
-	  /* New ttl. */
-	  ip0->ttl = i4m->host_config.ttl;
-	  ip1->ttl = i4m->host_config.ttl;
+	  /* New hop count. */
+	  ip0->hop_limit = im->host_config.ttl;
+	  ip1->hop_limit = im->host_config.ttl;
 	}
   
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -302,14 +307,14 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  ip0->src_address = ip0->dst_address;
 	  ip0->dst_address = tmp0;
 
-	  ip0->ttl = i4m->host_config.ttl;
+	  ip0->hop_limit = im->host_config.ttl;
 	}
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);
     }
 
   vlib_error_count (vm, ip6_icmp_input_node.index,
-		    ICMP_ERROR_ECHO_REPLIES_SENT,
+		    ICMP6_ERROR_ECHO_REPLIES_SENT,
 		    frame->n_vectors);
 
   return frame->n_vectors;
@@ -321,74 +326,7 @@ static VLIB_REGISTER_NODE (ip6_icmp_echo_request_node) = {
 
   .vector_size = sizeof (u32),
 
-  .format_trace = format_icmp_input_trace,
-
-  .n_next_nodes = 1,
-  .next_nodes = {
-    [0] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
-  },
-};
-
-static uword
-ip6_icmp_neighbor_solicitation (vlib_main_t * vm,
-				vlib_node_runtime_t * node,
-				vlib_frame_t * frame)
-{
-  uword n_packets = frame->n_vectors;
-  u32 * from, * to_next;
-  u32 n_left_from, n_left_to_next, next;
-
-  from = vlib_frame_vector_args (frame);
-  n_left_from = n_packets;
-  next = node->cached_next_index;
-  
-  if (node->flags & VLIB_NODE_FLAG_TRACE)
-    vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
-				   /* stride */ 1,
-				   sizeof (icmp_input_trace_t));
-
-  while (n_left_from > 0)
-    {
-      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
-
-      while (n_left_from > 0 && n_left_to_next > 0)
-	{
-	  vlib_buffer_t * p0;
-	  ip6_header_t * ip0;
-	  icmp46_header_t * icmp0;
-	  u32 bi0;
-      
-	  bi0 = to_next[0] = from[0];
-
-	  from += 1;
-	  n_left_from -= 1;
-	  to_next += 1;
-	  n_left_to_next -= 1;
-      
-	  p0 = vlib_get_buffer (vm, bi0);
-	  ip0 = vlib_buffer_get_current (p0);
-	  icmp0 = ip6_next_header (ip0);
-
-	  ASSERT (0);
-	}
-  
-      vlib_put_next_frame (vm, node, next, n_left_to_next);
-    }
-
-  vlib_error_count (vm, ip6_icmp_input_node.index,
-		    ICMP_ERROR_ECHO_REPLIES_SENT,
-		    frame->n_vectors);
-
-  return frame->n_vectors;
-}
-
-static VLIB_REGISTER_NODE (ip6_icmp_neighbor_solicitation_node) = {
-  .function = ip6_icmp_neighbor_solicitation,
-  .name = "ip6-icmp-neighbor-solicitation",
-
-  .vector_size = sizeof (u32),
-
-  .format_trace = format_icmp_input_trace,
+  .format_trace = format_icmp6_input_trace,
 
   .n_next_nodes = 1,
   .next_nodes = {
@@ -471,12 +409,12 @@ unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
   return 0;
 }
 
-static void ip6_icmp_register_type (vlib_main_t * vm, icmp6_type_t type, u32 node_index)
+void icmp6_register_type (vlib_main_t * vm, icmp6_type_t type, u32 node_index)
 {
   icmp6_main_t * im = &icmp6_main;
 
-  ASSERT (type < ARRAY_LEN (im->ip6_input_next_index_by_type));
-  im->ip6_input_next_index_by_type[type]
+  ASSERT (type < ARRAY_LEN (im->input_next_index_by_type));
+  im->input_next_index_by_type[type]
     = vlib_node_add_next (vm, ip6_icmp_input_node.index, node_index);
 }
 
@@ -507,14 +445,34 @@ icmp6_init (vlib_main_t * vm)
   foreach_icmp6_code;
 #undef _
 
-  memset (cm->ip6_input_next_index_by_type,
-	  ICMP_INPUT_NEXT_ERROR,
-	  sizeof (cm->ip6_input_next_index_by_type));
+  memset (cm->input_next_index_by_type,
+	  ICMP_INPUT_NEXT_DROP,
+	  sizeof (cm->input_next_index_by_type));
+  memset (cm->max_valid_code_by_type, 0, sizeof (cm->max_valid_code_by_type));
 
-  ip6_icmp_register_type (vm, ICMP6_echo_request, ip6_icmp_echo_request_node.index);
-  ip6_icmp_register_type (vm, ICMP6_neighbor_solicitation, ip6_icmp_neighbor_solicitation_node.index);
+#define _(a,n,t) cm->max_valid_code_by_type[ICMP6_##a] = clib_max (cm->max_valid_code_by_type[ICMP6_##a], n);
+  foreach_icmp6_code;
+#undef _
 
-  return 0;
+  memset (cm->min_valid_hop_limit_by_type, 0, sizeof (cm->min_valid_hop_limit_by_type));
+  cm->min_valid_hop_limit_by_type[ICMP6_router_solicitation] = 255;
+  cm->min_valid_hop_limit_by_type[ICMP6_router_advertisement] = 255;
+  cm->min_valid_hop_limit_by_type[ICMP6_neighbor_solicitation] = 255;
+  cm->min_valid_hop_limit_by_type[ICMP6_neighbor_advertisement] = 255;
+  cm->min_valid_hop_limit_by_type[ICMP6_redirect] = 255;
+
+  memset (cm->min_valid_length_by_type, sizeof (icmp46_header_t), sizeof (cm->min_valid_length_by_type));
+  cm->min_valid_length_by_type[ICMP6_router_solicitation] = sizeof (icmp6_neighbor_discovery_header_t);
+  cm->min_valid_length_by_type[ICMP6_router_advertisement] = sizeof (icmp6_router_advertisement_header_t);
+  cm->min_valid_length_by_type[ICMP6_neighbor_solicitation]
+    = sizeof (icmp6_neighbor_solicitation_or_advertisement_header_t);
+  cm->min_valid_length_by_type[ICMP6_neighbor_advertisement]
+    = sizeof (icmp6_neighbor_solicitation_or_advertisement_header_t);
+  cm->min_valid_length_by_type[ICMP6_redirect] = sizeof (icmp6_redirect_header_t);
+
+  icmp6_register_type (vm, ICMP6_echo_request, ip6_icmp_echo_request_node.index);
+
+  return vlib_call_init_function (vm, ip6_neighbor_init);
 }
 
 VLIB_INIT_FUNCTION (icmp6_init);

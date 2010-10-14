@@ -1127,6 +1127,18 @@ VLIB_CLI_COMMAND (vlib_cli_show_ip_command) = {
   .parent = &vlib_cli_show_command,
 };
 
+VLIB_CLI_COMMAND (vlib_cli_show_ip4_command) = {
+  .name = "ip4",
+  .short_help = "Internet protocol version 4 (IP4) show commands",
+  .parent = &vlib_cli_show_command,
+};
+
+VLIB_CLI_COMMAND (vlib_cli_show_ip6_command) = {
+  .name = "ip6",
+  .short_help = "Internet protocol version 6 (IP6) show commands",
+  .parent = &vlib_cli_show_command,
+};
+
 static VLIB_CLI_COMMAND (ip_route_command) = {
   .name = "route",
   .short_help = "Add/delete IP routes",
@@ -1452,8 +1464,8 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 }
 
 static VLIB_CLI_COMMAND (ip6_show_fib_command) = {
-  .name = "fib6",
+  .name = "fib",
   .short_help = "Show IP6 routing table",
   .function = ip6_show_fib,
-  .parent = &vlib_cli_show_ip_command,
+  .parent = &vlib_cli_show_ip6_command,
 };

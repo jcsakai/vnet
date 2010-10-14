@@ -245,16 +245,42 @@ ethernet_interface_link_up_down (vlib_main_t * vm,
 }
 
 #if DEBUG > 0
+
+#define VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT VLIB_INTERFACE_TX_N_NEXT
+
+/* Echo packets back to ethernet input. */
 static uword
 simulated_ethernet_interface_tx (vlib_main_t * vm,
 				 vlib_node_runtime_t * node,
 				 vlib_frame_t * frame)
 {
-  u32 n_left_from, * from;
+  u32 n_left_from, n_left_to_next, n_copy, * from, * to_next;
+  u32 next_index = VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT;
+  u32 i;
+  vlib_buffer_t * b;
 
   n_left_from = frame->n_vectors;
   from = vlib_frame_args (frame);
-  vlib_buffer_free (vm, from, /* stride */ 1, n_left_from, /* follow_buffer_next */ 0);
+
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+
+      n_copy = clib_min (n_left_from, n_left_to_next);
+
+      memcpy (to_next, from, n_copy * sizeof (from[0]));
+      n_left_to_next -= n_copy;
+      n_left_from -= n_copy;
+      for (i = 0; i < n_copy; i++)
+	{
+	  b = vlib_get_buffer (vm, from[i]);
+	  /* TX interface will be fake eth; copy to RX for benefit of ethernet-input. */
+	  b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX];
+	}
+
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
   return n_left_from;
 }
 
@@ -280,10 +306,13 @@ create_simulated_ethernet_interfaces (vlib_main_t * vm,
   u8 address[6];
   u32 hw_if_index;
 
-  memset (address, 0, sizeof (address));
-  address[0] = 0xde;
-  address[1] = 0xad;
-  address[5] = instance;
+  if (! unformat_user (input, unformat_ethernet_address, &address))
+    {
+      memset (address, 0, sizeof (address));
+      address[0] = 0xde;
+      address[1] = 0xad;
+      address[5] = instance;
+    }
 
   error = ethernet_register_interface
     (vm,
@@ -292,6 +321,18 @@ create_simulated_ethernet_interfaces (vlib_main_t * vm,
      address,
      /* phy */ 0,
      &hw_if_index);
+
+  {
+    vlib_hw_interface_t * hw_if;
+    u32 slot;
+
+    hw_if = vlib_get_hw_interface (vm, hw_if_index);
+    slot = vlib_node_add_named_next_with_slot
+      (vm, hw_if->tx_node_index,
+       "ethernet-input",
+       VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT);
+    ASSERT (slot == VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT);
+  }
 
   return error;
 }

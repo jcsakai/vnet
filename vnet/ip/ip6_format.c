@@ -203,9 +203,9 @@ u8 * format_ip6_header (u8 * s, va_list * args)
     s = format (s, "\n%Uversion %d",
 		format_white_space, indent, ip_version);
     
-  s = format (s, "\n%Utos 0x%02x, ttl %d, payload length %d",
+  s = format (s, "\n%Utos 0x%02x, hop limit %d, payload length %d",
 	      format_white_space, indent,
-	      traffic_class, ip->ttl,
+	      traffic_class, ip->hop_limit,
 	      clib_net_to_host_u16 (ip->payload_length));
 
   /* Recurse into next protocol layer. */
@@ -258,8 +258,8 @@ uword unformat_ip6_header (unformat_input_t * input, va_list * args)
       if (unformat (input, "tos %U", unformat_vlib_number, &i))
 	ip->ip_version_traffic_class_and_flow_label |= clib_host_to_net_u32 ((i & 0xff) << 20);
 
-      else if (unformat (input, "ttl %U", unformat_vlib_number, &i))
-	ip->ttl = i;
+      else if (unformat (input, "hop-limit %U", unformat_vlib_number, &i))
+	ip->hop_limit = i;
 
       /* Can't parse input: try next protocol level. */
       else

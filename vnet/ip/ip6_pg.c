@@ -79,7 +79,7 @@ typedef struct {
   pg_edit_t flow_label;
   pg_edit_t payload_length;
   pg_edit_t protocol;
-  pg_edit_t ttl;
+  pg_edit_t hop_limit;
   pg_edit_t src_address, dst_address;
 } pg_ip6_header_t;
 
@@ -89,7 +89,7 @@ pg_ip6_header_init (pg_ip6_header_t * p)
   /* Initialize fields that are not bit fields in the IP header. */
 #define _(f) pg_edit_init (&p->f, ip6_header_t, f);
   _ (payload_length);
-  _ (ttl);
+  _ (hop_limit);
   _ (protocol);
   _ (src_address);
   _ (dst_address);
@@ -122,7 +122,7 @@ unformat_pg_ip6_header (unformat_input_t * input, va_list * args)
   pg_edit_set_fixed (&p->ip_version, 6);
   pg_edit_set_fixed (&p->traffic_class, 0);
   pg_edit_set_fixed (&p->flow_label, 0);
-  pg_edit_set_fixed (&p->ttl, 64);
+  pg_edit_set_fixed (&p->hop_limit, 64);
 
   p->payload_length.type = PG_EDIT_UNSPECIFIED;
 
@@ -153,9 +153,9 @@ unformat_pg_ip6_header (unformat_input_t * input, va_list * args)
 			 unformat_pg_number, &p->payload_length))
 	;
 
-      else if (unformat (input, "ttl %U",
+      else if (unformat (input, "hop-limit %U",
 			 unformat_pg_edit,
-			 unformat_pg_number, &p->ttl))
+			 unformat_pg_number, &p->hop_limit))
 	;
 
       /* Can't parse input: try next protocol level. */

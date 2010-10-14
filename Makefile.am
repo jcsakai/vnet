@@ -89,6 +89,7 @@ libvnet_la_SOURCES +=				\
  vnet/ip/ip6_format.c				\
  vnet/ip/ip6_forward.c				\
  vnet/ip/ip6_input.c				\
+ vnet/ip/ip6_neighbor.c				\
  vnet/ip/ip6_pg.c				\
  vnet/ip/ip_checksum.c				\
  vnet/ip/ip.h					\
@@ -105,6 +106,7 @@ libvnet_la_SOURCES +=				\
 nobase_include_HEADERS +=			\
  vnet/ip/format.h				\
  vnet/ip/icmp46_packet.h			\
+ vnet/ip/icmp6.h				\
  vnet/ip/ip.h					\
  vnet/ip/ip4.h					\
  vnet/ip/ip4_error.h				\

@@ -5,7 +5,7 @@ packet-generator new {
   size 64-64
   no-recycle
   data {
-    ICMP6: ab::2 -> ab::1
+    ICMP6: 2000::2 -> 2001::2
     ICMP echo_request
     incrementing 100
   }
@@ -13,5 +13,11 @@ packet-generator new {
 
 tr add pg-input 100
 int create-ethernet
+int create-ethernet
 set int state fake-eth0 up
-set int ip address fake-eth0 ab::/64
+set int state fake-eth1 up
+
+set int ip address fake-eth0 2000::1/64
+set int ip address fake-eth1 2001::1/64
+
+ip route add ff02::1:ff00:0/104 via local

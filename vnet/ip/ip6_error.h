@@ -45,8 +45,9 @@
 							\
   /* Errors signalled by ip6-local. */			\
   _ (UNKNOWN_PROTOCOL, "unknown ip protocol")		\
-  _ (TCP_CHECKSUM, "bad tcp checksum")			\
   _ (UDP_CHECKSUM, "bad udp checksum")			\
+  _ (TCP_CHECKSUM, "bad tcp checksum")			\
+  _ (ICMP_CHECKSUM, "bad icmp checksum")		\
   _ (UDP_LENGTH, "inconsistent udp/ip lengths")		\
 							\
   /* Errors signalled by {tcp6,udp6}-lookup. */		\

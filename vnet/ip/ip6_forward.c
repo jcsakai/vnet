@@ -1349,72 +1349,6 @@ static VLIB_REGISTER_NODE (ip6_lookup_node) = {
   .sw_interface_add_del_function = ip6_sw_interface_add_del,
 };
 
-/* Global IP6 main. */
-ip6_main_t ip6_main;
-
-static clib_error_t *
-ip6_lookup_init (vlib_main_t * vm)
-{
-  ip6_main_t * im = &ip6_main;
-  uword i;
-
-  for (i = 0; i < ARRAY_LEN (im->fib_masks); i++)
-    {
-      u32 j, i0, i1;
-
-      i0 = i / 32;
-      i1 = i % 32;
-
-      for (j = 0; j < i0; j++)
-	im->fib_masks[i].as_u32[j] = ~0;
-
-      if (i1)
-	im->fib_masks[i].as_u32[i0] = clib_host_to_net_u32 (pow2_mask (i1) << (32 - i1));
-    }
-
-  /* Create FIB with index 0 and table id of 0. */
-  find_fib_by_table_index_or_id (im, /* table id */ 0, IP6_ROUTE_FLAG_TABLE_ID);
-
-  ip_lookup_init (&im->lookup_main, ip6_lookup_node.index);
-
-  {
-    ip6_icmp_neighbor_header_t p;
-
-    memset (&p, 0, sizeof (p));
-
-    /* Send to broadcast address 0x3333.ffXX.XXXX.  XX will be filled in later. */
-    ip6_multicast_ethernet_address (p.ethernet.dst_address, 0xff000000);
-    p.ethernet.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
-
-    p.ip.ip_version_traffic_class_and_flow_label = clib_host_to_net_u32 (0x6 << 28);
-    p.ip.payload_length = clib_host_to_net_u16 (sizeof (p) - STRUCT_OFFSET_OF (ip6_icmp_neighbor_header_t, icmp));
-    p.ip.protocol = IP_PROTOCOL_ICMP6;
-    p.ip.ttl = 255;
-    ip6_set_solicited_node_multicast_address (&p.ip.dst_address, 0);
-
-    p.icmp.type = ICMP6_neighbor_solicitation;
-
-    p.option_header.type = ICMP6_NEIGHBOR_DISCOVERY_OPTION_source_link_layer_address;
-    p.option_header.n_data_bytes = sizeof (p.option_header) + sizeof (p.src_ethernet_address);
-
-    {
-      ip_csum_t sum = ip_incremental_checksum (0, &p.icmp,
-					       sizeof (p)
-					       - STRUCT_OFFSET_OF (ip6_icmp_neighbor_header_t, icmp));
-      p.icmp.checksum = ~ ip_csum_fold (sum);
-    }
-
-    vlib_packet_template_init (vm,
-			       &im->ip6_discover_neighbor_packet_template,
-			       &p, sizeof (p),
-			       /* alloc chunk size */ 8);
-  }
-
-  return 0;
-}
-
-VLIB_INIT_FUNCTION (ip6_lookup_init);
-
 typedef struct {
   /* Adjacency taken. */
   u32 adj_index;
@@ -1622,18 +1556,10 @@ static VLIB_REGISTER_NODE (ip6_multicast_node) = {
   },
 };
 
-/* Compute TCP/UDP checksum in software. */
-u32 ip6_tcp_udp_checksum (vlib_buffer_t * p0)
+u16 ip6_tcp_udp_icmp_compute_checksum (ip6_header_t * ip0)
 {
-  ip6_header_t * ip0;
   ip_csum_t sum0;
   u16 sum16, payload_length_host_byte_order;
-
-  ip0 = vlib_buffer_get_current (p0);
-
-  /* FIXME handle other headers. */
-  ASSERT (ip0->protocol == IP_PROTOCOL_TCP
-	  || ip0->protocol == IP_PROTOCOL_UDP);
 
   /* Initialize checksum with ip6 header. */
   sum0 = clib_mem_unaligned (&ip0->src_address.as_u64[0], u64);
@@ -1645,33 +1571,38 @@ u32 ip6_tcp_udp_checksum (vlib_buffer_t * p0)
 			     clib_mem_unaligned (&ip0->dst_address.as_u64[1], u64));
 
   sum0 = ip_csum_with_carry (sum0, ip0->payload_length);
-  sum0 = ip_csum_with_carry (sum0, ip0->protocol);
+  sum0 = ip_csum_with_carry (sum0, ip0->protocol << 8);
   payload_length_host_byte_order = clib_net_to_host_u16 (ip0->payload_length);
 
-  if (ip0->protocol == IP_PROTOCOL_TCP)
+  sum0 = ip_incremental_checksum (sum0, (void *) (ip0 + 1), payload_length_host_byte_order);
+  sum16 = ~ ip_csum_fold (sum0);
+
+  return sum16;
+}
+
+/* Compute TCP/UDP/ICMP6 checksum in software. */
+static u32 ip6_tcp_udp_icmp_validate_checksum (vlib_buffer_t * p0)
+{
+  ip6_header_t * ip0 = vlib_buffer_get_current (p0);
+  udp_header_t * udp0;
+  u16 sum16;
+
+  ASSERT (ip0->protocol == IP_PROTOCOL_TCP
+	  || ip0->protocol == IP_PROTOCOL_ICMP6
+	  || ip0->protocol == IP_PROTOCOL_UDP);
+
+  udp0 = (void *) (ip0 + 1);
+  if (ip0->protocol == IP_PROTOCOL_UDP && udp0->checksum == 0)
     {
-      sum0 = ip_incremental_checksum (sum0, (void *) (ip0 + 1), payload_length_host_byte_order);
-      sum16 = ~ ip_csum_fold (sum0);
-    }
-  else
-    {
-      udp_header_t * udp0 = (void *) (ip0 + 1);
-
-      if (udp0->checksum == 0)
-	{
-	  sum16 = 0;
-	  goto done;
-	}
-
-      sum0 = ip_incremental_checksum (sum0, udp0, payload_length_host_byte_order);
-
-      sum16 = ~ ip_csum_fold (sum0);
+      p0->flags |= (IP_BUFFER_L4_CHECKSUM_COMPUTED
+		    | IP_BUFFER_L4_CHECKSUM_CORRECT);
+      return p0->flags;
     }
 
- done:
-  p0->flags |= IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED;
-  if (sum16 == 0)
-    p0->flags |= IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT;
+  sum16 = ip6_tcp_udp_icmp_compute_checksum (ip0);
+
+  p0->flags |= (IP_BUFFER_L4_CHECKSUM_COMPUTED
+		| ((sum16 == 0) << LOG2_IP_BUFFER_L4_CHECKSUM_CORRECT));
 
   return p0->flags;
 }
@@ -1708,9 +1639,8 @@ ip6_local (vlib_main_t * vm,
 	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
 	  u32 pi1, ip_len1, udp_len1, flags1, adj_index1, next1;
 	  i32 len_diff0, len_diff1;
-	  u8 error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
-	  u8 error1, is_udp1, is_tcp_udp1, good_tcp_udp1, proto1;
-	  u8 enqueue_code;
+	  u8 error0, type0, good_l4_checksum0;
+	  u8 error1, type1, good_l4_checksum1;
       
 	  pi0 = to_next[0] = from[0];
 	  pi1 = to_next[1] = from[1];
@@ -1731,25 +1661,27 @@ ip6_local (vlib_main_t * vm,
 	  adj_index0 = i0->non_local.dst_adj_index;
 	  adj_index1 = i1->non_local.dst_adj_index;
 
-	  proto0 = ip0->protocol;
-	  proto1 = ip1->protocol;
-	  is_udp0 = proto0 == IP_PROTOCOL_UDP;
-	  is_udp1 = proto1 == IP_PROTOCOL_UDP;
-	  is_tcp_udp0 = is_udp0 || proto0 == IP_PROTOCOL_TCP;
-	  is_tcp_udp1 = is_udp1 || proto1 == IP_PROTOCOL_TCP;
+	  type0 = lm->builtin_protocol_by_ip_protocol[ip0->protocol];
+	  type1 = lm->builtin_protocol_by_ip_protocol[ip1->protocol];
+
+	  next0 = lm->local_next_by_ip_protocol[ip0->protocol];
+	  next1 = lm->local_next_by_ip_protocol[ip1->protocol];
 
 	  flags0 = p0->flags;
 	  flags1 = p1->flags;
 
-	  good_tcp_udp0 = (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
-	  good_tcp_udp1 = (flags1 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+	  good_l4_checksum0 = (flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
+	  good_l4_checksum1 = (flags1 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 
 	  udp0 = ip6_next_header (ip0);
 	  udp1 = ip6_next_header (ip1);
 
 	  /* Don't verify UDP checksum for packets with explicit zero checksum. */
-	  good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
-	  good_tcp_udp1 |= is_udp1 && udp1->checksum == 0;
+	  good_l4_checksum0 |= type0 == IP_BUILTIN_PROTOCOL_UDP && udp0->checksum == 0;
+	  good_l4_checksum1 |= type1 == IP_BUILTIN_PROTOCOL_UDP && udp1->checksum == 0;
+
+	  good_l4_checksum0 |= type0 == IP_BUILTIN_PROTOCOL_UNKNOWN;
+	  good_l4_checksum1 |= type1 == IP_BUILTIN_PROTOCOL_UNKNOWN;
 
 	  /* Verify UDP length. */
 	  ip_len0 = clib_net_to_host_u16 (ip0->payload_length);
@@ -1760,48 +1692,42 @@ ip6_local (vlib_main_t * vm,
 	  len_diff0 = ip_len0 - udp_len0;
 	  len_diff1 = ip_len1 - udp_len1;
 
-	  len_diff0 = is_udp0 ? len_diff0 : 0;
-	  len_diff1 = is_udp1 ? len_diff1 : 0;
+	  len_diff0 = type0 == IP_BUILTIN_PROTOCOL_UDP ? len_diff0 : 0;
+	  len_diff1 = type1 == IP_BUILTIN_PROTOCOL_UDP ? len_diff1 : 0;
 
-	  if (PREDICT_FALSE (! (is_tcp_udp0 & is_tcp_udp1
-				& good_tcp_udp0 & good_tcp_udp1)))
+	  if (PREDICT_FALSE (type0 != IP_BUILTIN_PROTOCOL_UNKNOWN
+			     && ! good_l4_checksum0
+			     && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED)))
 	    {
-	      if (is_tcp_udp0)
-		{
-		  if (is_tcp_udp0
-		      && ! (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
-		    flags0 = ip6_tcp_udp_checksum (p0);
-		  good_tcp_udp0 =
-		    (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
-		  good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
-		}
-	      if (is_tcp_udp1)
-		{
-		  if (is_tcp_udp1
-		      && ! (flags1 & IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
-		    flags1 = ip6_tcp_udp_checksum (p1);
-		  good_tcp_udp1 =
-		    (flags1 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
-		  good_tcp_udp1 |= is_udp1 && udp1->checksum == 0;
-		}
+	      flags0 = ip6_tcp_udp_icmp_validate_checksum (p0);
+	      good_l4_checksum0 =
+		(flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 	    }
-
-	  good_tcp_udp0 &= len_diff0 >= 0;
-	  good_tcp_udp1 &= len_diff1 >= 0;
+	  if (PREDICT_FALSE (type1 != IP_BUILTIN_PROTOCOL_UNKNOWN
+			     && ! good_l4_checksum1
+			     && ! (flags1 & IP_BUFFER_L4_CHECKSUM_COMPUTED)))
+	    {
+	      flags1 = ip6_tcp_udp_icmp_validate_checksum (p1);
+	      good_l4_checksum1 =
+		(flags1 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
+	    }
 
 	  error0 = error1 = IP6_ERROR_UNKNOWN_PROTOCOL;
 
 	  error0 = len_diff0 < 0 ? IP6_ERROR_UDP_LENGTH : error0;
 	  error1 = len_diff1 < 0 ? IP6_ERROR_UDP_LENGTH : error1;
 
-	  ASSERT (IP6_ERROR_TCP_CHECKSUM + 1 == IP6_ERROR_UDP_CHECKSUM);
-	  error0 = (is_tcp_udp0 && ! good_tcp_udp0
-		    ? IP6_ERROR_TCP_CHECKSUM + is_udp0
+	  ASSERT (IP6_ERROR_UDP_CHECKSUM + IP_BUILTIN_PROTOCOL_UDP == IP6_ERROR_UDP_CHECKSUM);
+	  ASSERT (IP6_ERROR_UDP_CHECKSUM + IP_BUILTIN_PROTOCOL_TCP == IP6_ERROR_TCP_CHECKSUM);
+	  ASSERT (IP6_ERROR_UDP_CHECKSUM + IP_BUILTIN_PROTOCOL_ICMP == IP6_ERROR_ICMP_CHECKSUM);
+	  error0 = (! good_l4_checksum0
+		    ? IP6_ERROR_UDP_CHECKSUM + type0
 		    : error0);
-	  error1 = (is_tcp_udp1 && ! good_tcp_udp1
-		    ? IP6_ERROR_TCP_CHECKSUM + is_udp1
+	  error1 = (! good_l4_checksum1
+		    ? IP6_ERROR_UDP_CHECKSUM + type1
 		    : error1);
 
+	  /* Drop packets from unroutable hosts. */
 	  if (error0 == IP6_ERROR_UNKNOWN_PROTOCOL
 	      && i0->non_local.src_adj_index == ~0)
 	    {
@@ -1823,51 +1749,15 @@ ip6_local (vlib_main_t * vm,
 			: error1);
 	    }
 
-	  next0 = lm->local_next_by_ip_protocol[proto0];
-	  next1 = lm->local_next_by_ip_protocol[proto1];
-
 	  next0 = error0 != IP6_ERROR_UNKNOWN_PROTOCOL ? IP_LOCAL_NEXT_DROP : next0;
 	  next1 = error1 != IP6_ERROR_UNKNOWN_PROTOCOL ? IP_LOCAL_NEXT_DROP : next1;
 
 	  p0->error = error_node->errors[error0];
 	  p1->error = error_node->errors[error1];
 
-	  enqueue_code = (next0 != next_index) + 2*(next1 != next_index);
-
-	  if (PREDICT_FALSE (enqueue_code != 0))
-	    {
-	      switch (enqueue_code)
-		{
-		case 1:
-		  /* A B A */
-		  to_next[-2] = pi1;
-		  to_next -= 1;
-		  n_left_to_next += 1;
-		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
-		  break;
-
-		case 2:
-		  /* A A B */
-		  to_next -= 1;
-		  n_left_to_next += 1;
-		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
-		  break;
-
-		case 3:
-		  /* A B B or A B C */
-		  to_next -= 2;
-		  n_left_to_next += 2;
-		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
-		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
-		  if (next0 == next1)
-		    {
-		      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-		      next_index = next1;
-		      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-		    }
-		  break;
-		}
-	    }
+	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, pi1, next0, next1);
 	}
 
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -1876,9 +1766,9 @@ ip6_local (vlib_main_t * vm,
 	  ip6_header_t * ip0;
 	  ip_local_buffer_opaque_t * i0;
 	  udp_header_t * udp0;
-	  u32 pi0, next0, ip_len0, udp_len0, flags0, adj_index0;
+	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
 	  i32 len_diff0;
-	  u8 error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
+	  u8 error0, type0, good_l4_checksum0;
       
 	  pi0 = to_next[0] = from[0];
 	  from += 1;
@@ -1893,18 +1783,19 @@ ip6_local (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  proto0 = ip0->protocol;
-	  is_udp0 = proto0 == IP_PROTOCOL_UDP;
-	  is_tcp_udp0 = is_udp0 || proto0 == IP_PROTOCOL_TCP;
+	  type0 = lm->builtin_protocol_by_ip_protocol[ip0->protocol];
+	  next0 = lm->local_next_by_ip_protocol[ip0->protocol];
 
 	  flags0 = p0->flags;
 
-	  good_tcp_udp0 = (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
+	  good_l4_checksum0 = (flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 
 	  udp0 = ip6_next_header (ip0);
 
 	  /* Don't verify UDP checksum for packets with explicit zero checksum. */
-	  good_tcp_udp0 |= (is_udp0 && udp0->checksum == 0);
+	  good_l4_checksum0 |= type0 == IP_BUILTIN_PROTOCOL_UDP && udp0->checksum == 0;
+
+	  good_l4_checksum0 |= type0 == IP_BUILTIN_PROTOCOL_UNKNOWN;
 
 	  /* Verify UDP length. */
 	  ip_len0 = clib_net_to_host_u16 (ip0->payload_length);
@@ -1912,27 +1803,26 @@ ip6_local (vlib_main_t * vm,
 
 	  len_diff0 = ip_len0 - udp_len0;
 
-	  len_diff0 = is_udp0 ? len_diff0 : 0;
+	  len_diff0 = type0 == IP_BUILTIN_PROTOCOL_UDP ? len_diff0 : 0;
 
-	  if (PREDICT_FALSE (! (is_tcp_udp0 & good_tcp_udp0)))
+	  if (PREDICT_FALSE (type0 != IP_BUILTIN_PROTOCOL_UNKNOWN
+			     && ! good_l4_checksum0
+			     && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED)))
 	    {
-	      if (is_tcp_udp0
-		  && ! (flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_COMPUTED))
-		flags0 = ip6_tcp_udp_checksum (p0);
-	      good_tcp_udp0 =
-		(flags0 & IP_BUFFER_TCP_UDP_CHECKSUM_CORRECT) != 0;
-	      good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
+	      flags0 = ip6_tcp_udp_icmp_validate_checksum (p0);
+	      good_l4_checksum0 =
+		(flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 	    }
-
-	  good_tcp_udp0 &= len_diff0 >= 0;
 
 	  error0 = IP6_ERROR_UNKNOWN_PROTOCOL;
 
 	  error0 = len_diff0 < 0 ? IP6_ERROR_UDP_LENGTH : error0;
 
-	  ASSERT (IP6_ERROR_TCP_CHECKSUM + 1 == IP6_ERROR_UDP_CHECKSUM);
-	  error0 = (is_tcp_udp0 && ! good_tcp_udp0
-		    ? IP6_ERROR_TCP_CHECKSUM + is_udp0
+	  ASSERT (IP6_ERROR_UDP_CHECKSUM + IP_BUILTIN_PROTOCOL_UDP == IP6_ERROR_UDP_CHECKSUM);
+	  ASSERT (IP6_ERROR_UDP_CHECKSUM + IP_BUILTIN_PROTOCOL_TCP == IP6_ERROR_TCP_CHECKSUM);
+	  ASSERT (IP6_ERROR_UDP_CHECKSUM + IP_BUILTIN_PROTOCOL_ICMP == IP6_ERROR_ICMP_CHECKSUM);
+	  error0 = (! good_l4_checksum0
+		    ? IP6_ERROR_UDP_CHECKSUM + type0
 		    : error0);
 
 	  if (error0 == IP6_ERROR_UNKNOWN_PROTOCOL
@@ -1946,23 +1836,13 @@ ip6_local (vlib_main_t * vm,
 			: error0);
 	    }
 
-	  next0 = lm->local_next_by_ip_protocol[proto0];
-
 	  next0 = error0 != IP6_ERROR_UNKNOWN_PROTOCOL ? IP_LOCAL_NEXT_DROP : next0;
 
 	  p0->error = error_node->errors[error0];
 
-	  if (PREDICT_FALSE (next0 != next_index))
-	    {
-	      n_left_to_next += 1;
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-
-	      next_index = next0;
-	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-	      to_next[0] = pi0;
-	      to_next += 1;
-	      n_left_to_next -= 1;
-	    }
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   pi0, next0);
 	}
   
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
@@ -2105,11 +1985,11 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
 	  {
 	    u32 bi0;
-	    ip6_icmp_neighbor_header_t * h0;
+	    vlib_buffer_t * b0;
+	    icmp6_neighbor_solicitation_for_ethernet_t * h0;
 	    vlib_sw_interface_t * swif0;
 	    ethernet_interface_t * eif0;
 	    u8 * eth_addr0, dummy[6] = { 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, };
-	    ip_csum_t sum0;
 
 	    h0 = vlib_packet_template_get_packet (vm, &im->ip6_discover_neighbor_packet_template, &bi0);
 
@@ -2127,7 +2007,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	    h0->ethernet.dst_address[5] = ip0->dst_address.as_u8[15];
 
 	    /* Source address is our link local v6 address. */
-	    ip6_link_local_address_from_ethernet_address (&h0->ip.src_address, eth_addr0);
+	    h0->ip.src_address = vec_elt (im->ip6_address_by_sw_if_index, sw_if_index0);
 
 	    /* Destination address is a solicited node multicast address.  We need to fill in
 	       the low 24 bits with low 24 bits of target's address. */
@@ -2135,20 +2015,17 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	    h0->ip.dst_address.as_u8[14] = ip0->dst_address.as_u8[14];
 	    h0->ip.dst_address.as_u8[15] = ip0->dst_address.as_u8[15];
 
-	    h0->target_address = ip0->dst_address;
+	    h0->neighbor.target_address = ip0->dst_address;
 
-	    /* Update icmp checksum. */
-	    {
-	      int i;
-	      sum0 = h0->icmp.checksum;
-	      for (i = 0; i < ARRAY_LEN (h0->ip.src_address.as_uword); i++)
-		sum0 = ip_csum_with_carry (sum0, h0->target_address.as_uword[i]);
-	      sum0 = ip_incremental_checksum (sum0, h0->src_ethernet_address, sizeof (h0->src_ethernet_address));
+	    memcpy (h0->link_layer_option.ethernet_address, eth_addr0,
+		    sizeof (h0->link_layer_option.ethernet_address));
 
-	      h0->icmp.checksum = ~ip_csum_fold (sum0);
-	    }
+	    h0->neighbor.icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (&h0->ip);
+	    ASSERT (0 == ip6_tcp_udp_icmp_compute_checksum (&h0->ip));
 
 	    vlib_buffer_copy_trace_flag (vm, p0, bi0);
+	    b0 = vlib_get_buffer (vm, bi0);
+	    b0->sw_if_index[VLIB_TX] = p0->sw_if_index[VLIB_TX];
 
 	    vlib_set_next_frame_buffer (vm, node, next0, bi0);
 	  }
@@ -2250,23 +2127,21 @@ ip6_rewrite (vlib_main_t * vm,
 
 	  error0 = error1 = IP6_ERROR_NONE;
 
-	  /* Decrement TTL & update checksum.
-	     Works either endian, so no need for byte swap. */
 	  {
-	    i32 ttl0 = ip0->ttl, ttl1 = ip1->ttl;
+	    i32 hop_limit0 = ip0->hop_limit, hop_limit1 = ip1->hop_limit;
 
-	    /* Input node should have reject packets with ttl 0. */
-	    ASSERT (ip0->ttl > 0);
-	    ASSERT (ip1->ttl > 0);
+	    /* Input node should have reject packets with hop limit 0. */
+	    ASSERT (ip0->hop_limit > 0);
+	    ASSERT (ip1->hop_limit > 0);
 
-	    ttl0 -= 1;
-	    ttl1 -= 1;
+	    hop_limit0 -= 1;
+	    hop_limit1 -= 1;
 
-	    ip0->ttl = ttl0;
-	    ip1->ttl = ttl1;
+	    ip0->hop_limit = hop_limit0;
+	    ip1->hop_limit = hop_limit1;
 
-	    error0 = ttl0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
-	    error1 = ttl1 <= 0 ? IP6_ERROR_TIME_EXPIRED : error1;
+	    error0 = hop_limit0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
+	    error1 = hop_limit1 <= 0 ? IP6_ERROR_TIME_EXPIRED : error1;
 	  }
 
 	  /* Rewrite packet header and updates lengths. */
@@ -2338,15 +2213,15 @@ ip6_rewrite (vlib_main_t * vm,
 
 	  /* Check TTL */
 	  {
-	    i32 ttl0 = ip0->ttl;
+	    i32 hop_limit0 = ip0->hop_limit;
 
-	    ASSERT (ip0->ttl > 0);
+	    ASSERT (ip0->hop_limit > 0);
 
-	    ttl0 -= 1;
+	    hop_limit0 -= 1;
 
-	    ip0->ttl = ttl0;
+	    ip0->hop_limit = hop_limit0;
 
-	    error0 = ttl0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
+	    error0 = hop_limit0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
 	  }
 
 	  /* Guess we are only writing on simple Ethernet header. */
@@ -2407,4 +2282,62 @@ VLIB_REGISTER_NODE (ip6_rewrite_node) = {
   },
 };
 
+/* Global IP6 main. */
+ip6_main_t ip6_main;
 
+static clib_error_t *
+ip6_lookup_init (vlib_main_t * vm)
+{
+  ip6_main_t * im = &ip6_main;
+  uword i;
+
+  for (i = 0; i < ARRAY_LEN (im->fib_masks); i++)
+    {
+      u32 j, i0, i1;
+
+      i0 = i / 32;
+      i1 = i % 32;
+
+      for (j = 0; j < i0; j++)
+	im->fib_masks[i].as_u32[j] = ~0;
+
+      if (i1)
+	im->fib_masks[i].as_u32[i0] = clib_host_to_net_u32 (pow2_mask (i1) << (32 - i1));
+    }
+
+  /* Create FIB with index 0 and table id of 0. */
+  find_fib_by_table_index_or_id (im, /* table id */ 0, IP6_ROUTE_FLAG_TABLE_ID);
+
+  ip_lookup_init (&im->lookup_main, ip6_lookup_node.index);
+
+  {
+    icmp6_neighbor_solicitation_for_ethernet_t p;
+
+    memset (&p, 0, sizeof (p));
+
+    /* Send to broadcast address 0x3333.ffXX.XXXX.  XX will be filled in later. */
+    ip6_multicast_ethernet_address (p.ethernet.dst_address, 0xff000000);
+    p.ethernet.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
+
+    p.ip.ip_version_traffic_class_and_flow_label = clib_host_to_net_u32 (0x6 << 28);
+    p.ip.payload_length = clib_host_to_net_u16 (sizeof (p)
+						- STRUCT_OFFSET_OF (icmp6_neighbor_solicitation_for_ethernet_t, neighbor));
+    p.ip.protocol = IP_PROTOCOL_ICMP6;
+    p.ip.hop_limit = 255;
+    ip6_set_solicited_node_multicast_address (&p.ip.dst_address, 0);
+
+    p.neighbor.icmp.type = ICMP6_neighbor_solicitation;
+
+    p.link_layer_option.header.type = ICMP6_NEIGHBOR_DISCOVERY_OPTION_source_link_layer_address;
+    p.link_layer_option.header.n_data_u64s = sizeof (p.link_layer_option) / sizeof (u64);
+
+    vlib_packet_template_init (vm,
+			       &im->ip6_discover_neighbor_packet_template,
+			       &p, sizeof (p),
+			       /* alloc chunk size */ 8);
+  }
+
+  return 0;
+}
+
+VLIB_INIT_FUNCTION (ip6_lookup_init);
