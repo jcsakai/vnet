@@ -456,21 +456,19 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 VLIB_CONFIG_FUNCTION (tuntap_config, "tuntap");
 
 static void
-tuntap_ip4_set_interface_address (ip4_main_t * im,
-				  uword opaque,
-				  u32 sw_if_index,
-				  ip4_address_t * address,
-				  u32 address_length)
+tuntap_ip4_add_del_interface_address (ip4_main_t * im,
+				      uword opaque,
+				      u32 sw_if_index,
+				      ip4_address_t * address,
+				      u32 address_length,
+				      u32 is_delete)
 {
   tuntap_main_t * tm = &tuntap_main;
-  uword is_delete;
   struct ifreq ifr;
 
   /* Tuntap disabled. */
   if (tm->dev_tap_fd < 0)
     return;
-
-  is_delete = ! ip4_interface_address_is_valid (address);
 
   /* Use VLIB sw_if_index to select alias device. */
   memset (&ifr, 0, sizeof (ifr));
@@ -511,15 +509,15 @@ tuntap_init (vlib_main_t * vm)
 {
   clib_error_t * error;
   ip4_main_t * im = &ip4_main;
-  ip4_set_interface_address_callback_t cb;
+  ip4_add_del_interface_address_callback_t cb;
 
   error = vlib_call_init_function (vm, ip4_init);
   if (error)
     return error;
 
-  cb.function = tuntap_ip4_set_interface_address;
+  cb.function = tuntap_ip4_add_del_interface_address;
   cb.function_opaque = 0;
-  vec_add1 (im->set_interface_address_callbacks, cb);
+  vec_add1 (im->add_del_interface_address_callbacks, cb);
 
   return 0;
 }

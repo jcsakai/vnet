@@ -48,6 +48,11 @@
 #include <vnet/ip/ip6_error.h>
 #include <vnet/ip/icmp6.h>
 
+typedef union {
+  ip4_address_t ip4;
+  ip6_address_t ip6;
+} ip46_address_t;
+
 /* Per protocol info. */
 typedef struct {
   /* Protocol name (also used as hash key). */

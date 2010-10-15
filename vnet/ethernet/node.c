@@ -94,6 +94,7 @@ ethernet_input (vlib_main_t * vm,
 	  u32 bi0, bi1;
 	  vlib_buffer_t * b0, * b1;
 	  ethernet_header_t * e0, * e1;
+	  ethernet_buffer_opaque_t * o0, * o1;
 	  u32 i0, i1, type0, type1, enqueue_code;
 
 	  /* Prefetch next iteration. */
@@ -122,9 +123,15 @@ ethernet_input (vlib_main_t * vm,
 	  b0 = vlib_get_buffer (vm, bi0);
 	  b1 = vlib_get_buffer (vm, bi1);
 
+	  o0 = vlib_get_buffer_opaque (b0);
+	  o1 = vlib_get_buffer_opaque (b1);
+
 	  /* FIXME sap/snap/vlan */
 	  e0 = (void *) (b0->data + b0->current_data);
 	  e1 = (void *) (b1->data + b1->current_data);
+
+	  o0->start_of_ethernet_header = b0->current_data;
+	  o1->start_of_ethernet_header = b1->current_data;
 
 	  b0->current_data += sizeof (e0[0]);
 	  b1->current_data += sizeof (e1[0]);
@@ -189,6 +196,7 @@ ethernet_input (vlib_main_t * vm,
 	{
 	  u32 bi0;
 	  vlib_buffer_t * b0;
+	  ethernet_buffer_opaque_t * o0;
 	  ethernet_header_t * e0;
 	  u32 i0, type0;
 
@@ -202,6 +210,10 @@ ethernet_input (vlib_main_t * vm,
 	  b0 = vlib_get_buffer (vm, bi0);
 
 	  e0 = (void *) (b0->data + b0->current_data);
+
+	  o0 = vlib_get_buffer_opaque (b0);
+
+	  o0->start_of_ethernet_header = b0->current_data;
 
 	  b0->current_data += sizeof (e0[0]);
 	  b0->current_length -= sizeof (e0[0]);

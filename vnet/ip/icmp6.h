@@ -10,6 +10,8 @@
   _ (OPTIONS_WITH_ODD_LENGTH, "total option length not multiple of 8 bytes") \
   _ (OPTION_WITH_ZERO_LENGTH, "option has zero length")			\
   _ (ECHO_REPLIES_SENT, "echo replies sent")				\
+  _ (NEIGHBOR_SOLICITATION_SOURCE_NOT_ON_LINK, "neighbor solicitations from source not on link") \
+  _ (NEIGHBOR_SOLICITATION_SOURCE_UNKNOWN, "neighbor solicitations for unknown targets") \
   _ (NEIGHBOR_ADVERTISEMENTS_SENT, "neighbor advertisements sent")
 
 typedef enum {

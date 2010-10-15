@@ -206,6 +206,12 @@ static VLIB_CLI_COMMAND (show_ip6_neighbors_command) = {
   .parent = &vlib_cli_show_ip6_command,
 };
 
+typedef enum {
+  ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP,
+  ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY,
+  ICMP6_NEIGHBOR_SOLICITATION_N_NEXT,
+} icmp6_neighbor_solicitation_or_advertisement_next_t;
+
 always_inline uword
 icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 					      vlib_node_runtime_t * node,
@@ -213,15 +219,17 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 					      uword is_solicitation)
 {
   ip6_main_t * im = &ip6_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
   ip6_neighbor_main_t * nm = &ip6_neighbor_main;
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
-  u32 n_left_from, n_left_to_next, next;
+  u32 n_left_from, n_left_to_next, next_index, n_advertisements_sent;
   icmp6_neighbor_discovery_option_type_t option_type;
+  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip6_icmp_input_node.index);
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
-  next = node->cached_next_index;
+  next_index = node->cached_next_index;
   
   if (node->flags & VLIB_NODE_FLAG_TRACE)
     vlib_trace_frame_buffers_only (vm, node, from, frame->n_vectors,
@@ -232,10 +240,11 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
     (is_solicitation
      ? ICMP6_NEIGHBOR_DISCOVERY_OPTION_source_link_layer_address
      : ICMP6_NEIGHBOR_DISCOVERY_OPTION_target_link_layer_address);
+  n_advertisements_sent = 0;
 
   while (n_left_from > 0)
     {
-      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
@@ -244,7 +253,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	  ip_buffer_opaque_t * i0;
 	  icmp6_neighbor_solicitation_or_advertisement_header_t * h0;
 	  icmp6_neighbor_discovery_ethernet_link_layer_address_option_t * o0;
-	  u32 bi0, options_len0, sw_if_index0;
+	  u32 bi0, options_len0, sw_if_index0, next0, error0;
       
 	  bi0 = to_next[0] = from[0];
 
@@ -259,6 +268,22 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	  h0 = ip6_next_header (ip0);
 	  options_len0 = clib_net_to_host_u16 (ip0->payload_length) - sizeof (h0[0]);
 
+	  error0 = ICMP6_ERROR_NONE;
+
+	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
+
+	  /* Check that source address is unspecified, link-local or else on-link. */
+	  if (! ip6_address_is_unspecified (&ip0->src_address)
+	      && ! ip6_address_is_link_local_unicast (&ip0->src_address))
+	    {
+	      u32 src_adj_index0 = ip6_src_lookup_for_packet (im, p0, ip0);
+	      ip_adjacency_t * adj0 = ip_get_adjacency (&im->lookup_main, src_adj_index0);
+
+	      error0 = (adj0->rewrite_header.sw_if_index != sw_if_index0
+			? ICMP6_ERROR_NEIGHBOR_SOLICITATION_SOURCE_NOT_ON_LINK
+			: error0);
+	  }
+	      
 	  o0 = (void *) (h0 + 1);
 	  o0 = ((options_len0 == 8
 		 && o0->header.type == option_type
@@ -266,20 +291,31 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 		? o0
 		: 0);
 
-	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
-
-	  if (PREDICT_TRUE (o0 != 0))
+	  if (PREDICT_TRUE (error0 != ICMP6_ERROR_NONE && o0 != 0))
 	    set_ethernet_neighbor (vm, nm, sw_if_index0,
 				   is_solicitation ? &ip0->src_address : &h0->target_address,
 				   o0->ethernet_address);
 
+	  if (is_solicitation && error0 == ICMP6_ERROR_NONE)
+	    {
+	      /* Check that target address is one that we know about. */
+	      ip_interface_address_t * ia0;
+	      ia0 = ip_get_interface_address (lm, &h0->target_address);
+	      error0 = ia0 == 0 ? ICMP6_ERROR_NEIGHBOR_SOLICITATION_SOURCE_UNKNOWN : error0;
+	    }
+
 	  if (is_solicitation)
+	    next0 = error0 != ICMP6_ERROR_NONE ? ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP : ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY;
+	  else
+	    next0 = 0;
+
+	  if (is_solicitation && error0 == ICMP6_ERROR_NONE)
 	    {
 	      vlib_sw_interface_t * sw_if0;
 	      ethernet_interface_t * eth_if0;
 
 	      ip0->dst_address = ip0->src_address;
-	      ip0->src_address = vec_elt (im->ip6_address_by_sw_if_index, sw_if_index0);
+	      ip0->src_address = h0->target_address;
 	      h0->icmp.type = ICMP6_neighbor_advertisement;
 
 	      sw_if0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
@@ -300,15 +336,22 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	      h0->icmp.checksum = 0;
 	      h0->icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (ip0);
+
+	      n_advertisements_sent++;
 	    }
+
+	  p0->error = error_node->errors[error0];
+
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+					   to_next, n_left_to_next,
+					   bi0, next0);
 	}
-  
-      vlib_put_next_frame (vm, node, next, n_left_to_next);
+
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
-  vlib_error_count (vm, ip6_icmp_input_node.index,
-		    ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_SENT,
-		    frame->n_vectors);
+  /* Account for advertisements sent. */
+  vlib_error_count (vm, error_node->node_index, ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_SENT, n_advertisements_sent);
 
   return frame->n_vectors;
 }
@@ -335,9 +378,10 @@ static VLIB_REGISTER_NODE (ip6_icmp_neighbor_solicitation_node) = {
 
   .sw_interface_admin_up_down_function = ip6_neighbor_sw_interface_up_down,
 
-  .n_next_nodes = 1,
+  .n_next_nodes = ICMP6_NEIGHBOR_SOLICITATION_N_NEXT,
   .next_nodes = {
-    [0] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP] = "error-drop",
+    [ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
   },
 };
 

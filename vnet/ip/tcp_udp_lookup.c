@@ -323,8 +323,10 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	  li0 = lm->listener_index_by_dst_port[tcp0->ports.dst];
 	  l0 = pool_elt_at_index (lm->listener_pool, li0);
 
+	  /* FIXME make it a clib bitmap. */
+	  ASSERT (adj0->if_address_index < BITS (l0->valid_local_adjacency_bitmap));
 	  listener_is_valid0 =
-	    (l0->valid_local_adjacency_bitmap >> adj0->local_index) & 1;
+	    (l0->valid_local_adjacency_bitmap >> adj0->if_address_index) & 1;
 
 	  i0 = ci0 ? ci0 : li0;
 	  i0 = listener_is_valid0 ? i0 : unknown_port_error;
@@ -567,7 +569,13 @@ tcp_udp_lookup_init (vlib_main_t * vm)
   ip6_main_t * im6 = &ip6_main;
   ip_lookup_main_t * lm4 = &im4->lookup_main;
   ip_lookup_main_t * lm6 = &im6->lookup_main;
+  clib_error_t * error;
   int i;
+
+  if ((error = vlib_call_init_function (vm, ip4_lookup_init)))
+    return error;
+  if ((error = vlib_call_init_function (vm, ip6_lookup_init)))
+    return error;
 
   /* Setup all IP protocols to be punted and builtin-unknown. */
   for (i = 0; i < 256; i++)
@@ -578,7 +586,6 @@ tcp_udp_lookup_init (vlib_main_t * vm)
       lm6->builtin_protocol_by_ip_protocol[i] = IP_BUILTIN_PROTOCOL_UNKNOWN;
     }
 
-  lm4->is_ip6 = 0;
   lm4->local_next_by_ip_protocol[IP_PROTOCOL_TCP] = IP_LOCAL_NEXT_TCP_LOOKUP;
   lm4->local_next_by_ip_protocol[IP_PROTOCOL_UDP] = IP_LOCAL_NEXT_UDP_LOOKUP;
   lm4->local_next_by_ip_protocol[IP_PROTOCOL_ICMP] = IP_LOCAL_NEXT_ICMP;
@@ -586,7 +593,6 @@ tcp_udp_lookup_init (vlib_main_t * vm)
   lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_UDP] = IP_BUILTIN_PROTOCOL_UDP;
   lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_ICMP] = IP_BUILTIN_PROTOCOL_ICMP;
 
-  lm6->is_ip6 = 1;
   lm6->local_next_by_ip_protocol[IP_PROTOCOL_TCP] = IP_LOCAL_NEXT_TCP_LOOKUP;
   lm6->local_next_by_ip_protocol[IP_PROTOCOL_UDP] = IP_LOCAL_NEXT_UDP_LOOKUP;
   lm6->local_next_by_ip_protocol[IP_PROTOCOL_ICMP6] = IP_LOCAL_NEXT_ICMP;

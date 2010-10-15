@@ -137,6 +137,43 @@ ip6_address_is_zero (ip6_address_t * a)
   return 1;
 }
 
+/* Check for unspecified address ::0 */
+always_inline uword
+ip6_address_is_unspecified (ip6_address_t * a)
+{ return ip6_address_is_zero (a); }
+
+/* Check for loopback address ::1 */
+always_inline uword
+ip6_address_is_loopback (ip6_address_t * a)
+{
+  uword is_loopback;
+  u8 save = a->as_u8[15];
+  a->as_u8[15] = save ^ 1;
+  is_loopback = ip6_address_is_zero (a);
+  a->as_u8[15] = save;
+  return is_loopback;
+}
+
+/* Check for link local unicast fe80::/10. */
+always_inline uword
+ip6_address_is_link_local_unicast (ip6_address_t * a)
+{ return a->as_u8[0] == 0xfe && (a->as_u8[1] & 0xc0) == 0x80; }
+
+/* Check for unique local unicast fc00::/7. */
+always_inline uword
+ip6_address_is_local_unicast (ip6_address_t * a)
+{ return (a->as_u8[0] & 0xfe) == 0xfc; }
+
+/* Chekc for solicited node multicast 0xff02::1:ff00:0/104 */
+always_inline uword
+ip6_is_solicited_node_multicast_address (ip6_address_t * a)
+{
+  return (a->as_u32[0] == clib_host_to_net_u32 (0xff020000)
+	  && a->as_u32[1] == 0
+	  && a->as_u32[2] == clib_host_to_net_u32 (1)
+	  && a->as_u8[12] == 0xff);
+}
+
 typedef struct {
   /* 4 bit version, 8 bit traffic class and 20 bit flow label. */
   u32 ip_version_traffic_class_and_flow_label;

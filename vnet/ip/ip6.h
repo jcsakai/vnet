@@ -81,17 +81,18 @@ typedef struct {
   uword function_opaque;
 } ip6_add_del_route_callback_t;
 
-typedef void (ip6_set_interface_address_function_t)
+typedef void (ip6_add_del_interface_address_function_t)
   (struct ip6_main_t * im,
    uword opaque,
    u32 sw_if_index,
    ip6_address_t * address,
-   u32 address_length);
+   u32 address_length,
+   u32 is_del);
 
 typedef struct {
-  ip6_set_interface_address_function_t * function;
+  ip6_add_del_interface_address_function_t * function;
   uword function_opaque;
-} ip6_set_interface_address_callback_t;
+} ip6_add_del_interface_address_callback_t;
 
 typedef enum {
   /* First check access list to either permit or deny this
@@ -127,16 +128,11 @@ typedef struct ip6_main_t {
   /* Vector of functions to call when routes are added/deleted. */
   ip6_add_del_route_callback_t * add_del_route_callbacks;
 
-  /* IP6 address and length (e.g. netmask) for interfaces.
-     Address of ~0 means interface has no IP6 address. */
-  ip6_address_t * ip6_address_by_sw_if_index;
-  u8 * ip6_address_length_by_sw_if_index;
-
   /* Hash table mapping interface rewrite adjacency index by sw if index. */
-  uword * interface_adj_index_by_sw_if_index;
+  uword * interface_route_adj_index_by_sw_if_index;
 
   /* Functions to call when interface address changes. */
-  ip6_set_interface_address_callback_t * set_interface_address_callbacks;
+  ip6_add_del_interface_address_callback_t * add_del_interface_address_callbacks;
 
   /* Template used to generate IP6 neighbor solicitation packets. */
   vlib_packet_template_t ip6_discover_neighbor_packet_template;
@@ -160,31 +156,8 @@ extern vlib_node_registration_t ip6_input_node;
 extern vlib_node_registration_t ip6_rewrite_node;
 extern vlib_node_registration_t ip6_discover_neighbor_node;
 
-always_inline ip6_address_t *
-ip6_get_interface_address (ip6_main_t * im, u32 sw_if_index)
-{ return vec_elt_at_index (im->ip6_address_by_sw_if_index, sw_if_index); }
-
-always_inline uword
-ip6_get_interface_address_length (ip6_main_t * im, u32 sw_if_index)
-{ return vec_elt (im->ip6_address_length_by_sw_if_index, sw_if_index); }
-
-always_inline uword
-ip6_interface_address_is_valid (ip6_address_t * a)
-{
-  int i;
-  for (i = 0; i < ARRAY_LEN (a->as_uword); i++)
-    if (a->as_uword[i] != ~0)
-      return 1;
-  return 0;
-}
-
-always_inline void
-ip6_interface_address_set_invalid (ip6_address_t * a)
-{
-  int i;
-  for (i = 0; i < ARRAY_LEN (a->as_uword); i++)
-    a->as_uword[i] = ~0;
-}
+u32
+ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst);
 
 always_inline uword
 ip6_destination_matches_route (ip6_main_t * im,
@@ -199,6 +172,15 @@ ip6_destination_matches_route (ip6_main_t * im,
 	return 0;
     }
   return 1;
+}
+
+always_inline uword
+ip6_destination_matches_interface (ip6_main_t * im,
+				   ip6_address_t * key,
+				   ip_interface_address_t * ia)
+{
+  ip6_address_t * a = ip_interface_address_get_address (&im->lookup_main, ia);
+  return ip6_destination_matches_route (im, key, a, ia->address_length);
 }
 
 /* As above but allows for unaligned destinations (e.g. works right from IP header of packet). */
@@ -217,9 +199,29 @@ ip6_unaligned_destination_matches_route (ip6_main_t * im,
   return 1;
 }
 
-void
-ip6_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
-			   ip6_address_t * to_set, u32 to_set_length);
+always_inline void
+ip6_src_address_for_packet (ip6_main_t * im, vlib_buffer_t * p, ip6_address_t * src, u32 sw_if_index)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip_interface_address_t * ia = ip_interface_address_for_packet (lm, p, sw_if_index);
+  ip6_address_t * a = ip_interface_address_get_address (lm, ia);
+  *src = a[0];
+}
+
+always_inline u32
+ip6_src_lookup_for_packet (ip6_main_t * im, vlib_buffer_t * p, ip6_header_t * i)
+{
+  ip_buffer_opaque_t * o = vlib_get_buffer_opaque (p);
+  if (o->src_adj_index == ~0)
+    o->src_adj_index =
+      ip6_fib_lookup (im, p->sw_if_index[VLIB_RX], &i->src_address);
+  return o->src_adj_index;
+}
+
+clib_error_t *
+ip6_add_del_interface_address (vlib_main_t * vm, u32 sw_if_index,
+			       ip6_address_t * address, u32 address_length,
+			       u32 is_del);
 
 int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2);
 
@@ -275,7 +277,7 @@ void
 ip6_foreach_matching_route (ip6_main_t * im,
 			    u32 table_index_or_table_id,
 			    u32 flags,
-			    u8 * address,
+			    ip6_address_t * address,
 			    u32 address_length,
 			    ip6_address_t ** results,
 			    u8 ** result_length);
@@ -283,14 +285,17 @@ ip6_foreach_matching_route (ip6_main_t * im,
 void ip6_delete_matching_routes (ip6_main_t * im,
 				 u32 table_index_or_table_id,
 				 u32 flags,
-				 u8 * address,
+				 ip6_address_t * address,
 				 u32 address_length);
 
 void ip6_maybe_remap_adjacencies (ip6_main_t * im,
 				  u32 table_index_or_table_id,
 				  u32 flags);
 
-void ip6_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj, u32 sw_if_index);
+void ip6_adjacency_set_interface_route (vlib_main_t * vm,
+					ip_adjacency_t * adj,
+					u32 sw_if_index,
+					u32 if_address_index);
 
 uword
 ip6_tcp_register_listener (vlib_main_t * vm,

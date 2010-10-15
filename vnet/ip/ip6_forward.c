@@ -28,7 +28,7 @@
 #include <vnet/vnet/l3_types.h>
 
 /* This is really, really simple but stupid fib. */
-static u32
+u32
 ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
@@ -411,7 +411,7 @@ ip6_add_del_route_next_hop (ip6_main_t * im,
   is_interface_next_hop = ip6_address_is_zero (next_hop);
   if (is_interface_next_hop)
     {
-      nh_result = hash_get (im->interface_adj_index_by_sw_if_index, next_hop_sw_if_index);
+      nh_result = hash_get (im->interface_route_adj_index_by_sw_if_index, next_hop_sw_if_index);
       if (nh_result)
 	nh_adj_index = *nh_result;
       else
@@ -419,9 +419,9 @@ ip6_add_del_route_next_hop (ip6_main_t * im,
 	  ip_adjacency_t * adj;
 	  adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
 				  &nh_adj_index);
-	  ip6_adjacency_set_interface_route (vm, adj, next_hop_sw_if_index);
+	  ip6_adjacency_set_interface_route (vm, adj, next_hop_sw_if_index, ~0);
 	  ip_call_add_del_adjacency_callbacks (lm, next_hop_sw_if_index, /* is_del */ 0);
-	  hash_set (im->interface_adj_index_by_sw_if_index, next_hop_sw_if_index, nh_adj_index);
+	  hash_set (im->interface_route_adj_index_by_sw_if_index, next_hop_sw_if_index, nh_adj_index);
 	}
     }
   else
@@ -532,18 +532,16 @@ void
 ip6_foreach_matching_route (ip6_main_t * im,
 			    u32 table_index_or_table_id,
 			    u32 flags,
-			    u8 * address,
+			    ip6_address_t * dst_address,
 			    u32 address_length,
 			    ip6_address_t ** results,
 			    u8 ** result_lengths)
 {
   ip6_fib_t * fib = find_fib_by_table_index_or_id (im, table_index_or_table_id, flags);
   ip6_fib_mhash_t * mh;
-  ip6_address_t dst_address, * k;
+  ip6_address_t * k;
   uword * v;
   
-  memcpy (&dst_address, address, sizeof (dst_address));
-
   if (*results)
     _vec_len (*results) = 0;
   if (*result_lengths)
@@ -555,7 +553,7 @@ ip6_foreach_matching_route (ip6_main_t * im,
 	continue;
 
       mhash_foreach (k, v, &mh->adj_index_by_dst_address, ({
-	if (ip6_destination_matches_route (im, k, &dst_address, mh->dst_address_length))
+	if (ip6_destination_matches_route (im, k, dst_address, mh->dst_address_length))
 	  {
 	    vec_add1 (*results, k[0]);
 	    vec_add1 (*result_lengths, mh->dst_address_length);
@@ -634,7 +632,7 @@ void ip6_maybe_remap_adjacencies (ip6_main_t * im,
 void ip6_delete_matching_routes (ip6_main_t * im,
 				 u32 table_index_or_table_id,
 				 u32 flags,
-				 u8 * address,
+				 ip6_address_t * address,
 				 u32 address_length)
 {
   static ip6_address_t * matching_addresses;
@@ -878,8 +876,10 @@ ip6_lookup (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
-void ip6_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj,
-					u32 sw_if_index)
+void ip6_adjacency_set_interface_route (vlib_main_t * vm,
+					ip_adjacency_t * adj,
+					u32 sw_if_index,
+					u32 if_address_index)
 {
   vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
   ip_lookup_next_t n;
@@ -889,6 +889,7 @@ void ip6_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj,
     {
       n = IP_LOOKUP_NEXT_ARP;
       node_index = ip6_discover_neighbor_node.index;
+      adj->if_address_index = if_address_index;
     }
   else
     {
@@ -909,70 +910,70 @@ void ip6_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj,
 static void
 ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
 			  ip6_main_t * im, u32 fib_index,
-			  ip6_address_t * address,
-			  u32 address_length)
+			  ip_interface_address_t * a)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
   ip_adjacency_t * adj;
-  ip6_add_del_route_args_t a;
+  ip6_address_t * address = ip_interface_address_get_address (lm, a);
+  ip6_add_del_route_args_t x;
 
   /* Add e.g. 1.0.0.0/8 as interface route (arp for Ethernet). */
-  a.table_index_or_table_id = fib_index;
-  a.flags = (IP6_ROUTE_FLAG_ADD
+  x.table_index_or_table_id = fib_index;
+  x.flags = (IP6_ROUTE_FLAG_ADD
 	     | IP6_ROUTE_FLAG_FIB_INDEX
 	     | IP6_ROUTE_FLAG_NO_REDISTRIBUTE);
-  a.dst_address = address[0];
-  a.dst_address_length = address_length;
-  a.n_add_adj = 0;
-  a.add_adj = 0;
+  x.dst_address = address[0];
+  x.dst_address_length = a->address_length;
+  x.n_add_adj = 0;
+  x.add_adj = 0;
 
-  if (address_length < 128)
+  if (a->address_length < 128)
     {
       adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
-			      &a.adj_index);
-      ip6_adjacency_set_interface_route (vm, adj, sw_if_index);
-      ip_call_add_del_adjacency_callbacks (lm, a.adj_index, /* is_del */ 0);
-      ip6_add_del_route (im, &a);
+			      &x.adj_index);
+      ip6_adjacency_set_interface_route (vm, adj, sw_if_index, a - lm->if_address_pool);
+      ip_call_add_del_adjacency_callbacks (lm, x.adj_index, /* is_del */ 0);
+      ip6_add_del_route (im, &x);
     }
 
   /* Add e.g. ::1/128 as local to this host. */
   adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
-			  &a.adj_index);
+			  &x.adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
-  ip_call_add_del_adjacency_callbacks (lm, a.adj_index, /* is_del */ 0);
-  a.dst_address_length = 128;
-  ip6_add_del_route (im, &a);
+  adj->if_address_index = a - lm->if_address_pool;
+  adj->rewrite_header.sw_if_index = sw_if_index;
+  ip_call_add_del_adjacency_callbacks (lm, x.adj_index, /* is_del */ 0);
+  x.dst_address_length = 128;
+  ip6_add_del_route (im, &x);
 }
 
 static void
 ip6_del_interface_routes (ip6_main_t * im, u32 fib_index,
 			  ip6_address_t * address, u32 address_length)
 {
-  ip6_add_del_route_args_t a;
+  ip6_add_del_route_args_t x;
 
   /* Add e.g. 1.0.0.0/8 as interface route (arp for Ethernet). */
-  a.table_index_or_table_id = fib_index;
-  a.flags = (IP6_ROUTE_FLAG_DEL
+  x.table_index_or_table_id = fib_index;
+  x.flags = (IP6_ROUTE_FLAG_DEL
 	     | IP6_ROUTE_FLAG_FIB_INDEX
 	     | IP6_ROUTE_FLAG_NO_REDISTRIBUTE);
-  a.dst_address = address[0];
-  a.dst_address_length = address_length;
-  a.adj_index = ~0;
-  a.n_add_adj = 0;
-  a.add_adj = 0;
-
-  ASSERT (ip6_interface_address_is_valid (address));
+  x.dst_address = address[0];
+  x.dst_address_length = address_length;
+  x.adj_index = ~0;
+  x.n_add_adj = 0;
+  x.add_adj = 0;
 
   if (address_length < 128)
-    ip6_add_del_route (im, &a);
+    ip6_add_del_route (im, &x);
 
-  a.dst_address_length = 128;
-  ip6_add_del_route (im, &a);
+  x.dst_address_length = 128;
+  ip6_add_del_route (im, &x);
 
   ip6_delete_matching_routes (im,
 			      fib_index,
 			      IP6_ROUTE_FLAG_FIB_INDEX,
-			      address->as_u8,
+			      address,
 			      address_length);
 }
 
@@ -1012,13 +1013,14 @@ static void serialize_ip6_set_interface_address_msg (serialize_main_t * m, va_li
   serialize (m, serialize_vec_ip6_set_interface_address, a, 1);
 }
 
-static void
-ip6_set_interface_address_internal (vlib_main_t * vm,
-				    u32 sw_if_index,
-				    ip6_address_t * new_address,
-				    u32 new_length,
-				    u32 redistribute,
-				    u32 insert_routes);
+static clib_error_t *
+ip6_add_del_interface_address_internal (vlib_main_t * vm,
+					u32 sw_if_index,
+					ip6_address_t * new_address,
+					u32 new_length,
+					u32 redistribute,
+					u32 insert_routes,
+					u32 is_del);
 
 static void unserialize_ip6_set_interface_address_msg (serialize_main_t * m, va_list * va)
 {
@@ -1026,9 +1028,11 @@ static void unserialize_ip6_set_interface_address_msg (serialize_main_t * m, va_
   vlib_main_t * vm = mcm->vlib_main;
   ip6_interface_address_t a;
   unserialize (m, unserialize_vec_ip6_set_interface_address, &a, 1);
-  ip6_set_interface_address_internal (vm, a.sw_if_index, &a.address, a.length,
-				      /* redistribute */ 0,
-				      /* insert_routes */ 1);
+  ip6_add_del_interface_address_internal
+    (vm, a.sw_if_index, &a.address, a.length,
+     /* redistribute */ 0,
+     /* insert_routes */ 1,
+     /* is_del */ 0);
 }
 
 static MC_SERIALIZE_MSG (ip6_set_interface_address_msg) = {
@@ -1037,68 +1041,83 @@ static MC_SERIALIZE_MSG (ip6_set_interface_address_msg) = {
   .unserialize = unserialize_ip6_set_interface_address_msg,
 };
 
-static void
-ip6_set_interface_address_internal (vlib_main_t * vm,
-				    u32 sw_if_index,
-				    ip6_address_t * new_address,
-				    u32 new_length,
-				    u32 redistribute,
-				    u32 insert_routes)
+static clib_error_t *
+ip6_add_del_interface_address_internal (vlib_main_t * vm,
+					u32 sw_if_index,
+					ip6_address_t * address,
+					u32 address_length,
+					u32 redistribute,
+					u32 insert_routes,
+					u32 is_del)
 {
   ip6_main_t * im = &ip6_main;
-  ip6_address_t old_address;
-  uword old_length;
+  ip_lookup_main_t * lm = &im->lookup_main;
+  clib_error_t * error;
+  u32 if_address_index;
 
-  ASSERT (sw_if_index < vec_len (im->ip6_address_by_sw_if_index));
-  ASSERT (sw_if_index < vec_len (im->ip6_address_length_by_sw_if_index));
+  {
+    uword elts_before = pool_elts (lm->if_address_pool);
 
-  old_address = im->ip6_address_by_sw_if_index[sw_if_index];
-  old_length = im->ip6_address_length_by_sw_if_index[sw_if_index];
+    error = ip_interface_address_add_del
+      (lm,
+       sw_if_index,
+       address,
+       address_length,
+       is_del,
+       &if_address_index);
+    if (error)
+      goto done;
 
-  if (new_address->as_u32 == old_address.as_u32
-      && old_length == new_length)
-    return;
+    /* Pool did not grow: add duplicate address. */
+    if (elts_before == pool_elts (lm->if_address_pool))
+      goto done;
+  }
 
   if (vm->mc_main && redistribute)
     {
       ip6_interface_address_t a;
       a.sw_if_index = sw_if_index;
-      a.address = new_address[0];
-      a.length = new_length;
+      a.address = address[0];
+      a.length = address_length;
       mc_serialize (vm->mc_main, &ip6_set_interface_address_msg, &a);
-      return;
+      goto done;
     }
-
-  im->ip6_address_by_sw_if_index[sw_if_index] = new_address[0];
-  im->ip6_address_length_by_sw_if_index[sw_if_index] = new_length;
 
   if (vlib_sw_interface_is_admin_up (vm, sw_if_index) && insert_routes)
     {
       u32 fib_index = im->fib_index_by_sw_if_index[sw_if_index];
 
-      if (ip6_interface_address_is_valid (&old_address))
-	ip6_del_interface_routes (im, fib_index, &old_address, old_length);
+      if (is_del)
+	ip6_del_interface_routes (im, fib_index, address, address_length);
 
-      if (ip6_interface_address_is_valid (new_address))
+      else
 	ip6_add_interface_routes (vm, sw_if_index,
-				  im, fib_index, new_address, new_length);
+				  im, fib_index,
+				  pool_elt_at_index (lm->if_address_pool, if_address_index));
     }
 
   {
-    ip6_set_interface_address_callback_t * cb;
-    vec_foreach (cb, im->set_interface_address_callbacks)
+    ip6_add_del_interface_address_callback_t * cb;
+    vec_foreach (cb, im->add_del_interface_address_callbacks)
       cb->function (im, cb->function_opaque, sw_if_index,
-		    new_address, new_length);
+		    address, address_length,
+		    is_del);
   }
+
+ done:
+  return error;
 }
 
-void
-ip6_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
-			   ip6_address_t * new_address, u32 new_length)
+clib_error_t *
+ip6_add_del_interface_address (vlib_main_t * vm, u32 sw_if_index,
+			       ip6_address_t * address, u32 address_length,
+			       u32 is_del)
 {
-  ip6_set_interface_address_internal (vm, sw_if_index, new_address, new_length,
-				      /* redistribute */ 1,
-				      /* insert_routes */ 1);
+  return ip6_add_del_interface_address_internal
+    (vm, sw_if_index, address, address_length,
+     /* redistribute */ 1,
+     /* insert_routes */ 1,
+     is_del);
 }
 
 static void serialize_vec_ip6_fib (serialize_main_t * m, va_list * va)
@@ -1181,29 +1200,30 @@ void serialize_vnet_ip6_main (serialize_main_t * m, va_list * va)
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
   vlib_interface_main_t * vim = &vm->interface_main;
   vlib_sw_interface_t * si;
-  ip6_main_t * i4m = &ip6_main;
+  ip6_main_t * im = &ip6_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
   ip6_interface_address_t * as = 0, * a;
 
   /* Download adjacency tables & multipath stuff. */
-  serialize (m, serialize_ip_lookup_main, &i4m->lookup_main);
+  serialize (m, serialize_ip_lookup_main, lm);
 
   /* FIBs. */
-  vec_serialize (m, i4m->fibs, serialize_vec_ip6_fib);
+  vec_serialize (m, im->fibs, serialize_vec_ip6_fib);
 
   /* FIB interface config. */
-  vec_serialize (m, i4m->fib_index_by_sw_if_index, serialize_vec_32);
+  vec_serialize (m, im->fib_index_by_sw_if_index, serialize_vec_32);
 
   /* Interface ip6 addresses. */
   pool_foreach (si, vim->sw_interfaces, ({
     u32 sw_if_index = si->sw_if_index;
-    ip6_address_t * x = vec_elt_at_index (i4m->ip6_address_by_sw_if_index, sw_if_index);
-    if (ip6_interface_address_is_valid (x))
-      {
-	vec_add2 (as, a, 1);
-	a->address = x[0];
-	a->length = vec_elt (i4m->ip6_address_length_by_sw_if_index, sw_if_index);
-	a->sw_if_index = sw_if_index;
-      }
+    ip_interface_address_t * ia;
+    foreach_ip_interface_address (lm, ia, sw_if_index, ({
+      ip6_address_t * x = ip_interface_address_get_address (lm, ia);
+      vec_add2 (as, a, 1);
+      a->address = x[0];
+      a->length = ia->address_length;
+      a->sw_if_index = sw_if_index;
+    }));
   }));
   vec_serialize (m, as, serialize_vec_ip6_set_interface_address);
   vec_free (as);
@@ -1212,36 +1232,38 @@ void serialize_vnet_ip6_main (serialize_main_t * m, va_list * va)
 void unserialize_vnet_ip6_main (serialize_main_t * m, va_list * va)
 {
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
-  ip6_main_t * i4m = &ip6_main;
+  ip6_main_t * im = &ip6_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
   ip6_interface_address_t * as = 0, * a;
 
-  unserialize (m, unserialize_ip_lookup_main, &i4m->lookup_main);
+  unserialize (m, unserialize_ip_lookup_main, lm);
 
   {
     ip_adjacency_t * adj;
     u32 n_adj;
-    heap_foreach (adj, n_adj, i4m->lookup_main.adjacency_heap, ({
+    heap_foreach (adj, n_adj, im->lookup_main.adjacency_heap, ({
 	  unserialize_fixup_ip6_rewrite_adjacencies (vm, adj, n_adj);
     }));
   }
 
-  vec_unserialize (m, &i4m->fibs, unserialize_vec_ip6_fib);
+  vec_unserialize (m, &im->fibs, unserialize_vec_ip6_fib);
 
   /* Re-construct table id -> table index hash. */
   {
     ip6_fib_t * f;
-    vec_foreach (f, i4m->fibs)
-      hash_set (i4m->fib_index_by_table_id, f->table_id, f->index);
+    vec_foreach (f, im->fibs)
+      hash_set (im->fib_index_by_table_id, f->table_id, f->index);
   }
 
-  vec_unserialize (m, &i4m->fib_index_by_sw_if_index, unserialize_vec_32);
+  vec_unserialize (m, &im->fib_index_by_sw_if_index, unserialize_vec_32);
 
   vec_unserialize (m, &as, unserialize_vec_ip6_set_interface_address);
   vec_foreach (a, as) {
-    ip6_set_interface_address_internal
+    ip6_add_del_interface_address_internal
       (vm, a->sw_if_index, &a->address, a->length,
        /* redistribute */ 0,
-       /* insert_routes */ 0);
+       /* insert_routes */ 0,
+       /* is_del */ 0);
   }
   vec_free (as);
 }
@@ -1252,37 +1274,29 @@ ip6_sw_interface_admin_up_down (vlib_main_t * vm,
 				u32 flags)
 {
   ip6_main_t * im = &ip6_main;
+  ip_interface_address_t * ia;
   ip6_address_t * a;
-  uword is_admin_up;
+  u32 is_admin_up, fib_index;
 
   /* Fill in lookup tables with default table (0). */
   vec_validate (im->fib_index_by_sw_if_index, sw_if_index);
 
-  /* Validate interface address/length table. */
-  {
-    ip6_address_t null;
-
-    ip6_interface_address_set_invalid (&null);
-    ASSERT (! ip6_interface_address_is_valid (&null));
-    vec_validate_init_empty (im->ip6_address_by_sw_if_index, sw_if_index, null);
-    vec_validate_init_empty (im->ip6_address_length_by_sw_if_index, sw_if_index, ~0);
-  }
+  vec_validate_init_empty (im->lookup_main.if_address_pool_index_by_sw_if_index, sw_if_index, ~0);
 
   is_admin_up = (flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
-  a = ip6_get_interface_address (im, sw_if_index);
-  if (ip6_interface_address_is_valid (a))
-    {
-      u32 fib_index = im->fib_index_by_sw_if_index[sw_if_index];
-      u32 length = ip6_get_interface_address_length (im, sw_if_index);
 
-      if (is_admin_up)
-	ip6_add_interface_routes (vm, sw_if_index,
-				  im, fib_index,
-				  a, length);
-      else
-	ip6_del_interface_routes (im, fib_index,
-				  a, length);
-    }
+  fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
+
+  foreach_ip_interface_address (&im->lookup_main, ia, sw_if_index, ({
+    a = ip_interface_address_get_address (&im->lookup_main, ia);
+    if (is_admin_up)
+      ip6_add_interface_routes (vm, sw_if_index,
+				im, fib_index,
+				ia);
+    else
+      ip6_del_interface_routes (im, fib_index,
+				a, ia->address_length);
+  }));
 
   return 0;
 }
@@ -1728,23 +1742,17 @@ ip6_local (vlib_main_t * vm,
 		    : error1);
 
 	  /* Drop packets from unroutable hosts. */
-	  if (error0 == IP6_ERROR_UNKNOWN_PROTOCOL
-	      && i0->non_local.src_adj_index == ~0)
+	  if (error0 == IP6_ERROR_UNKNOWN_PROTOCOL)
 	    {
-	      i0->non_local.src_adj_index =
-		ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX],
-				&ip0->src_address);
-	      error0 = (lm->miss_adj_index == i0->non_local.src_adj_index
+	      u32 src_adj_index0 = ip6_src_lookup_for_packet (im, p0, ip0);
+	      error0 = (lm->miss_adj_index == src_adj_index0
 			? IP6_ERROR_SRC_LOOKUP_MISS
 			: error0);
 	    }
-	  if (error1 == IP6_ERROR_UNKNOWN_PROTOCOL
-	      && i1->non_local.src_adj_index == ~0)
+	  if (error1 == IP6_ERROR_UNKNOWN_PROTOCOL)
 	    {
-	      i1->non_local.src_adj_index =
-		ip6_fib_lookup (im, p1->sw_if_index[VLIB_RX],
-				&ip1->src_address);
-	      error1 = (lm->miss_adj_index == i1->non_local.src_adj_index
+	      u32 src_adj_index1 = ip6_src_lookup_for_packet (im, p1, ip1);
+	      error1 = (lm->miss_adj_index == src_adj_index1
 			? IP6_ERROR_SRC_LOOKUP_MISS
 			: error1);
 	    }
@@ -1825,13 +1833,10 @@ ip6_local (vlib_main_t * vm,
 		    ? IP6_ERROR_UDP_CHECKSUM + type0
 		    : error0);
 
-	  if (error0 == IP6_ERROR_UNKNOWN_PROTOCOL
-	      && i0->non_local.src_adj_index == ~0)
+	  if (error0 == IP6_ERROR_UNKNOWN_PROTOCOL)
 	    {
-	      i0->non_local.src_adj_index =
-		ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX],
-				&ip0->src_address);
-	      error0 = (lm->miss_adj_index == i0->non_local.src_adj_index
+	      u32 src_adj_index0 = ip6_src_lookup_for_packet (im, p0, ip0);
+	      error0 = (lm->miss_adj_index == src_adj_index0
 			? IP6_ERROR_SRC_LOOKUP_MISS
 			: error0);
 	    }
@@ -2006,8 +2011,8 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	    h0->ethernet.dst_address[4] = ip0->dst_address.as_u8[14];
 	    h0->ethernet.dst_address[5] = ip0->dst_address.as_u8[15];
 
-	    /* Source address is our link local v6 address. */
-	    h0->ip.src_address = vec_elt (im->ip6_address_by_sw_if_index, sw_if_index0);
+	    /* Choose source address based on destination lookup adjacency. */
+	    ip6_src_address_for_packet (im, p0, &h0->ip.src_address, sw_if_index0);
 
 	    /* Destination address is a solicited node multicast address.  We need to fill in
 	       the low 24 bits with low 24 bits of target's address. */
@@ -2308,7 +2313,7 @@ ip6_lookup_init (vlib_main_t * vm)
   /* Create FIB with index 0 and table id of 0. */
   find_fib_by_table_index_or_id (im, /* table id */ 0, IP6_ROUTE_FLAG_TABLE_ID);
 
-  ip_lookup_init (&im->lookup_main, ip6_lookup_node.index);
+  ip_lookup_init (&im->lookup_main, /* is_ip6 */ 1);
 
   {
     icmp6_neighbor_solicitation_for_ethernet_t p;

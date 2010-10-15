@@ -47,16 +47,21 @@ VLIB_CLI_COMMAND (set_interface_ip_command) = {
 };
 
 static clib_error_t *
-set_ip_address (vlib_main_t * vm,
-		unformat_input_t * input,
-		vlib_cli_command_t * cmd)
+add_del_ip_address (vlib_main_t * vm,
+		    unformat_input_t * input,
+		    vlib_cli_command_t * cmd)
 {
   ip4_address_t a4;
   ip6_address_t a6;
   clib_error_t * error = 0;
-  u32 sw_if_index, length;
+  u32 sw_if_index, length, is_del;
 
   sw_if_index = ~0;
+  is_del = 0;
+
+  if (unformat (input, "del"))
+    is_del = 1;
+
   if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
     {
       error = clib_error_return (0, "unknown interface `%U'",
@@ -65,9 +70,9 @@ set_ip_address (vlib_main_t * vm,
     }
 
   if (unformat (input, "%U/%d", unformat_ip4_address, &a4, &length))
-    ip4_set_interface_address (vm, sw_if_index, &a4, length);
+    ip4_add_del_interface_address (vm, sw_if_index, &a4, length, is_del);
   else if (unformat (input, "%U/%d", unformat_ip6_address, &a6, &length))
-    ip6_set_interface_address (vm, sw_if_index, &a6, length);
+    ip6_add_del_interface_address (vm, sw_if_index, &a6, length, is_del);
   else
     {
       error = clib_error_return (0, "expected IP4/IP6 address/length `%U'",
@@ -82,8 +87,8 @@ set_ip_address (vlib_main_t * vm,
 
 static VLIB_CLI_COMMAND (set_interface_ip_address_command) = {
   .name = "address",
-  .function = set_ip_address,
-  .short_help = "Set IP4/IP6 address for interface",
+  .function = add_del_ip_address,
+  .short_help = "Add/delete IP4/IP6 address for interface",
   .parent = &set_interface_ip_command,
 };
 

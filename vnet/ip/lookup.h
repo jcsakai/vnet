@@ -67,15 +67,23 @@ typedef struct {
   u16 n_adj;
 
   /* Next hop after ip4-lookup. */
-  u16 lookup_next_index;
+  union {
+    ip_lookup_next_t lookup_next_index : 16;
+    u16 lookup_next_index_as_int;
+  };
 
   union {
     /* IP_LOOKUP_NEXT_REWRITE adjacencies. */
     vnet_declare_rewrite (64 - 2*sizeof(u32));
 
-    /* IP_LOOKUP_NEXT_LOCAL */
-    u32 local_index;
+    /* IP_LOOKUP_NEXT_{LOCAL,ARP} */
+    struct {
+      vnet_rewrite_header_t local_arp_dummy_header;
 
+      /* Interface address index for this local/arp adjacency follows rewrite header.
+	 No rewrite data is used for these rewrites. */
+      u32 if_address_index;
+    };
   };
 } ip_adjacency_t;
 
@@ -117,13 +125,33 @@ typedef struct {
   } normalized_next_hops, unnormalized_next_hops;
 } ip_multipath_adjacency_t;
 
+typedef struct {
+  /* Key for mhash; in fact, just a byte offset into mhash key vector. */
+  u32 address_key;
+
+  /* Interface which has this address. */
+  u32 sw_if_index;
+
+  /* Address (prefix) length for this interface. */
+  u16 address_length;
+
+  /* Will be used for something eventually.  Primary vs. secondary? */
+  u16 flags;
+
+  /* Next and previous pointers for doubly linked list of
+     addresses per software interface. */
+  u32 next_this_sw_interface;
+  u32 prev_this_sw_interface;
+} ip_interface_address_t;
+
 /* Stored in 32 byte VLIB buffer opaque by ip lookup for benefit of
    next nodes. */
 typedef struct {
-  /* Adjacency from destination/source IP address lookup. */
+  /* Adjacency from destination IP address lookup. */
   u32 dst_adj_index;
 
-  /* This gets set to ~0 until source lookup is performed. */
+  /* Adjacency from source IP address lookup.
+     This gets set to ~0 until source lookup is performed. */
   u32 src_adj_index;
 
   /* Flow hash value for this packet computed from IP src/dst address
@@ -160,11 +188,11 @@ typedef void (* ip_add_del_adjacency_callback_t) (struct ip_lookup_main_t * lm,
 						  u32 is_del);
 
 typedef struct ip_lookup_main_t {
-  /* 1 for ip6; 0 for ip4. */
-  u8 is_ip6;
-
   /* Adjacency heap. */
   ip_adjacency_t * adjacency_heap;
+
+  /* Adjacency packet/byte counters indexed by adjacency index. */
+  vlib_combined_counter_main_t adjacency_counters;
 
   /* Heap of (next hop, weight) blocks.  Sorted by next hop. */
   ip_multipath_next_hop_t * next_hop_heap;
@@ -192,6 +220,16 @@ typedef struct ip_lookup_main_t {
 
   ip_add_del_adjacency_callback_t * add_del_adjacency_callbacks;
 
+  /* Pool of addresses that are assigned to interfaces. */
+  ip_interface_address_t * if_address_pool;
+
+  /* Hash table mapping address to index in interface address pool. */
+  mhash_t address_to_if_address_index;
+
+  /* Head of doubly linked list of interface addresses for each software interface.
+     ~0 means this interface has no address. */
+  u32 * if_address_pool_index_by_sw_if_index;
+
   /* rx/tx interface/feature configuration. */
   vnet_config_main_t config_mains[VLIB_N_RX_TX];
 
@@ -203,8 +241,11 @@ typedef struct ip_lookup_main_t {
 
   format_function_t * format_fib_result;
 
-  /* Adjacency packet/byte counters indexed by adjacency index. */
-  vlib_combined_counter_main_t adjacency_counters;
+  /* 1 for ip6; 0 for ip4. */
+  u32 is_ip6;
+
+  /* Either format_ip4_address_and_length or format_ip6_address_and_length. */
+  format_function_t * format_address_and_length;
 
   /* Table mapping ip protocol to ip[46]-local node next index. */
   u8 local_next_by_ip_protocol[256];
@@ -242,8 +283,6 @@ ip_call_add_del_adjacency_callbacks (ip_lookup_main_t * lm, u32 adj_index, u32 i
     lm->add_del_adjacency_callbacks[i] (lm, adj_index, adj, is_del);
 }
 
-void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index);
-
 /* Create new block of given number of contiguous adjacencies. */
 ip_adjacency_t *
 ip_add_adjacency (ip_lookup_main_t * lm,
@@ -264,6 +303,61 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
 					 u32 next_hop_adj_index,
 					 u32 next_hop_weight,
 					 u32 * new_mp_adj_index);
+
+clib_error_t *
+ip_interface_address_add_del (ip_lookup_main_t * lm,
+			      u32 sw_if_index,
+			      void * address,
+			      u32 address_length,
+			      u32 is_del,
+			      u32 * result_index);
+
+always_inline ip_interface_address_t *
+ip_get_interface_address (ip_lookup_main_t * lm, void * address)
+{
+  uword * p = mhash_get (&lm->address_to_if_address_index, address);
+  return p ? pool_elt_at_index (lm->if_address_pool, p[0]) : 0;
+}
+
+always_inline void *
+ip_interface_address_get_address (ip_lookup_main_t * lm, ip_interface_address_t * a)
+{ return mhash_key_to_mem (&lm->address_to_if_address_index, a->address_key); }
+
+always_inline ip_interface_address_t *
+ip_interface_address_for_packet (ip_lookup_main_t * lm, vlib_buffer_t * b, u32 sw_if_index)
+{
+  ip_buffer_opaque_t * o;
+  ip_adjacency_t * adj;
+  u32 if_address_index;
+
+  o = vlib_get_buffer_opaque (b);
+  adj = ip_get_adjacency (lm, o->dst_adj_index);
+
+  ASSERT (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP
+	  || adj->lookup_next_index == IP_LOOKUP_NEXT_LOCAL);
+  if_address_index = adj->if_address_index;
+  if_address_index = (if_address_index == ~0 ?
+		      vec_elt (lm->if_address_pool_index_by_sw_if_index, sw_if_index)
+		      : if_address_index);
+
+  return pool_elt_at_index (lm->if_address_pool, if_address_index);
+}
+
+#define foreach_ip_interface_address(lm,a,sw_if_index,body)		\
+do {									\
+  u32 _ia = vec_elt ((lm)->if_address_pool_index_by_sw_if_index,	\
+		     (sw_if_index));					\
+  ip_interface_address_t * _a;						\
+  while (_ia != ~0)							\
+    {									\
+      _a = pool_elt_at_index ((lm)->if_address_pool, _ia);		\
+      _ia = _a->next_this_sw_interface;					\
+      (a) = _a;								\
+      body;								\
+    }									\
+} while (0)
+
+void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index);
 
 extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
 

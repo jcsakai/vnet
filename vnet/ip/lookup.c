@@ -56,6 +56,9 @@ ip_add_adjacency (ip_lookup_main_t * lm,
 
   for (i = 0; i < n_adj; i++)
     {
+      /* Make sure interface is always initialized. */
+      adj[i].rewrite_header.sw_if_index = ~0;
+
       if (copy_adj)
 	adj[i] = copy_adj[i];
 
@@ -519,6 +522,75 @@ ip_next_hop_hash_key_equal (hash_t * h, uword key0, uword key1)
   return n0 == n1 && ! memcmp (k0, k1, n0 * sizeof (k0[0]));
 }
 
+clib_error_t *
+ip_interface_address_add_del (ip_lookup_main_t * lm,
+			      u32 sw_if_index,
+			      void * address,
+			      u32 address_length,
+			      u32 is_del,
+			      u32 * result_if_address_index)
+{
+  ip_interface_address_t * a, * prev, * next;
+  uword * p = mhash_get (&lm->address_to_if_address_index, address);
+
+  vec_validate_init_empty (lm->if_address_pool_index_by_sw_if_index, sw_if_index, ~0);
+  a = p ? pool_elt_at_index (lm->if_address_pool, p[0]) : 0;
+
+  /* Verify given length. */
+  if (a && address_length != a->address_length)
+    return clib_error_create ("%U wrong length (expected %d) for interface %U",
+			      lm->format_address_and_length, address, address_length,
+			      a->address_length,
+			      format_vlib_sw_interface_name, &vlib_global_main, sw_if_index);
+
+  if (is_del)
+    {
+      if (a)
+	return clib_error_create ("%U not found for interface %U",
+				  lm->format_address_and_length, address, address_length,
+				  format_vlib_sw_interface_name, &vlib_global_main, sw_if_index);
+
+      if (a->prev_this_sw_interface != ~0)
+	{
+	  prev = pool_elt_at_index (lm->if_address_pool, a->prev_this_sw_interface);
+	  prev->next_this_sw_interface = a->next_this_sw_interface;
+	}
+      if (a->next_this_sw_interface != ~0)
+	{
+	  next = pool_elt_at_index (lm->if_address_pool, a->next_this_sw_interface);
+	  next->prev_this_sw_interface = a->prev_this_sw_interface;
+	}
+
+      mhash_unset (&lm->address_to_if_address_index, address, /* old_value */ 0);
+      pool_put (lm->if_address_pool, a);
+      if (result_if_address_index)
+	*result_if_address_index = ~0;
+    }
+
+  else if (! a)
+    {
+      u32 pi = lm->if_address_pool_index_by_sw_if_index[sw_if_index];
+      u32 ai;
+
+      prev = pi != ~0 ? pool_elt_at_index (lm->if_address_pool, pi) : 0;
+
+      pool_get (lm->if_address_pool, a);
+      ai = a - lm->if_address_pool;
+      a->address_key = mhash_set (&lm->address_to_if_address_index, address, ai, /* old_value */ 0);
+      a->address_length = address_length;
+      a->sw_if_index = sw_if_index;
+      a->flags = 0;
+      a->prev_this_sw_interface = pi;
+      a->next_this_sw_interface = ~0;
+
+      lm->if_address_pool_index_by_sw_if_index[sw_if_index] = pi != ~0 ? pi : ai;
+      if (result_if_address_index)
+	*result_if_address_index = ai;
+    }
+
+  return /* no error */ 0;
+}
+
 void serialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
 {
   ip_adjacency_t * a = va_arg (*va, ip_adjacency_t *);
@@ -528,14 +600,15 @@ void serialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
     {
       serialize_integer (m, a[i].heap_handle, sizeof (a[i].heap_handle));
       serialize_integer (m, a[i].n_adj, sizeof (a[i].n_adj));
-      serialize_integer (m, a[i].lookup_next_index, sizeof (a[i].lookup_next_index));
+      serialize_integer (m, a[i].lookup_next_index, sizeof (a[i].lookup_next_index_as_int));
       switch (a[i].lookup_next_index)
 	{
 	case IP_LOOKUP_NEXT_LOCAL:
-	  serialize_integer (m, a[i].local_index, sizeof (a[i].local_index));
+	  serialize_integer (m, a[i].if_address_index, sizeof (a[i].if_address_index));
 	  break;
 
 	case IP_LOOKUP_NEXT_ARP:
+	  serialize_integer (m, a[i].if_address_index, sizeof (a[i].if_address_index));
 	  serialize_integer (m, a[i].rewrite_header.sw_if_index, sizeof (a[i].rewrite_header.sw_if_index));
 	  break;
 
@@ -560,14 +633,15 @@ void unserialize_vec_ip_adjacency (serialize_main_t * m, va_list * va)
     {
       unserialize_integer (m, &a[i].heap_handle, sizeof (a[i].heap_handle));
       unserialize_integer (m, &a[i].n_adj, sizeof (a[i].n_adj));
-      unserialize_integer (m, &a[i].lookup_next_index, sizeof (a[i].lookup_next_index));
+      unserialize_integer (m, &a[i].lookup_next_index_as_int, sizeof (a[i].lookup_next_index_as_int));
       switch (a[i].lookup_next_index)
 	{
 	case IP_LOOKUP_NEXT_LOCAL:
-	  unserialize_integer (m, &a[i].local_index, sizeof (a[i].local_index));
+	  unserialize_integer (m, &a[i].if_address_index, sizeof (a[i].if_address_index));
 	  break;
 
 	case IP_LOOKUP_NEXT_ARP:
+	  unserialize_integer (m, &a[i].if_address_index, sizeof (a[i].if_address_index));
 	  unserialize_integer (m, &a[i].rewrite_header.sw_if_index, sizeof (a[i].rewrite_header.sw_if_index));
 	  break;
 
@@ -680,7 +754,7 @@ void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
   }
 }
 
-void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
+void ip_lookup_init (ip_lookup_main_t * lm, u32 is_ip6)
 {
   ip_adjacency_t * adj;
 
@@ -706,6 +780,18 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index)
 
   /* 5% max error tolerance for multipath. */
   lm->multipath_next_hop_error_tolerance = .05;
+
+  lm->is_ip6 = is_ip6;
+  if (is_ip6)
+    {
+      lm->format_address_and_length = format_ip6_address_and_length;
+      mhash_init (&lm->address_to_if_address_index, sizeof (uword), sizeof (ip6_address_t));
+    }
+  else
+    {
+      lm->format_address_and_length = format_ip4_address_and_length;
+      mhash_init (&lm->address_to_if_address_index, sizeof (uword), sizeof (ip4_address_t));
+    }
 }
 
 u8 * format_ip_lookup_next (u8 * s, va_list * args)
@@ -735,6 +821,19 @@ u8 * format_ip_lookup_next (u8 * s, va_list * args)
   return s;
 }
 
+static u8 * format_ip_interface_address (u8 * s, va_list * args)
+{
+  ip_lookup_main_t * lm = va_arg (*args, ip_lookup_main_t *);
+  u32 if_address_index = va_arg (*args, u32);
+  ip_interface_address_t * ia = pool_elt_at_index (lm->if_address_pool, if_address_index);
+  void * a = ip_interface_address_get_address (lm, ia);
+
+  if (lm->is_ip6)
+    return format (s, "%U", format_ip6_address_and_length, a, ia->address_length);
+  else
+    return format (s, "%U", format_ip4_address_and_length, a, ia->address_length);
+}
+
 u8 * format_ip_adjacency (u8 * s, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
@@ -757,6 +856,17 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
 		    format_vlib_sw_interface_name,
 		    vm,
 		    vlib_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
+      switch (adj->lookup_next_index)
+	{
+	case IP_LOOKUP_NEXT_ARP:
+	case IP_LOOKUP_NEXT_LOCAL:
+	  if (adj->if_address_index != ~0)
+	    s = format (s, " %U", format_ip_interface_address, lm, adj->if_address_index);
+	  break;
+
+	default:
+	  break;
+	}
       break;
     }
 
@@ -811,29 +921,48 @@ static uword unformat_ip_lookup_next (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
+static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
   ip_adjacency_t * adj = va_arg (*args, ip_adjacency_t *);
   u32 node_index = va_arg (*args, u32);
-  u32 sw_if_index;
+  u32 sw_if_index, is_ip6;
+  ip46_address_t a46;
   ip_lookup_next_t next;
 
+  is_ip6 = node_index == ip6_rewrite_node.index;
   adj->rewrite_header.node_index = node_index;
 
-  if (unformat (input, "arp %U",
-		unformat_vlib_sw_interface, vm, &sw_if_index))
+  if (unformat (input, "arp %U %U",
+		unformat_vlib_sw_interface, vm, &sw_if_index,
+		unformat_ip46_address, &a46, is_ip6))
     {
-      ip4_adjacency_set_interface_route (vm, adj, sw_if_index);
+      ip_lookup_main_t * lm = is_ip6 ? &ip6_main.lookup_main : &ip4_main.lookup_main;
+      ip_adjacency_t * a_adj;
+      u32 adj_index;
+
+      if (is_ip6)
+	adj_index = ip6_fib_lookup (&ip6_main, sw_if_index, &a46.ip6);
+      else
+	adj_index = ip4_fib_lookup (&ip4_main, sw_if_index, &a46.ip4);
+
+      a_adj = ip_get_adjacency (lm, adj_index);
+
+      if (a_adj->rewrite_header.sw_if_index != sw_if_index)
+	return 0;
+
+      if (is_ip6)
+	ip6_adjacency_set_interface_route (vm, adj, sw_if_index, a_adj->if_address_index);
+      else
+	ip4_adjacency_set_interface_route (vm, adj, sw_if_index, a_adj->if_address_index);
     }
 
   else if (unformat_user (input, unformat_ip_lookup_next, &next))
     {
       adj->lookup_next_index = next;
-
-      adj->local_index = 0;
+      adj->if_address_index = ~0;
       if (next == IP_LOOKUP_NEXT_LOCAL)
-	unformat (input, "%d", &adj->local_index);
+	unformat (input, "%d", &adj->if_address_index);
     }
 
   else if (unformat_user (input,

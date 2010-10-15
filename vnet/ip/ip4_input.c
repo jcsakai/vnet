@@ -127,6 +127,9 @@ ip4_input_inline (vlib_main_t * vm,
 	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
 	  i1->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
 
+	  i0->src_adj_index = ~0;
+	  i1->src_adj_index = ~0;
+
 	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i0->current_config_index,
 				&next0,
@@ -223,6 +226,7 @@ ip4_input_inline (vlib_main_t * vm,
 
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  i0->src_adj_index = ~0;
 	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
 				&i0->current_config_index,
 				&next0,
