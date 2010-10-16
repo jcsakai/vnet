@@ -296,6 +296,9 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  /* New hop count. */
 	  ip0->hop_limit = im->host_config.ttl;
 	  ip1->hop_limit = im->host_config.ttl;
+
+	  i0->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
+	  i1->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
 	}
   
       while (n_left_from > 0 && n_left_to_next > 0)

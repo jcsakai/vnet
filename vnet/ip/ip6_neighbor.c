@@ -58,7 +58,7 @@ static u8 * format_ip6_neighbor_ip6_entry (u8 * s, va_list * va)
   vlib_sw_interface_t * si;
 
   if (! n)
-    return format (s, "%=12s%=20s%=20s%=40s", "Time", "IP6", "Link layer", "Interface");
+    return format (s, "%=12s%=20s%=20s%=40s", "Time", "Address", "Link layer", "Interface");
 
   si = vlib_get_sw_interface (vm, n->key.sw_if_index);
   s = format (s, "%=12U%=20U%=20U%=40U",
@@ -110,10 +110,8 @@ set_ethernet_neighbor (vlib_main_t * vm,
   ip6_neighbor_key_t k;
   ip6_neighbor_t * n;
   ip6_main_t * im = &ip6_main;
-  uword * p, fib_index;
+  uword * p;
   ethernet_header_t * eth;
-
-  fib_index = im->fib_index_by_sw_if_index[sw_if_index];
 
   k.sw_if_index = sw_if_index;
   k.ip6_address = a[0];
@@ -140,7 +138,7 @@ set_ethernet_neighbor (vlib_main_t * vm,
       eth = vnet_rewrite_get_data (adj);
       memcpy (eth->dst_address, link_layer_address, sizeof (eth->dst_address));
 
-      args.table_index_or_table_id = fib_index;
+      args.table_index_or_table_id = im->fib_index_by_sw_if_index[sw_if_index];
       args.flags = IP6_ROUTE_FLAG_FIB_INDEX | IP6_ROUTE_FLAG_ADD;
       args.dst_address = a[0];
       args.dst_address_length = 128;
