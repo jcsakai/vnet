@@ -2043,7 +2043,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
 static char * ip6_discover_neighbor_error_strings[] = {
   [IP6_DISCOVER_NEIGHBOR_ERROR_DROP] = "address overflow drops",
-  [IP6_DISCOVER_NEIGHBOR_ERROR_REQUEST_SENT] = "IP6 neighbor solicitations sent",
+  [IP6_DISCOVER_NEIGHBOR_ERROR_REQUEST_SENT] = "neighbor solicitations sent",
 };
 
 static clib_error_t *
