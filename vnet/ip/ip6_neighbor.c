@@ -258,8 +258,8 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	  bi0 = to_next[0] = from[0];
 
 	  from += 1;
-	  n_left_from -= 1;
 	  to_next += 1;
+	  n_left_from -= 1;
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, bi0);
@@ -305,7 +305,9 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	    }
 
 	  if (is_solicitation)
-	    next0 = error0 != ICMP6_ERROR_NONE ? ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP : ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY;
+	    next0 = (error0 != ICMP6_ERROR_NONE
+		     ? ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP
+		     : ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY);
 	  else
 	    next0 = 0;
 
