@@ -1874,14 +1874,14 @@ static VLIB_REGISTER_NODE (ip6_local_node) = {
 };
 
 typedef enum {
-  IP6_ARP_NEXT_DROP,
-  IP6_ARP_N_NEXT,
-} ip6_arp_next_t;
+  IP6_DISCOVER_NEIGHBOR_NEXT_DROP,
+  IP6_DISCOVER_NEIGHBOR_N_NEXT,
+} ip6_discover_neighbor_next_t;
 
 typedef enum {
-  IP6_ARP_ERROR_DROP,
-  IP6_ARP_ERROR_REQUEST_SENT,
-} ip6_arp_error_t;
+  IP6_DISCOVER_NEIGHBOR_ERROR_DROP,
+  IP6_DISCOVER_NEIGHBOR_ERROR_REQUEST_SENT,
+} ip6_discover_neighbor_error_t;
 
 static uword
 ip6_discover_neighbor (vlib_main_t * vm,
@@ -1919,12 +1919,10 @@ ip6_discover_neighbor (vlib_main_t * vm,
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
   next_index = node->cached_next_index;
-  if (next_index == IP6_ARP_NEXT_DROP)
-    next_index = IP6_ARP_N_NEXT; /* point to first interface */
 
   while (n_left_from > 0)
     {
-      vlib_get_next_frame (vm, node, IP6_ARP_NEXT_DROP,
+      vlib_get_next_frame (vm, node, IP6_DISCOVER_NEIGHBOR_NEXT_DROP,
 			   to_next_drop, n_left_to_next_drop);
 
       while (n_left_from > 0 && n_left_to_next_drop > 0)
@@ -1972,7 +1970,6 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
 	  bm0 = hash_bitmap[c0];
 	  drop0 = (bm0 & m0) != 0;
-	  next0 = drop0 ? IP6_ARP_NEXT_DROP : adj0->rewrite_header.next_index;
 
 	  /* Mark it as seen. */
 	  hash_bitmap[c0] = bm0 | m0;
@@ -1983,7 +1980,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	  to_next_drop += 1;
 	  n_left_to_next_drop -= 1;
 
-	  p0->error = node->errors[drop0 ? IP6_ARP_ERROR_DROP : IP6_ARP_ERROR_REQUEST_SENT];
+	  p0->error = node->errors[drop0 ? IP6_DISCOVER_NEIGHBOR_ERROR_DROP : IP6_DISCOVER_NEIGHBOR_ERROR_REQUEST_SENT];
 
 	  if (drop0)
 	    continue;
@@ -1996,7 +1993,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	    ethernet_interface_t * eif0;
 	    u8 * eth_addr0, dummy[6] = { 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, };
 
-	    h0 = vlib_packet_template_get_packet (vm, &im->ip6_discover_neighbor_packet_template, &bi0);
+	    h0 = vlib_packet_template_get_packet (vm, &im->discover_neighbor_packet_template, &bi0);
 
 	    /* Build ethernet header. */
 	    swif0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
@@ -2032,36 +2029,63 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	    b0 = vlib_get_buffer (vm, bi0);
 	    b0->sw_if_index[VLIB_TX] = p0->sw_if_index[VLIB_TX];
 
+	    next0 = vec_elt (im->discover_neighbor_next_index_by_hw_if_index, swif0->hw_if_index);
+
 	    vlib_set_next_frame_buffer (vm, node, next0, bi0);
 	  }
 	}
 
-      vlib_put_next_frame (vm, node, IP6_ARP_NEXT_DROP, n_left_to_next_drop);
+      vlib_put_next_frame (vm, node, IP6_DISCOVER_NEIGHBOR_NEXT_DROP, n_left_to_next_drop);
     }
 
   return frame->n_vectors;
 }
 
-static char * ip6_arp_error_strings[] = {
-  [IP6_ARP_ERROR_DROP] = "address overflow drops",
-  [IP6_ARP_ERROR_REQUEST_SENT] = "IP6 neighbor solicitations sent",
+static char * ip6_discover_neighbor_error_strings[] = {
+  [IP6_DISCOVER_NEIGHBOR_ERROR_DROP] = "address overflow drops",
+  [IP6_DISCOVER_NEIGHBOR_ERROR_REQUEST_SENT] = "IP6 neighbor solicitations sent",
 };
+
+static clib_error_t *
+ip6_discover_neighbor_hw_interface_link_up_down (vlib_main_t * vm,
+				   u32 hw_if_index,
+				   u32 flags);
 
 VLIB_REGISTER_NODE (ip6_discover_neighbor_node) = {
   .function = ip6_discover_neighbor,
   .name = "ip6-discover-neighbor",
   .vector_size = sizeof (u32),
 
+  .hw_interface_link_up_down_function = ip6_discover_neighbor_hw_interface_link_up_down,
+
   .format_trace = format_ip6_forward_next_trace,
 
-  .n_errors = ARRAY_LEN (ip6_arp_error_strings),
-  .error_strings = ip6_arp_error_strings,
+  .n_errors = ARRAY_LEN (ip6_discover_neighbor_error_strings),
+  .error_strings = ip6_discover_neighbor_error_strings,
 
-  .n_next_nodes = IP6_ARP_N_NEXT,
+  .n_next_nodes = IP6_DISCOVER_NEIGHBOR_N_NEXT,
   .next_nodes = {
-    [IP6_ARP_NEXT_DROP] = "error-drop",
+    [IP6_DISCOVER_NEIGHBOR_NEXT_DROP] = "error-drop",
   },
 };
+
+static clib_error_t *
+ip6_discover_neighbor_hw_interface_link_up_down (vlib_main_t * vm,
+						 u32 hw_if_index,
+						 u32 flags)
+{
+  ip6_main_t * im = &ip6_main;
+  vlib_hw_interface_t * hw_if;
+
+  hw_if = vlib_get_hw_interface (vm, hw_if_index);
+
+  /* Fill in lookup tables with default table (0). */
+  vec_validate_init_empty (im->discover_neighbor_next_index_by_hw_if_index, hw_if_index, ~0);
+  im->discover_neighbor_next_index_by_hw_if_index[hw_if_index]
+    = vlib_node_add_next (vm, ip6_discover_neighbor_node.index, hw_if->output_node_index);
+
+  return 0;
+}
 
 typedef enum {
   IP6_REWRITE_NEXT_DROP,
@@ -2337,7 +2361,7 @@ ip6_lookup_init (vlib_main_t * vm)
     p.link_layer_option.header.n_data_u64s = sizeof (p.link_layer_option) / sizeof (u64);
 
     vlib_packet_template_init (vm,
-			       &im->ip6_discover_neighbor_packet_template,
+			       &im->discover_neighbor_packet_template,
 			       &p, sizeof (p),
 			       /* alloc chunk size */ 8);
   }

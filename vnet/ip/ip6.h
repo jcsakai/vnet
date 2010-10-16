@@ -135,7 +135,9 @@ typedef struct ip6_main_t {
   ip6_add_del_interface_address_callback_t * add_del_interface_address_callbacks;
 
   /* Template used to generate IP6 neighbor solicitation packets. */
-  vlib_packet_template_t ip6_discover_neighbor_packet_template;
+  vlib_packet_template_t discover_neighbor_packet_template;
+
+  u32 * discover_neighbor_next_index_by_hw_if_index;
 
   /* Seed for Jenkins hash used to compute ip6 flow hash. */
   u32 flow_hash_seed;

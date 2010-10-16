@@ -291,7 +291,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 		? o0
 		: 0);
 
-	  if (PREDICT_TRUE (error0 != ICMP6_ERROR_NONE && o0 != 0))
+	  if (PREDICT_TRUE (error0 == ICMP6_ERROR_NONE && o0 != 0))
 	    set_ethernet_neighbor (vm, nm, sw_if_index0,
 				   is_solicitation ? &ip0->src_address : &h0->target_address,
 				   o0->ethernet_address);
