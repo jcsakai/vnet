@@ -2079,7 +2079,6 @@ ip6_discover_neighbor_hw_interface_link_up_down (vlib_main_t * vm,
 
   hw_if = vlib_get_hw_interface (vm, hw_if_index);
 
-  /* Fill in lookup tables with default table (0). */
   vec_validate_init_empty (im->discover_neighbor_next_index_by_hw_if_index, hw_if_index, ~0);
   im->discover_neighbor_next_index_by_hw_if_index[hw_if_index]
     = vlib_node_add_next (vm, ip6_discover_neighbor_node.index, hw_if->output_node_index);
