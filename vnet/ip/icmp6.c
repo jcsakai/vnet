@@ -130,12 +130,11 @@ ip6_icmp_input (vlib_main_t * vm,
 		vlib_frame_t * frame)
 {
   icmp6_main_t * im = &icmp6_main;
-  uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next_index;
 
   from = vlib_frame_vector_args (frame);
-  n_left_from = n_packets;
+  n_left_from = frame->n_vectors;
   next_index = node->cached_next_index;
   
   if (node->flags & VLIB_NODE_FLAG_TRACE)
@@ -222,13 +221,12 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 		       vlib_node_runtime_t * node,
 		       vlib_frame_t * frame)
 {
-  uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
   ip6_main_t * im = &ip6_main;
 
   from = vlib_frame_vector_args (frame);
-  n_left_from = n_packets;
+  n_left_from = frame->n_vectors;
   next = node->cached_next_index;
   
   if (node->flags & VLIB_NODE_FLAG_TRACE)

@@ -2018,7 +2018,6 @@ ip4_arp (vlib_main_t * vm,
 	  u32 pi0, adj_index0, a0, b0, c0, m0, sw_if_index0, drop0;
 	  uword bm0;
 	  ip_adjacency_t * adj0;
-	  u32 next0;
 
 	  pi0 = from[0];
 
@@ -2049,7 +2048,6 @@ ip4_arp (vlib_main_t * vm,
 
 	  bm0 = hash_bitmap[c0];
 	  drop0 = (bm0 & m0) != 0;
-	  next0 = drop0 ? IP4_ARP_NEXT_DROP : adj0->rewrite_header.next_index;
 
 	  /* Mark it as seen. */
 	  hash_bitmap[c0] = bm0 | m0;
@@ -2091,7 +2089,7 @@ ip4_arp (vlib_main_t * vm,
 	    b0 = vlib_get_buffer (vm, bi0);
 	    b0->sw_if_index[VLIB_TX] = p0->sw_if_index[VLIB_TX];
 
-	    vlib_set_next_frame_buffer (vm, node, next0, bi0);
+	    vlib_set_next_frame_buffer (vm, node, adj0->rewrite_header.next_index, bi0);
 	  }
 	}
 

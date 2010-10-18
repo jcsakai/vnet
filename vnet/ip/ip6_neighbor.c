@@ -307,7 +307,10 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 		     ? ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP
 		     : ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY);
 	  else
-	    next0 = 0;
+	    {
+	      next0 = 0;
+	      error0 = error0 == ICMP6_ERROR_NONE ? ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_RX : error0;
+	    }
 
 	  if (is_solicitation && error0 == ICMP6_ERROR_NONE)
 	    {
@@ -351,7 +354,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
     }
 
   /* Account for advertisements sent. */
-  vlib_error_count (vm, error_node->node_index, ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_SENT, n_advertisements_sent);
+  vlib_error_count (vm, error_node->node_index, ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_TX, n_advertisements_sent);
 
   return frame->n_vectors;
 }

@@ -12,7 +12,8 @@
   _ (ECHO_REPLIES_SENT, "echo replies sent")				\
   _ (NEIGHBOR_SOLICITATION_SOURCE_NOT_ON_LINK, "neighbor solicitations from source not on link") \
   _ (NEIGHBOR_SOLICITATION_SOURCE_UNKNOWN, "neighbor solicitations for unknown targets") \
-  _ (NEIGHBOR_ADVERTISEMENTS_SENT, "neighbor advertisements sent")
+  _ (NEIGHBOR_ADVERTISEMENTS_TX, "neighbor advertisements sent")	\
+  _ (NEIGHBOR_ADVERTISEMENTS_RX, "neighbor advertisements received")
 
 typedef enum {
 #define _(f,s) ICMP6_ERROR_##f,
