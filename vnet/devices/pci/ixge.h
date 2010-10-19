@@ -1,0 +1,682 @@
+#ifndef included_ixge_h
+#define included_ixge_h
+
+#include <clib/clib.h>
+
+typedef volatile struct {
+  /* [31:7] 128 byte aligned. */
+  u32 descriptor_address[2];
+  u32 n_descriptor_bytes;
+
+  u32 dca_control;
+
+  u32 head;
+
+  /* [4:0] tail buffer size (in 1k byte units)
+     [13:8] head buffer size (in 64 byte units)
+     [24:22] lo free descriptors threshold (units of 64 descriptors)
+     [27:25] descriptor type 0 = legacy, 1 = advanced one buffer (e.g. tail),
+     2 = advanced header splitting (head + tail), 5 = advanced header
+     splitting (head only).
+     [28] drop if no descriptors available. */
+  u32 split_control;
+
+  u32 tail;
+  CLIB_PAD_FROM_TO (0x1c, 0x28);
+
+  /* [7:0] tx prefetch threshold
+     [15:8] tx host threshold
+     [24:16] tx write back threshold
+     [25] rx/tx enable
+     [26] tx descriptor writeback flush
+     [30] rx strip vlan enable */
+  u32 control;
+
+  u32 rx_coallesce_control;
+
+  union {
+    struct {
+      /* packets bytes lo hi */
+      u32 stats[3];
+
+      u32 unused;
+    } rx;
+
+    struct {
+      u32 unused[2];
+
+      /* Lo bit enables TX descriptor completion write back. */
+      u32 tx_descriptor_completion_address[2];
+    } tx;
+  };
+} ixge_dma_regs_t;
+
+/* Only advanced descriptors are supported. */
+typedef volatile union {
+  struct {
+    u64 packet_address;
+    u64 head_address;
+  } rx_to_hw;
+
+  struct {
+    u32 rss_type : 4;
+    u32 packet_type : 13;
+    u32 rx_tcp_coallesce_count : 4;
+    u32 n_head_bytes : 10;
+    u32 is_split_header : 1;
+    
+    u32 reserved19 : 1;
+    u32 vm_loopback : 1;
+    u32 security : 1;
+    u32 time_stamp : 1;
+    u32 reserved12 : 4;
+    u32 low_latency_interrupt : 1;
+    u32 udp_checksum_is_valid : 1;
+    u32 outer_vlan_found_on_2_vlan_packet : 1;
+    u32 reserved8 : 1;
+    u32 non_unicast_ethernet_address : 1;
+    u32 ip4_checksum_done : 1;
+    u32 tcp_udp_checksum_done : 1;
+    u32 tcp_udp_checksum_is_udp : 1;
+    u32 is_vlan : 1;
+    u32 flow_directory_match : 1;
+    u32 is_eop : 1;
+    u32 descriptor_done : 1;
+
+    u32 ip4_checksum_error : 1;
+    u32 tcp_udp_checksum_error : 1;
+
+    u32 extended_error : 12;
+    u16 n_packet_bytes_this_descriptor;
+    u16 vlan_tag;
+  } rx_from_hw;
+
+} ixge_descriptor_t;
+
+typedef volatile struct {
+  /* [2] pcie master disable
+     [3] mac reset
+     [26] global device reset */
+  u32 control;
+  u32 control_alias;
+  /* [3:2] device id (0 or 1 for dual port chips)
+     [7] link is up
+     [17:10] num vfs
+     [18] io active
+     [19] pcie master enable status */
+  u32 status_read_only;
+  CLIB_PAD_FROM_TO (0xc, 0x18);
+  /* [14] pf reset done
+     [17] relaxed ordering disable
+     [26] extended vlan enable
+     [28] driver loaded */
+  u32 extended_control;
+  CLIB_PAD_FROM_TO (0x1c, 0x20);
+
+  /* sdp_data [7:0]
+     sdp_is_output [15:8]
+     sdp_is_native [23:16]
+     sdp_function [31:24] */
+  u32 extended_sdp_control;
+  CLIB_PAD_FROM_TO (0x24, 0x28);
+
+  /* [0] i2c clock in
+     [1] i2c clock out
+     [2] i2c data in
+     [3] i2c data out */
+  u32 i2c_control;
+  CLIB_PAD_FROM_TO (0x2c, 0x4c);
+  u32 tcp_timer;
+
+  CLIB_PAD_FROM_TO (0x50, 0x200);
+
+  u32 led_control;
+
+  CLIB_PAD_FROM_TO (0x204, 0x600);
+  u32 core_spare;
+  CLIB_PAD_FROM_TO (0x604, 0x700);
+
+  struct {
+    u32 vflr_events_clear[4];
+    u32 mailbox_interrupt_status[4];
+    u32 mailbox_interrupt_enable[4];
+    CLIB_PAD_FROM_TO (0x730, 0x800);
+  } pf_foo;
+
+  struct {
+    u32 interrupt_status_write_1_to_clear;
+    CLIB_PAD_FROM_TO (0x804, 0x808);
+    u32 interrupt_status_write_1_to_set;
+    CLIB_PAD_FROM_TO (0x80c, 0x810);
+    u32 interrupt_auto_clear_enable;
+    CLIB_PAD_FROM_TO (0x814, 0x820);
+    u32 interrupt_throttle0[24];
+    u32 interrupt_enable_write_1_to_set;
+    CLIB_PAD_FROM_TO (0x884, 0x888);
+    u32 interrupt_enable_write_1_to_clear;
+    CLIB_PAD_FROM_TO (0x88c, 0x890);
+    u32 interrupt_enable_auto_clear;
+    u32 msi_to_eitr_select;
+    u32 gpie_interrupt_enable;
+    CLIB_PAD_FROM_TO (0x89c, 0x900);
+    u32 interrupt_vector_allocation[64];
+    u32 interrupt_vector_allocation_misc;
+    CLIB_PAD_FROM_TO (0xa04, 0xa90);
+    /* 64 queues in [0] and [1]. */
+    u32 interrupt_status1_write_1_to_clear[4];
+    u32 interrupt_enable1_write_1_to_set[4];
+    u32 interrupt_enable1_write_1_to_clear[4];
+    CLIB_PAD_FROM_TO (0xac0, 0xad0);
+    u32 interrupt_enable1_auto_clear[4];
+    CLIB_PAD_FROM_TO (0xae0, 0x1000);
+  } interrupt;
+
+  ixge_dma_regs_t rx_dma0[64];
+
+  CLIB_PAD_FROM_TO (0x2000, 0x2140);
+  u32 dcb_rx_packet_plane_t4_config[8];
+  u32 dcb_rx_packet_plane_t4_status[8];
+  CLIB_PAD_FROM_TO (0x2180, 0x2300);
+
+  /* reg i defines mapping for 4 rx queues starting at 4*i + 0. */
+  u32 rx_queue_stats_mapping[32];
+  u32 rx_queue_stats_control;
+
+  CLIB_PAD_FROM_TO (0x2384, 0x2410);
+  u32 fc_user_descriptor_ptr[2];
+  u32 fc_buffer_control;
+  CLIB_PAD_FROM_TO (0x241c, 0x2420);
+  u32 fc_rx_dma;
+  CLIB_PAD_FROM_TO (0x2424, 0x2430);
+  u32 dcb_packet_plane_control;
+  CLIB_PAD_FROM_TO (0x2434, 0x2f00);
+
+  u32 rx_dma_control;
+  u32 pf_queue_drop_enable;
+  CLIB_PAD_FROM_TO (0x2f08, 0x2f20);
+  u32 rx_dma_descriptor_cache_config;
+  CLIB_PAD_FROM_TO (0x2f24, 0x3000);
+
+  u32 rx_control;
+  CLIB_PAD_FROM_TO (0x3004, 0x3008);
+  /* [15:0] ether type (little endian)
+     [31:16] opcode (big endian) */
+  u32 flow_control_control;
+  CLIB_PAD_FROM_TO (0x300c, 0x3028);
+  u32 rx_coallesce_data_buffer_control;
+  CLIB_PAD_FROM_TO (0x302c, 0x3190);
+  u32 rx_packet_buffer_flush_detect;
+  CLIB_PAD_FROM_TO (0x3194, 0x3200);
+  u32 flow_control_tx_timers[4];		/* 2 timer values */
+  CLIB_PAD_FROM_TO (0x3210, 0x3220);
+  u32 flow_control_rx_threshold_lo[8];
+  CLIB_PAD_FROM_TO (0x3240, 0x3260);
+  u32 flow_control_rx_threshold_hi[8];
+  CLIB_PAD_FROM_TO (0x3280, 0x32a0);
+  u32 flow_control_refresh_threshold;
+  CLIB_PAD_FROM_TO (0x32a4, 0x3c00);
+  /* For each of 8 traffic classes (units of bytes). */
+  u32 rx_packet_buffer_size[8];
+  CLIB_PAD_FROM_TO (0x3c20, 0x3d00);
+  u32 flow_control_config;
+  CLIB_PAD_FROM_TO (0x3d04, 0x4200);
+
+  struct {
+    u32 pcs_config;
+    CLIB_PAD_FROM_TO (0x4204, 0x4208);
+    u32 link_control;
+    u32 link_status;
+    u32 pcs_debug[2];
+    u32 auto_negotiation;
+    u32 link_partner_ability;
+    u32 auto_negotiation_tx_next_page;
+    u32 auto_negotiation_link_partner_next_page;
+    CLIB_PAD_FROM_TO (0x4228, 0x4240);
+  } gige_mac;
+
+  struct {
+    u32 control[2];
+    u32 pause_and_pace_control;
+    CLIB_PAD_FROM_TO (0x424c, 0x425c);
+    u32 mdi_command;
+    u32 mdi_data;
+    CLIB_PAD_FROM_TO (0x4264, 0x4268);
+    u32 max_frame_size;
+    CLIB_PAD_FROM_TO (0x426c, 0x4288);
+    u32 xgxs_status[2];
+    u32 pcs_status;
+    u32 flow_control;
+    u32 serdes_control;
+    u32 fifo_control;
+    u32 auto_negotiation_control;
+    u32 link_status;
+    u32 auto_negotiation_control2;
+    CLIB_PAD_FROM_TO (0x42ac, 0x42b0);
+    u32 link_partner_ability[2];
+    CLIB_PAD_FROM_TO (0x42b8, 0x42d0);
+    u32 manageability_control;
+    u32 link_partner_next_page[2];
+    CLIB_PAD_FROM_TO (0x42dc, 0x42e0);
+    u32 kr_pcs_control;
+    u32 kr_pcs_status;
+    u32 fec_status[2];
+    CLIB_PAD_FROM_TO (0x42f0, 0x4314);
+    u32 sgmii_control;
+    CLIB_PAD_FROM_TO (0x4318, 0x4324);
+    u32 link_status2;
+    CLIB_PAD_FROM_TO (0x4328, 0x4900);
+  } xge_mac;
+
+  CLIB_PAD_FROM_TO (0x4900, 0x4904);
+  u32 tx_dcb_descriptor_plane_queue_select;
+  u32 tx_dcb_descriptor_plane_t1_config;
+  u32 tx_dcb_descriptor_plane_t1_status;
+  CLIB_PAD_FROM_TO (0x4910, 0x4950);
+  u32 tx_packet_buffer_thresholds[8];
+  CLIB_PAD_FROM_TO (0x4970, 0x4980);
+  struct {
+    u32 mmw;
+    u32 config;
+    u32 status;
+    u32 rate_drift;
+  } dcb_tx_rate_scheduler;
+  CLIB_PAD_FROM_TO (0x4990, 0x4a80);
+  u32 tx_dma_control;
+  CLIB_PAD_FROM_TO (0x4a84, 0x4a88);
+  u32 tx_dma_tcp_flags_control[2];
+  CLIB_PAD_FROM_TO (0x4a90, 0x4b00);
+  u32 pf_mailbox[64];
+  CLIB_PAD_FROM_TO (0x4c00, 0x5000);
+
+  /* RX */
+  u32 checksum_control;
+  CLIB_PAD_FROM_TO (0x5004, 0x5008);
+  u32 rx_filter_control;
+  CLIB_PAD_FROM_TO (0x500c, 0x5010);
+  u32 management_vlan_tag[8];
+  u32 management_udp_tcp_ports[8];
+  CLIB_PAD_FROM_TO (0x5050, 0x5078);
+  /* little endian. */
+  u32 extended_vlan_ether_type;
+  CLIB_PAD_FROM_TO (0x507c, 0x5080);
+  u32 filter_control;
+  CLIB_PAD_FROM_TO (0x5084, 0x5088);
+  u32 vlan_control;
+  CLIB_PAD_FROM_TO (0x508c, 0x5090);
+  u32 multicast_control;
+  CLIB_PAD_FROM_TO (0x5094, 0x5100);
+  u32 fcoe_rx_control;
+  CLIB_PAD_FROM_TO (0x5104, 0x5108);
+  u32 fc_flt_context;
+  CLIB_PAD_FROM_TO (0x510c, 0x5110);
+  u32 fc_filter_control;
+  CLIB_PAD_FROM_TO (0x5114, 0x5120);
+  u32 rx_message_type_lo;
+  CLIB_PAD_FROM_TO (0x5124, 0x5128);
+  u32 ethernet_type_queue_filter[8];
+  CLIB_PAD_FROM_TO (0x5148, 0x5160);
+  u32 management_decision_filters1[8];
+  u32 vf_vm_tx_switch_loopback_enable[2];
+  u32 rx_time_sync_control;
+  CLIB_PAD_FROM_TO (0x518c, 0x5190);
+  u32 management_ethernet_type_filters[4];
+  u32 rx_timestamp_attributes_lo;
+  u32 rx_timestamp_hi;
+  u32 rx_timestamp_attributes_hi;
+  CLIB_PAD_FROM_TO (0x51ac, 0x51b0);
+  u32 pf_virtual_control;
+  CLIB_PAD_FROM_TO (0x51b4, 0x51d8);
+  u32 fc_offset_parameter;
+  CLIB_PAD_FROM_TO (0x51dc, 0x51e0);
+  u32 vf_rx_enable[2];
+  u32 rx_timestamp_lo;
+  CLIB_PAD_FROM_TO (0x51ec, 0x5200);
+  u32 multicast_filter[128];
+  CLIB_PAD_FROM_TO (0x5400, 0x5800);
+  u32 wake_up_control;
+  CLIB_PAD_FROM_TO (0x5804, 0x5808);
+  u32 wake_up_filter_control;
+  CLIB_PAD_FROM_TO (0x580c, 0x5818);
+  u32 multiple_rx_queue_command_82598;
+  CLIB_PAD_FROM_TO (0x581c, 0x5820);
+  u32 management_control;
+  u32 management_filter_control;
+  CLIB_PAD_FROM_TO (0x5828, 0x5838);
+  u32 wake_up_ip4_address_valid;
+  CLIB_PAD_FROM_TO (0x583c, 0x5840);
+  u32 wake_up_ip4_address_table[4];
+  u32 management_control_to_host;
+  CLIB_PAD_FROM_TO (0x5854, 0x5880);
+  u32 wake_up_ip6_address_table[4];
+  u32 management_decision_filters[8];
+  u32 management_ip4_or_ip6_address_filters[4][4];
+  CLIB_PAD_FROM_TO (0x58f0, 0x5900);
+  u32 wake_up_packet_length;
+  CLIB_PAD_FROM_TO (0x5904, 0x5910);
+  u32 management_ethernet_address_filters[4][2];
+  CLIB_PAD_FROM_TO (0x5930, 0x5a00);
+  u32 wake_up_packet_memory[32];
+  CLIB_PAD_FROM_TO (0x5a80, 0x5c00);
+  u32 redirection_table_82598[32];
+  u32 rss_random_keys_82598[10];
+  CLIB_PAD_FROM_TO (0x5ca8, 0x6000);
+
+  ixge_dma_regs_t tx_dma[128];
+
+  u32 pf_vm_vlan_insert[64];
+  u32 tx_dma_tcp_max_alloc_size_requests;
+  CLIB_PAD_FROM_TO (0x8104, 0x8110);
+  u32 vf_tx_enable[2];
+  CLIB_PAD_FROM_TO (0x8118, 0x8120);
+  u32 multiple_tx_queues_command;
+  CLIB_PAD_FROM_TO (0x8124, 0x8200);
+  u32 pf_vf_anti_spoof[8];
+  u32 pf_dma_tx_switch_control;
+  CLIB_PAD_FROM_TO (0x8224, 0x82e0);
+  u32 tx_strict_low_latency_queues[4];
+  CLIB_PAD_FROM_TO (0x82f0, 0x8600);
+  u32 tx_queue_stats_mapping_82599[32];
+  u32 tx_queue_packet_counts[32];
+  u32 tx_queue_byte_counts[32][2];
+
+  struct {
+    u32 control;
+    u32 status;
+    u32 buffer_almost_full;
+    CLIB_PAD_FROM_TO (0x880c, 0x8810);
+    u32 buffer_min_ifg;
+    CLIB_PAD_FROM_TO (0x8814, 0x8900);
+  } tx_security;
+
+  struct {
+    u32 index;
+    u32 salt;
+    u32 key[4];
+    CLIB_PAD_FROM_TO (0x8918, 0x8a00);
+  } tx_ipsec;
+
+  struct {
+    u32 capabilities;
+    u32 control;
+    u32 tx_sci[2];
+    u32 sa;
+    u32 sa_pn[2];
+    u32 key[2][4];
+    /* untagged packets, encrypted packets, protected packets,
+       encrypted bytes, protected bytes */
+    u32 stats[5];
+    CLIB_PAD_FROM_TO (0x8a50, 0x8c00);
+  } tx_link_security;
+
+  struct {
+    u32 control;
+    u32 timestamp_value[2];
+    u32 system_time[2];
+    u32 increment_attributes;
+    u32 time_adjustment_offset[2];
+    u32 aux_control;
+    u32 target_time[2][2];
+    CLIB_PAD_FROM_TO (0x8c34, 0x8c3c);
+    u32 aux_time_stamp[2][2];
+    CLIB_PAD_FROM_TO (0x8c4c, 0x8d00);
+  } tx_timesync;
+
+  struct {
+    u32 control;
+    u32 status;
+    CLIB_PAD_FROM_TO (0x8d08, 0x8e00);
+  } rx_security;
+
+  struct {
+    u32 index;
+    u32 ip_address[4];
+    u32 spi;
+    u32 ip_index;
+    u32 key[4];
+    u32 salt;
+    u32 mode;
+    CLIB_PAD_FROM_TO (0x8e34, 0x8f00);
+  } rx_ipsec;
+
+  struct {
+    u32 capabilities;
+    u32 control;
+    u32 sci[2];
+    u32 sa[2];
+    u32 sa_pn[2];
+    u32 key[2][4];
+    /* see datasheet */
+    u32 stats[17];
+    CLIB_PAD_FROM_TO (0x8f84, 0x9000);
+  } rx_link_security;
+
+  u32 wake_up_flexible_host_filter_table0[4][16][4];
+  u32 tco_flexible_filter_table[2][16][4];
+  u32 wake_up_flexible_host_filter_table1[2][16][4];
+  CLIB_PAD_FROM_TO (0x9800, 0xa000);
+
+  /* 4096 bits. */
+  u32 vlan_filter[128];
+
+  /* [0] ethernet address [31:0]
+     [1] [15:0] ethernet address [47:32]
+     [31] valid bit. */
+  u32 rx_ethernet_address[128][2];
+
+  /* select one of 64 pools for each rx address. */
+  u32 rx_ethernet_address_pool_select[128][2];
+  CLIB_PAD_FROM_TO (0xaa00, 0xcc00);
+
+  u32 tx_packet_buffer_sizes[8];
+  CLIB_PAD_FROM_TO (0xcc20, 0xcd10);
+  u32 tx_manageability_tc_mapping;
+  CLIB_PAD_FROM_TO (0xcd14, 0xcd20);
+  u32 dcb_tx_packet_plane_t2_config[8];
+  u32 dcb_tx_packet_plane_t2_status[8];
+  CLIB_PAD_FROM_TO (0xcd60, 0xce00);
+
+  u32 tx_flow_control_status;
+  CLIB_PAD_FROM_TO (0xce04, 0xd000);
+
+  ixge_dma_regs_t rx_dma1[64];
+
+  u32 src_address_queue_filter[128];
+  u32 dst_address_queue_filter[128];
+  u32 src_dst_port_queue_filter[128];
+  u32 five_tuple_queue_filter[128];
+
+  u32 l3_l4_tuple_immediate_rx_interrupt[128];
+  CLIB_PAD_FROM_TO (0xea00, 0xeb00);
+  u32 redirection_table_82599[32];
+  u32 rss_random_key_82599[10];
+  CLIB_PAD_FROM_TO (0xeba8, 0xec00);
+  u32 ethernet_type_queue_select[8];
+  CLIB_PAD_FROM_TO (0xec20, 0xec30);
+  u32 syn_packet_queue_filter;
+  CLIB_PAD_FROM_TO (0xec34, 0xec60);
+  u32 immediate_interrupt_rx_vlan_priority;
+  CLIB_PAD_FROM_TO (0xec64, 0xec70);
+  u32 rss_queues_per_traffic_class;
+  CLIB_PAD_FROM_TO (0xec74, 0xec90);
+  u32 lli_size_threshold;
+  CLIB_PAD_FROM_TO (0xec94, 0xed00);
+
+  struct {
+    u32 control;
+    CLIB_PAD_FROM_TO (0xed04, 0xed10);
+    u32 table[8];
+    CLIB_PAD_FROM_TO (0xed30, 0xee00);
+  } fcoe_redirection;
+
+  struct {
+    u32 control;
+    CLIB_PAD_FROM_TO (0xee04, 0xee0c);
+    u32 src_ipv6[7];
+    u32 hash_signature;
+    u32 command;
+    CLIB_PAD_FROM_TO (0xee30, 0xee3c);
+    /* dst ip4 src ip4 tcp udp */
+    u32 masks0[4];
+    u32 filter_length;
+    u32 usage_stats;
+    u32 failed_usage_stats;
+    u32 filters_match_stats;
+    u32 filters_miss_stats;
+    CLIB_PAD_FROM_TO (0xee60, 0xee70);
+    /* other ip6 */
+    u32 masks1[2];
+    CLIB_PAD_FROM_TO (0xee78, 0xf000);
+  } flow_director;
+
+  struct {
+    u32 l2_control[64];
+    u32 vlan_pool_filter[64];
+    u32 vlan_pool_filter_bitmap[128];
+    u32 unicast_table[128];
+    u32 mirror_rule[4];
+    u32 mirror_rule_vlan[8];
+    u32 mirror_rule_pool[8];
+    CLIB_PAD_FROM_TO (0xf650, 0x10010);
+  } pf_bar;
+
+  struct {
+    u32 control;
+    u32 read;
+    CLIB_PAD_FROM_TO (0x10018, 0x1001c);
+    u32 flash_access;
+    CLIB_PAD_FROM_TO (0x10020, 0x10114);
+    u32 flash_data;
+    u32 flash_control;
+    u32 flash_read_data;
+    CLIB_PAD_FROM_TO (0x10120, 0x1013c);
+    u32 flash_opcode;
+    u32 software_semaphore;
+    CLIB_PAD_FROM_TO (0x10144, 0x10148);
+    u32 firmware_semaphore;
+    CLIB_PAD_FROM_TO (0x1014c, 0x10160);
+    u32 software_firmware_sync;
+    CLIB_PAD_FROM_TO (0x10164, 0x10200);
+    u32 rx_control;
+    CLIB_PAD_FROM_TO (0x10204, 0x11000);
+  } flash_eeprom;
+
+  struct {
+    u32 control;
+    CLIB_PAD_FROM_TO (0x11004, 0x11010);
+    u32 counter_control;
+    /* [7:0],[15:8],[23:16],[31:24] event for counters 0-3. */
+    u32 counter_event;
+    CLIB_PAD_FROM_TO (0x11018, 0x11020);
+    u32 counters_clear_on_read[4];
+    u32 counter_config[4];
+    struct {
+      u32 address;
+      u32 data;
+    } indirect_access;
+    CLIB_PAD_FROM_TO (0x11048, 0x11050);
+    u32 extended_control;
+    CLIB_PAD_FROM_TO (0x11054, 0x11064);
+    u32 mirrored_revision_id;
+    CLIB_PAD_FROM_TO (0x11068, 0x11070);
+    u32 dca_requester_id_information;
+    u32 dca_control;
+    CLIB_PAD_FROM_TO (0x11078, 0x110b0);
+    u32 pcie_interrupt_status;
+    CLIB_PAD_FROM_TO (0x110b4, 0x110b8);
+    u32 pcie_interrupt_enable;
+    CLIB_PAD_FROM_TO (0x110bc, 0x110c0);
+    u32 msi_x_pba_clear[8];
+    CLIB_PAD_FROM_TO (0x110e0, 0x12300);
+  } pcie;
+
+  u32 interrupt_throttle1[128-24];
+  CLIB_PAD_FROM_TO (0x124a0, 0x14f00);
+
+  u32 core_analog_config;
+  CLIB_PAD_FROM_TO (0x14f04, 0x14f10);
+  u32 core_common_config;
+  CLIB_PAD_FROM_TO (0x14f14, 0x15f14);
+
+  u32 link_sec_software_firmware_interface;
+} ixge_regs_t;
+
+#define foreach_ixge_counter				\
+  _ (0x40d0, rx_total_packets)				\
+  _64 (0x40c0, rx_total_bytes)				\
+  _ (0x4074, rx_good_packets)				\
+  _64 (0x4088, rx_good_bytes)				\
+  _ (0x407c, rx_multicast_packets)			\
+  _ (0x4078, rx_broadcast_packets)			\
+  _ (0x41b0, rx_good_non_filtered_packets)		\
+  _64 (0x41b4, rx_good_non_filtered_bytes)		\
+  _ (0x2f50, rx_dma_good_packets)			\
+  _64 (0x2f54, rx_dma_good_bytes)			\
+  _ (0x2f5c, rx_dma_duplicated_good_packets)		\
+  _64 (0x2f60, rx_dma_duplicated_good_bytes)		\
+  _ (0x2f68, rx_dma_good_loopback_packets)		\
+  _64 (0x2f6c, rx_dma_good_loopback_bytes)		\
+  _ (0x2f74, rx_dma_good_duplicated_loopback_packets)	\
+  _64 (0x2f78, rx_dma_good_duplicated_loopback_bytes)	\
+  _ (0x405c, rx_64_byte_packets)			\
+  _ (0x4060, rx_65_127_byte_packets)			\
+  _ (0x4064, rx_128_255_byte_packets)			\
+  _ (0x4068, rx_256_511_byte_packets)			\
+  _ (0x406c, rx_512_1023_byte_packets)			\
+  _ (0x4070, rx_gt_1023_byte_packets)			\
+  _ (0x4000, rx_crc_errors)				\
+  _ (0x4120, rx_ip_checksum_errors)			\
+  _ (0x4004, rx_illegal_symbol_errors)			\
+  _ (0x4008, rx_error_symbol_errors)			\
+  _ (0x4034, xge_mac_local_faults)			\
+  _ (0x4038, xge_mac_remote_faults)			\
+  _ (0x403c, rx_length_errors)				\
+  _ (0x41a4, rx_xons)					\
+  _ (0x41a8, rx_xoffs)					\
+  _ (0x40a4, rx_undersize_packets)			\
+  _ (0x40a8, rx_fragments)				\
+  _ (0x40ac, rx_oversize_packets)			\
+  _ (0x40b0, rx_jabbers)				\
+  _ (0x40b4, rx_management_packets)			\
+  _ (0x40b8, rx_management_drops)			\
+  _ (0x40d4, tx_total_packets)				\
+  _ (0x4080, tx_good_packets)				\
+  _64 (0x4090, tx_good_bytes)				\
+  _ (0x40f0, tx_multicast_packets)			\
+  _ (0x40f4, tx_broadcast_packets)			\
+  _ (0x87a0, tx_dma_good_packets)			\
+  _64 (0x87a4, tx_dma_good_bytes)			\
+  _ (0x40d8, tx_64_byte_packets)			\
+  _ (0x40dc, tx_65_127_byte_packets)			\
+  _ (0x40e0, tx_128_255_byte_packets)			\
+  _ (0x40e4, tx_256_511_byte_packets)			\
+  _ (0x40e8, tx_512_1023_byte_packets)			\
+  _ (0x40ec, tx_gt_1023_byte_packets)			\
+  _ (0x4010, tx_undersize_drops)			\
+  _ (0x8780, switch_security_violation_packets)		\
+  _ (0x5118, fc_crc_errors)				\
+  _ (0x241c, fc_rx_drops)				\
+  _ (0x2424, fc_last_error_count)			\
+  _ (0x2428, fcoe_rx_packets)				\
+  _ (0x242c, fcoe_rx_dwords)				\
+  _ (0x8784, fcoe_tx_packets)				\
+  _ (0x8788, fcoe_tx_dwords)
+
+typedef enum {
+#define _(a,f) IXGE_COUNTER_##f,
+#define _64(a,f) _(a,f)
+  foreach_ixge_counter
+#undef _
+  IXGE_N_COUNTER,
+} ixge_counter_type_t;
+
+typedef struct {
+  u32 unit;
+
+  u32 vlib_hw_if_index;
+
+  ixge_regs_t * regs;
+
+  u64 counters[IXGE_N_COUNTER], counters_last_clear[IXGE_N_COUNTER];
+} ixge_main_t;
+
+#endif /* included_ixge_h */

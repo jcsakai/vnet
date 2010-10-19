@@ -142,6 +142,8 @@ nobase_include_HEADERS +=			\
 ########################################
 
 libvnet_la_SOURCES +=				\
+  vnet/devices/pci/ixge.c			\
+  vnet/devices/pci/ixge.h			\
   vnet/devices/ethernet_phy_bcm.c
 
 ########################################
