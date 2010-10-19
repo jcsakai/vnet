@@ -95,7 +95,8 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
 	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
 	vnet/pg/output.lo vnet/pg/stream.lo vnet/devices/pci/ixge.lo \
-	vnet/devices/ethernet_phy_bcm.lo vnet/unix/tuntap.lo
+	vnet/devices/ethernet_phy_bcm.lo vnet/devices/xge/xge.lo \
+	vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -303,6 +304,7 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/pci/ixge.c \
 	vnet/devices/pci/ixge.h vnet/devices/ethernet_phy_bcm.c \
+	vnet/devices/xge/xge.c vnet/devices/xge/xge.h \
 	vnet/unix/tuntap.c
 nobase_include_HEADERS = vnet/vnet/config.h vnet/vnet/l3_types.h \
 	vnet/vnet/rewrite.h vnet/ethernet/error.def \
@@ -534,6 +536,14 @@ vnet/devices/$(DEPDIR)/$(am__dirstamp):
 	@: > vnet/devices/$(DEPDIR)/$(am__dirstamp)
 vnet/devices/ethernet_phy_bcm.lo: vnet/devices/$(am__dirstamp) \
 	vnet/devices/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/xge/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/xge
+	@: > vnet/devices/xge/$(am__dirstamp)
+vnet/devices/xge/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/xge/$(DEPDIR)
+	@: > vnet/devices/xge/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/xge/xge.lo: vnet/devices/xge/$(am__dirstamp) \
+	vnet/devices/xge/$(DEPDIR)/$(am__dirstamp)
 vnet/unix/$(am__dirstamp):
 	@$(MKDIR_P) vnet/unix
 	@: > vnet/unix/$(am__dirstamp)
@@ -572,6 +582,8 @@ mostlyclean-compile:
 	-rm -f vnet/devices/ethernet_phy_bcm.lo
 	-rm -f vnet/devices/pci/ixge.$(OBJEXT)
 	-rm -f vnet/devices/pci/ixge.lo
+	-rm -f vnet/devices/xge/xge.$(OBJEXT)
+	-rm -f vnet/devices/xge/xge.lo
 	-rm -f vnet/ethernet/arp.$(OBJEXT)
 	-rm -f vnet/ethernet/arp.lo
 	-rm -f vnet/ethernet/cli.$(OBJEXT)
@@ -673,6 +685,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@example/$(DEPDIR)/main_stub.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/$(DEPDIR)/ethernet_phy_bcm.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/pci/$(DEPDIR)/ixge.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/xge/$(DEPDIR)/xge.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/arp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/cli.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/format.Plo@am__quote@
@@ -752,6 +765,7 @@ clean-libtool:
 	-rm -rf .libs _libs
 	-rm -rf vnet/devices/.libs vnet/devices/_libs
 	-rm -rf vnet/devices/pci/.libs vnet/devices/pci/_libs
+	-rm -rf vnet/devices/xge/.libs vnet/devices/xge/_libs
 	-rm -rf vnet/ethernet/.libs vnet/ethernet/_libs
 	-rm -rf vnet/hdlc/.libs vnet/hdlc/_libs
 	-rm -rf vnet/ip/.libs vnet/ip/_libs
@@ -1019,6 +1033,8 @@ distclean-generic:
 	-rm -f vnet/devices/$(am__dirstamp)
 	-rm -f vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/devices/pci/$(am__dirstamp)
+	-rm -f vnet/devices/xge/$(DEPDIR)/$(am__dirstamp)
+	-rm -f vnet/devices/xge/$(am__dirstamp)
 	-rm -f vnet/ethernet/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/ethernet/$(am__dirstamp)
 	-rm -f vnet/hdlc/$(DEPDIR)/$(am__dirstamp)
@@ -1044,7 +1060,7 @@ clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-libtool distclean-tags
@@ -1092,7 +1108,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 

@@ -1,7 +1,7 @@
 #ifndef included_ixge_h
 #define included_ixge_h
 
-#include <clib/clib.h>
+#include <vlib/vlib.h>
 
 typedef volatile struct {
   /* [31:7] 128 byte aligned. */
@@ -238,8 +238,8 @@ typedef volatile struct {
     u32 control[2];
     u32 pause_and_pace_control;
     CLIB_PAD_FROM_TO (0x424c, 0x425c);
-    u32 mdi_command;
-    u32 mdi_data;
+    u32 phy_command;
+    u32 phy_data;
     CLIB_PAD_FROM_TO (0x4264, 0x4268);
     u32 max_frame_size;
     CLIB_PAD_FROM_TO (0x426c, 0x4288);
@@ -539,26 +539,24 @@ typedef volatile struct {
     CLIB_PAD_FROM_TO (0xf650, 0x10010);
   } pf_bar;
 
-  struct {
-    u32 control;
-    u32 read;
-    CLIB_PAD_FROM_TO (0x10018, 0x1001c);
-    u32 flash_access;
-    CLIB_PAD_FROM_TO (0x10020, 0x10114);
-    u32 flash_data;
-    u32 flash_control;
-    u32 flash_read_data;
-    CLIB_PAD_FROM_TO (0x10120, 0x1013c);
-    u32 flash_opcode;
-    u32 software_semaphore;
-    CLIB_PAD_FROM_TO (0x10144, 0x10148);
-    u32 firmware_semaphore;
-    CLIB_PAD_FROM_TO (0x1014c, 0x10160);
-    u32 software_firmware_sync;
-    CLIB_PAD_FROM_TO (0x10164, 0x10200);
-    u32 rx_control;
-    CLIB_PAD_FROM_TO (0x10204, 0x11000);
-  } flash_eeprom;
+  u32 flash_eeprom_control;
+  u32 eeprom_read;
+  CLIB_PAD_FROM_TO (0x10018, 0x1001c);
+  u32 flash_access;
+  CLIB_PAD_FROM_TO (0x10020, 0x10114);
+  u32 flash_data;
+  u32 flash_control;
+  u32 flash_read_data;
+  CLIB_PAD_FROM_TO (0x10120, 0x1013c);
+  u32 flash_opcode;
+  u32 software_semaphore;
+  CLIB_PAD_FROM_TO (0x10144, 0x10148);
+  u32 firmware_semaphore;
+  CLIB_PAD_FROM_TO (0x1014c, 0x10160);
+  u32 software_firmware_sync;
+  CLIB_PAD_FROM_TO (0x10164, 0x10200);
+  u32 general_rx_control;
+  CLIB_PAD_FROM_TO (0x10204, 0x11000);
 
   struct {
     u32 control;
@@ -670,9 +668,22 @@ typedef enum {
 } ixge_counter_type_t;
 
 typedef struct {
+  u32 mdio_address;
+
+  /* 32 bit ID read from ID registers. */
+  u32 id;
+} ixge_phy_t;
+
+typedef struct {
+  vlib_main_t * vlib_main;
+
   u32 unit;
 
   u32 vlib_hw_if_index;
+
+  /* Phy index (0 or 1) and address on MDI bus. */
+  u32 phy_index;
+  ixge_phy_t phys[2];
 
   ixge_regs_t * regs;
 
