@@ -98,6 +98,29 @@ static u32 ixge_read_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index)
 static void ixge_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u32 v)
 { (void) ixge_read_write_phy_reg (xd, dev_type, reg_index, v, /* is_read */ 0); }
 
+static void ixge_i2c_put_bits (i2c_bus_t * b, int scl, int sda)
+{
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, b->private);
+  u32 v;
+
+  v = 0;
+  v |= (sda != 0) << 3;
+  v |= (scl != 0) << 1;
+  xd->regs->i2c_control = v;
+}
+
+static void ixge_i2c_get_bits (i2c_bus_t * b, int * scl, int * sda)
+{
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, b->private);
+  u32 v;
+
+  v = xd->regs->i2c_control;
+  *sda = (v & (1 << 2)) != 0;
+  *scl = (v & (1 << 0)) != 0;
+}
+
 static void ixge_phy_init (ixge_device_t * xd)
 {
   ixge_main_t * xm = &ixge_main;
@@ -120,6 +143,20 @@ static void ixge_phy_init (ixge_device_t * xd)
     /* No PHY found? */
     if (i >= 32)
       {
+	u8 fucked[256];
+	u8 buffer[1];
+	i2c_bus_t * ib = &xd->i2c_bus;
+	u32 r;
+
+	ib->private = xd->index;
+	ib->put_bits = ixge_i2c_put_bits;
+	ib->get_bits = ixge_i2c_get_bits;
+	i2c_init (ib);
+
+	buffer[0] = 0;
+	r = i2c_write_read (ib, 0xa0, buffer, 1, &fucked, sizeof (fucked));
+	clib_warning ("%U", format_hex_bytes, fucked, sizeof (fucked));
+
 	phy->mdio_address = ~0;
 	return;
       }

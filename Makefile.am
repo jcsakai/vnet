@@ -150,6 +150,10 @@ libvnet_la_SOURCES +=				\
   vnet/devices/xge/xge.c			\
   vnet/devices/xge/xge.h
 
+libvnet_la_SOURCES +=				\
+  vnet/devices/i2c/i2c.c			\
+  vnet/devices/i2c/i2c.h
+
 ########################################
 # Unix kernel related
 ########################################

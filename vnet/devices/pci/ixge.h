@@ -3,6 +3,7 @@
 
 #include <vlib/vlib.h>
 #include <vlib/pci/pci.h>
+#include <vnet/devices/i2c/i2c.h>
 
 typedef volatile struct {
   /* [31:7] 128 byte aligned. */
@@ -701,6 +702,8 @@ typedef struct {
   /* Phy index (0 or 1) and address on MDI bus. */
   u32 phy_index;
   ixge_phy_t phys[2];
+
+  i2c_bus_t i2c_bus;
 
   /* Counters. */
   u64 counters[IXGE_N_COUNTER], counters_last_clear[IXGE_N_COUNTER];
