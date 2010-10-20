@@ -422,26 +422,19 @@ ixge_process (vlib_main_t * vm,
     
   ixge_device_init (xm);
 
-  /* Enable all interrupts. */
-
-  {
-    uword event_type, i, * event_data = 0;
-
-    while (1)
-      {
-	vlib_process_wait_for_event (vm);
-	event_type = vlib_process_get_events (vm, &event_data);
-
-	switch (event_type) {
-	default:
-	  ASSERT (0);
-	  break;
+  while (1)
+    {
+      ixge_device_t * xd;
+      vlib_process_suspend (vm, 250e-3);
+      vec_foreach (xd, xm->devices)
+	{
+	  uword was_up = vlib_hw_interface_is_link_up (vm, xd->vlib_hw_if_index);
+	  uword is_up = (xd->regs->xge_mac.link_status & (1 << 30)) != 0;
+	  if (was_up != is_up)
+	    vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
+					 is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
 	}
-
-	if (event_data)
-	  _vec_len (event_data) = 0;
-      }
-  }
+    }
 	    
   return 0;
 }
