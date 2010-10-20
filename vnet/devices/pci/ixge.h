@@ -314,7 +314,14 @@ typedef volatile struct {
   u32 rx_timestamp_lo;
   CLIB_PAD_FROM_TO (0x51ec, 0x5200);
   u32 multicast_filter[128];
-  CLIB_PAD_FROM_TO (0x5400, 0x5800);
+
+  /* [0] ethernet address [31:0]
+     [1] [15:0] ethernet address [47:32]
+     [31] valid bit.
+     Index 0 is read from eeprom after reset. */
+  u32 rx_ethernet_address0[16][2];
+
+  CLIB_PAD_FROM_TO (0x5480, 0x5800);
   u32 wake_up_control;
   CLIB_PAD_FROM_TO (0x5804, 0x5808);
   u32 wake_up_filter_control;
@@ -444,7 +451,7 @@ typedef volatile struct {
      [1] [15:0] ethernet address [47:32]
      [31] valid bit.
      Index 0 is read from eeprom after reset. */
-  u32 rx_ethernet_address[128][2];
+  u32 rx_ethernet_address1[128][2];
 
   /* select one of 64 pools for each rx address. */
   u32 rx_ethernet_address_pool_select[128][2];
@@ -522,7 +529,7 @@ typedef volatile struct {
     CLIB_PAD_FROM_TO (0xf650, 0x10010);
   } pf_bar;
 
-  u32 flash_eeprom_control;
+  u32 eeprom_flash_control;
   u32 eeprom_read;
   CLIB_PAD_FROM_TO (0x10018, 0x1001c);
   u32 flash_access;

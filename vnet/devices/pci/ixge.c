@@ -1,5 +1,6 @@
 #include <vnet/devices/pci/ixge.h>
 #include <vnet/devices/xge/xge.h>
+#include <vnet/ethernet/ethernet.h>
 #include <vlib/unix/pci.h>
 
 ixge_main_t ixge_main;
@@ -60,8 +61,6 @@ static void ixge_software_firmware_sync_release (ixge_device_t * xd, u32 sw_mask
 
 u32 ixge_read_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u32 v, u32 is_read)
 {
-  ixge_main_t * xm = &ixge_main;
-  vlib_main_t * vm = xm->vlib_main;
   ixge_regs_t * r = xd->regs;
   const u32 busy_bit = 1 << 30;
   u32 x;
@@ -148,9 +147,22 @@ static void ixge_phy_init (ixge_device_t * xd)
   } while (ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL) & XGE_PHY_CONTROL_RESET);
 }
 
-static void ixge_device_init (ixge_device_t * xd)
+static uword
+ixge_interface_tx (vlib_main_t * vm,
+		   vlib_node_runtime_t * rt,
+		   vlib_frame_t * f)
 {
-  ixge_phy_init (xd);
+  ASSERT (0);
+  return f->n_vectors;
+}
+
+static u8 * format_ixge_device_name (u8 * s, va_list * args)
+{
+  u32 i = va_arg (*args, u32);
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, i);
+  return format (s, "ixge:%U",
+		 format_os_pci_handle, xd->pci_device.os_handle);
 }
 
 static void ixge_update_counters (ixge_device_t * xd)
@@ -179,6 +191,80 @@ static void ixge_update_counters (ixge_device_t * xd)
       xd->counters[i] += r[o];
       if (is_64bit[i])
 	xd->counters[i] += (u64) r[o+1] << (u64) 32;
+    }
+}
+
+static u8 * format_ixge_device (u8 * s, va_list * args)
+{
+  u32 i = va_arg (*args, u32);
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, i);
+
+  ixge_update_counters (xd);
+
+  s = format (s, "PHY address %d, id 0x%x",
+	      xd->phys[xd->phy_index].mdio_address,
+	      xd->phys[xd->phy_index].id);
+
+  return s;
+}
+
+static void ixge_clear_hw_interface_counters (u32 instance)
+{
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, instance);
+  ixge_update_counters (xd);
+  memcpy (xd->counters_last_clear, xd->counters, sizeof (xd->counters));
+}
+
+static VLIB_DEVICE_CLASS (ixge_device_class) = {
+    .name = "ixge",
+    .tx_function = ixge_interface_tx,
+    .format_device_name = format_ixge_device_name,
+    .format_device = format_ixge_device,
+    .clear_counters = ixge_clear_hw_interface_counters,
+};
+
+static void ixge_device_init (ixge_main_t * xm)
+{
+  vlib_main_t * vm = xm->vlib_main;
+  ixge_device_t * xd;
+    
+  /* Reset chip(s). */
+  vec_foreach (xd, xm->devices)
+    {
+      const u32 reset_bit = 1 << 26;
+      xd->regs->control |= reset_bit;
+
+      /* No need to suspend.  Timed to take ~1e-6 secs */
+      while (xd->regs->control & reset_bit)
+	;
+
+      /* Software loaded. */
+      xd->regs->extended_control |= 1 << 28;
+
+      ixge_phy_init (xd);
+
+      {
+	u8 addr8[6];
+	u32 i, addr32[2];
+	clib_error_t * error;
+
+	addr32[0] = xd->regs->rx_ethernet_address0[0][0];
+	addr32[1] = xd->regs->rx_ethernet_address0[0][1];
+	for (i = 0; i < 6; i++)
+	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
+
+	error = ethernet_register_interface
+	  (vm,
+	   ixge_device_class.index,
+	   xd->index,
+	   /* ethernet address */ addr8,
+	   /* phy */ 0,
+	   &xd->vlib_hw_if_index);
+	if (error)
+	  clib_error_report (error);
+      }
     }
 }
 
@@ -281,39 +367,14 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   return error;
 }
 
-#if 0
-static VLIB_DEVICE_CLASS (ixge_device_class) = {
-    .name = "ixge",
-    .tx_function = ixge_interface_tx,
-    .format_device_name = format_ixge_interface_instance,
-    .format_device = format_ixge_device,
-    .clear_counters = ixge_clear_hw_interface_counters,
-};
-#endif
-
 static uword
 ixge_process (vlib_main_t * vm,
 	      vlib_node_runtime_t * rt,
 	      vlib_frame_t * f)
 {
   ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd;
-  ixge_regs_t * r;
     
-  vec_foreach (xd, xm->devices)
-    ixge_device_init (xd);
-
-#if 0
-  error = ethernet_register_interface
-    (vm,
-     ixge_device_class.index,
-     xd->index,
-     /* ethernet address */ &dummy,
-     /* phy */ 0,
-     &xd->vlib_hw_if_index);
-  if (error)
-    return error;
-#endif
+  ixge_device_init (xm);
 
   /* Enable all interrupts. */
 
