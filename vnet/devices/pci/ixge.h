@@ -2,6 +2,7 @@
 #define included_ixge_h
 
 #include <vlib/vlib.h>
+#include <vlib/pci/pci.h>
 
 typedef volatile struct {
   /* [31:7] 128 byte aligned. */
@@ -680,11 +681,8 @@ typedef struct {
 typedef struct {
   ixge_regs_t * regs;
 
-  /* PCI bus device + function. */
-  u32 pci_dev_fn;
-
-  /* Either 0 or 1 for dual mac chips. */
-  u32 unit;
+  /* PCI bus info. */
+  pci_device_t pci_device;
 
   /* VLIB interface for this instance. */
   u32 vlib_hw_if_index;

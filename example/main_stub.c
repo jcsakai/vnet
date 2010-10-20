@@ -1,5 +1,6 @@
 #include <vlib/vlib.h>
 #include <vlib/unix/unix.h>
+#include <vlib/unix/pci.h>
 #include <vnet/pg/pg.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ip/ip.h>
@@ -19,6 +20,10 @@ vnet_main_init (vlib_main_t * vm)
     return error;
 
   if ((error = unix_physmem_init (vm, /* fail_if_physical_memory_not_present */ 0)))
+    return error;
+
+  /* FIXME */
+  if ((error = vlib_call_init_function (vm, ixge_init)))
     return error;
 
   vlib_unix_cli_set_prompt ("VNET: ");

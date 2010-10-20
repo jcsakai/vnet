@@ -1,5 +1,6 @@
 #include <vnet/devices/pci/ixge.h>
 #include <vnet/devices/xge/xge.h>
+#include <vlib/unix/pci.h>
 
 ixge_main_t ixge_main;
 
@@ -132,7 +133,7 @@ static void ixge_phy_init (ixge_device_t * xd)
   } while (ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL) & XGE_PHY_CONTROL_RESET);
 }
 
-static void ixge_init (ixge_device_t * xd)
+static void ixge_device_init (ixge_device_t * xd)
 {
   ixge_phy_init (xd);
 }
@@ -264,3 +265,68 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 
   return error;
 }
+
+clib_error_t * ixge_init (vlib_main_t * vm)
+{
+  ixge_main_t * xm = &ixge_main;
+  xm->vlib_main = vm;
+  return vlib_call_init_function (vm, pci_bus_init);
+}
+
+VLIB_INIT_FUNCTION (ixge_init);
+
+static clib_error_t *
+ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
+{
+  ixge_main_t * xm = &ixge_main;
+  clib_error_t * error;
+  void * r;
+  ixge_device_t * xd;
+  
+  error = os_map_pci_resource (dev->os_handle, 0, &r);
+  if (error)
+    return error;
+
+  vec_add2 (xm->devices, xd, 1);
+  xd->pci_device = dev[0];
+  xd->regs = r;
+
+  return 0;
+}
+
+#define foreach_ixge_pci_device_id		\
+  _ (82598, 0x10b6)				\
+  _ (82598_bx, 0x1508)				\
+  _ (82598af_dual_port, 0x10c6)			\
+  _ (82598af_single_port, 0x10c7)		\
+  _ (82598at, 0x10c8)				\
+  _ (82598at2, 0x150b)				\
+  _ (82598eb_sfp_lom, 0x10db)			\
+  _ (82598eb_cx4, 0x10dd)			\
+  _ (82598_cx4_dual_port, 0x10ec)		\
+  _ (82598_da_dual_port, 0x10f1)		\
+  _ (82598_sr_dual_port_em, 0x10e1)		\
+  _ (82598eb_xf_lr, 0x10f4)			\
+  _ (82599_kx4, 0x10f7)				\
+  _ (82599_kx4_mezz, 0x1514)			\
+  _ (82599_kr, 0x1517)				\
+  _ (82599_combo_backplane, 0x10f8)		\
+  _ (82599_cx4, 0x10f9)				\
+  _ (82599_sfp, 0x10fb)				\
+  _ (82599_backplane_fcoe, 0x152a)		\
+  _ (82599_sfp_fcoe, 0x1529)			\
+  _ (82599_sfp_em, 0x1507)			\
+  _ (82599_xaui_lom, 0x10fc)			\
+  _ (82599_t3_lom, 0x151c)			\
+  _ (x540t, 0x1528)
+
+static PCI_REGISTER_DEVICE (ixge_pci_device_registration) = {
+  .init_function = ixge_pci_init,
+  .supported_devices = {
+#define _(t,i) { .vendor_id = PCI_VENDOR_ID_INTEL, .device_id = i, },
+    foreach_ixge_pci_device_id
+#undef _
+    { .vendor_id = 0x104c, .device_id = 0x8024, },
+    { 0 },
+  },
+};
