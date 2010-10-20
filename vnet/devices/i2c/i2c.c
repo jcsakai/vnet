@@ -382,7 +382,11 @@ i2c_write_read (i2c_bus_t * b, u32 address,
 }
 
 static void vlib_i2c_delay (i2c_bus_t * b, f64 delay)
-{ vlib_process_suspend (&vlib_global_main, delay); }
+{
+  vlib_main_t * vm = &vlib_global_main;
+  /* Suspend makes everything just too slow. */
+  vlib_time_wait (vm, delay);
+}
 
 void i2c_init (i2c_bus_t * b)
 {

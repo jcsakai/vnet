@@ -143,19 +143,21 @@ static void ixge_phy_init (ixge_device_t * xd)
     /* No PHY found? */
     if (i >= 32)
       {
-	u8 fucked[256];
-	u8 buffer[1];
 	i2c_bus_t * ib = &xd->i2c_bus;
-	u32 r;
+	u8 start_address[1];
+	u32 timed_out;
 
 	ib->private = xd->index;
 	ib->put_bits = ixge_i2c_put_bits;
 	ib->get_bits = ixge_i2c_get_bits;
 	i2c_init (ib);
 
-	buffer[0] = 0;
-	r = i2c_write_read (ib, 0xa0, buffer, 1, &fucked, sizeof (fucked));
-	clib_warning ("%U", format_hex_bytes, fucked, sizeof (fucked));
+	start_address[0] = 0;
+	timed_out = i2c_write_read (ib, 0xa0,
+				    &start_address, 1,
+				    &xd->sfp_eeprom, 128);
+	if (timed_out || ! sfp_eeprom_is_valid (&xd->sfp_eeprom))
+	  xd->sfp_eeprom.id = SFP_ID_unknown;
 
 	phy->mdio_address = ~0;
 	return;
@@ -245,6 +247,8 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
 
   if (phy->mdio_address != ~0)
     s = format (s, "PHY address %d, id 0x%x", phy->mdio_address, phy->id);
+  else if (xd->sfp_eeprom.id == SFP_ID_sfp)
+    s = format (s, "SFP optics %U", format_sfp_eeprom, &xd->sfp_eeprom);
   else
     s = format (s, "PHY not found");
 

@@ -4,6 +4,7 @@
 #include <vlib/vlib.h>
 #include <vlib/pci/pci.h>
 #include <vnet/devices/i2c/i2c.h>
+#include <vnet/devices/optics/sfp.h>
 
 typedef volatile struct {
   /* [31:7] 128 byte aligned. */
@@ -704,6 +705,7 @@ typedef struct {
   ixge_phy_t phys[2];
 
   i2c_bus_t i2c_bus;
+  sfp_eeprom_t sfp_eeprom;
 
   /* Counters. */
   u64 counters[IXGE_N_COUNTER], counters_last_clear[IXGE_N_COUNTER];

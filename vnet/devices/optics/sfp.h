@@ -1,13 +1,19 @@
 #ifndef included_vnet_optics_sfp_h
 #define included_vnet_optics_sfp_h
 
+#include <clib/format.h>
+
 #define foreach_sfp_id				\
   _ (unknown)					\
   _ (gbic)					\
   _ (on_motherboard)				\
   _ (sfp)
 
-#include <clib/clib.h>
+typedef enum {
+#define _(f) SFP_ID_##f,
+  foreach_sfp_id
+#undef _
+} sfp_id_t;
 
 typedef struct {
   u8 id;
@@ -42,5 +48,17 @@ typedef struct {
   /* Vendor specific data follows. */
   u8 vendor_specific1[0];
 } sfp_eeprom_t;
+
+always_inline uword
+sfp_eeprom_is_valid (sfp_eeprom_t * e)
+{
+  int i;
+  u8 sum = 0;
+  for (i = 0; i < 63; i++)
+    sum += ((u8 *) e)[i];
+  return sum == e->checksum_0_to_62;
+}
+
+format_function_t format_sfp_eeprom;
 
 #endif /* included_vnet_optics_sfp_h */
