@@ -119,7 +119,10 @@ static void ixge_phy_init (ixge_device_t * xd)
 
     /* No PHY found? */
     if (i >= 32)
-      return;
+      {
+	phy->mdio_address = ~0;
+	return;
+      }
   }
 
   phy->id = ((ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1) << 16)
@@ -199,12 +202,14 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
   u32 i = va_arg (*args, u32);
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd = vec_elt_at_index (xm->devices, i);
+  ixge_phy_t * phy = xd->phys + xd->phy_index;
 
   ixge_update_counters (xd);
 
-  s = format (s, "PHY address %d, id 0x%x",
-	      xd->phys[xd->phy_index].mdio_address,
-	      xd->phys[xd->phy_index].id);
+  if (phy->mdio_address != ~0)
+    s = format (s, "PHY address %d, id 0x%x", phy->mdio_address, phy->id);
+  else
+    s = format (s, "PHY not found");
 
   return s;
 }
