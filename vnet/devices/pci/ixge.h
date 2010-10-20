@@ -684,6 +684,8 @@ typedef struct {
   /* PCI bus info. */
   pci_device_t pci_device;
 
+  u32 index;
+
   /* VLIB interface for this instance. */
   u32 vlib_hw_if_index;
 
@@ -713,6 +715,8 @@ typedef struct {
   u32 n_descriptors_per_cache_line;
 
   u32 vlib_buffer_free_list_index;
+
+  u32 process_node_index;
 } ixge_main_t;
 
 extern ixge_main_t ixge_main;

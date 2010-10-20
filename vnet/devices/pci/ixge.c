@@ -9,9 +9,15 @@ static void ixge_semaphore_get (ixge_device_t * xd)
   ixge_main_t * xm = &ixge_main;
   vlib_main_t * vm = xm->vlib_main;
   ixge_regs_t * r = xd->regs;
+  u32 i;
 
+  i = 0;
   while (! (r->software_semaphore & (1 << 0)))
-    vlib_process_suspend (vm, 100e-6);
+    {
+      if (i > 0)
+	vlib_process_suspend (vm, 100e-6);
+      i++;
+    }
   do {
     r->software_semaphore |= 1 << 1;
   } while (! (r->software_semaphore & (1 << 1)));
@@ -35,7 +41,7 @@ static void ixge_software_firmware_sync (ixge_device_t * xd, u32 sw_mask)
     {
       ixge_semaphore_get (xd);
       m = r->software_firmware_sync;
-      done = (m & (sw_mask | fw_mask)) == 0;
+      done = (m & fw_mask) == 0;
       if (done)
 	r->software_firmware_sync = m | sw_mask;
       ixge_semaphore_release (xd);
@@ -57,7 +63,7 @@ u32 ixge_read_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u3
   ixge_main_t * xm = &ixge_main;
   vlib_main_t * vm = xm->vlib_main;
   ixge_regs_t * r = xd->regs;
-  const u32 busy_bit = 1 << 31;
+  const u32 busy_bit = 1 << 30;
   u32 x;
   
   ASSERT (xd->phy_index < 2);
@@ -65,21 +71,19 @@ u32 ixge_read_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u3
 
   ASSERT (reg_index < (1 << 16));
   ASSERT (dev_type < (1 << 5));
-  while (! (r->xge_mac.phy_command & busy_bit))
-    ;
-
   if (! is_read)
     r->xge_mac.phy_data = v;
 
   /* Address cycle. */
   x = reg_index | (dev_type << 16) | (xd->phys[xd->phy_index].mdio_address << 21);
   r->xge_mac.phy_command = x | busy_bit;
-  do vlib_process_suspend (vm, 100e-6);
-  while (r->xge_mac.phy_command & busy_bit);
+  /* Busy wait timed to take 28e-6 secs.  No suspend. */
+  while (r->xge_mac.phy_command & busy_bit)
+    ;
 
-  r->xge_mac.phy_command = x | ((is_read ? 3 : 1) < 26) | busy_bit;
-  do vlib_process_suspend (vm, 100e-6);
-  while (r->xge_mac.phy_command & busy_bit);
+  r->xge_mac.phy_command = x | ((is_read ? 2 : 1) << 26) | busy_bit;
+  while (r->xge_mac.phy_command & busy_bit)
+    ;
 
   if (is_read)
     v = r->xge_mac.phy_data >> 16;
@@ -89,10 +93,10 @@ u32 ixge_read_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u3
   return v;
 }
 
-always_inline u32 ixge_read_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index)
+static u32 ixge_read_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index)
 { return ixge_read_write_phy_reg (xd, dev_type, reg_index, 0, /* is_read */ 1); }
 
-always_inline void ixge_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u32 v)
+static void ixge_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u32 v)
 { (void) ixge_read_write_phy_reg (xd, dev_type, reg_index, v, /* is_read */ 0); }
 
 static void ixge_phy_init (ixge_device_t * xd)
@@ -108,21 +112,32 @@ static void ixge_phy_init (ixge_device_t * xd)
     phy->mdio_address = ~0;
     for (i = 0; i < 32; i++)
       {
+	phy->mdio_address = i;
 	v = ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1);
 	if (v != 0xffff && v != 0)
-	  {
-	    phy->mdio_address = i;
-	    break;
-	  }
+	  break;
       }
 
     /* No PHY found? */
-    if (phy->mdio_address != ~0)
+    if (i >= 32)
       return;
   }
 
   phy->id = ((ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1) << 16)
 	     | ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID2));
+
+  {
+    ELOG_TYPE_DECLARE (e) = {
+      .function = (char *) __FUNCTION__,
+      .format = "ixge %d, phy id 0x%d mdio address %d",
+      .format_args = "i4i4i4",
+    };
+    struct { u32 instance, id, address; } * ed;
+    ed = ELOG_DATA (&vm->elog_main, e);
+    ed->instance = xd->index;
+    ed->id = phy->id;
+    ed->address = phy->mdio_address;
+  }
 
   /* Reset phy. */
   ixge_write_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL, XGE_PHY_CONTROL_RESET);
@@ -266,6 +281,70 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   return error;
 }
 
+#if 0
+static VLIB_DEVICE_CLASS (ixge_device_class) = {
+    .name = "ixge",
+    .tx_function = ixge_interface_tx,
+    .format_device_name = format_ixge_interface_instance,
+    .format_device = format_ixge_device,
+    .clear_counters = ixge_clear_hw_interface_counters,
+};
+#endif
+
+static uword
+ixge_process (vlib_main_t * vm,
+	      vlib_node_runtime_t * rt,
+	      vlib_frame_t * f)
+{
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd;
+  ixge_regs_t * r;
+    
+  vec_foreach (xd, xm->devices)
+    ixge_device_init (xd);
+
+#if 0
+  error = ethernet_register_interface
+    (vm,
+     ixge_device_class.index,
+     xd->index,
+     /* ethernet address */ &dummy,
+     /* phy */ 0,
+     &xd->vlib_hw_if_index);
+  if (error)
+    return error;
+#endif
+
+  /* Enable all interrupts. */
+
+  {
+    uword event_type, i, * event_data = 0;
+
+    while (1)
+      {
+	vlib_process_wait_for_event (vm);
+	event_type = vlib_process_get_events (vm, &event_data);
+
+	switch (event_type) {
+	default:
+	  ASSERT (0);
+	  break;
+	}
+
+	if (event_data)
+	  _vec_len (event_data) = 0;
+      }
+  }
+	    
+  return 0;
+}
+
+static vlib_node_registration_t ixge_process_node = {
+    .function = ixge_process,
+    .type = VLIB_NODE_TYPE_PROCESS,
+    .name = "ixge-process",
+};
+
 clib_error_t * ixge_init (vlib_main_t * vm)
 {
   ixge_main_t * xm = &ixge_main;
@@ -290,6 +369,13 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   vec_add2 (xm->devices, xd, 1);
   xd->pci_device = dev[0];
   xd->regs = r;
+  xd->index = xd - xm->devices;
+
+  if (vec_len (xm->devices) == 1)
+    {
+      vlib_register_node (vm, &ixge_process_node);
+      xm->process_node_index = ixge_process_node.index;
+    }
 
   return 0;
 }
