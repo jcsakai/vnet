@@ -203,7 +203,7 @@ static u8 * format_ixge_device_name (u8 * s, va_list * args)
   u32 i = va_arg (*args, u32);
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd = vec_elt_at_index (xm->devices, i);
-  return format (s, "ixge:%U",
+  return format (s, "TenGigabitEthernet%U",
 		 format_os_pci_handle, xd->pci_device.os_handle);
 }
 

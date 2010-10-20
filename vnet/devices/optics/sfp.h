@@ -59,6 +59,33 @@ sfp_eeprom_is_valid (sfp_eeprom_t * e)
   return sum == e->checksum_0_to_62;
 }
 
+/* _ (byte_index, bit_index, name) */
+#define foreach_sfp_compatibility		\
+  _ (0, 4, 10g_base_sr)				\
+  _ (0, 5, 10g_base_lr)				\
+  _ (1, 2, oc48_long_reach)			\
+  _ (1, 1, oc48_intermediate_reach)		\
+  _ (1, 0, oc48_short_reach)			\
+  _ (2, 6, oc12_long_reach)			\
+  _ (2, 5, oc12_intermediate_reach)		\
+  _ (2, 4, oc12_short_reach)			\
+  _ (2, 2, oc3_long_reach)			\
+  _ (2, 1, oc3_intermediate_reach)		\
+  _ (2, 0, oc3_short_reach)			\
+  _ (3, 3, 1g_base_t)				\
+  _ (3, 2, 1g_base_cx)				\
+  _ (3, 1, 1g_base_lx)				\
+  _ (3, 0, 1g_base_sx)
+
+typedef enum {
+#define _(a,b,f) SFP_COMPATIBILITY_##f,
+  foreach_sfp_compatibility
+#undef _
+  SFP_N_COMPATIBILITY,
+} sfp_compatibility_t;
+
+u32 sfp_is_comatible (sfp_eeprom_t * e, sfp_compatibility_t c);
+
 format_function_t format_sfp_eeprom;
 
 #endif /* included_vnet_optics_sfp_h */
