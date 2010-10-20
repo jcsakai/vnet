@@ -10,7 +10,7 @@ typedef volatile struct {
 
   u32 dca_control;
 
-  u32 head;
+  u32 head_index;
 
   /* [4:0] tail buffer size (in 1k byte units)
      [13:8] head buffer size (in 64 byte units)
@@ -19,9 +19,9 @@ typedef volatile struct {
      2 = advanced header splitting (head + tail), 5 = advanced header
      splitting (head only).
      [28] drop if no descriptors available. */
-  u32 split_control;
+  u32 rx_split_control;
 
-  u32 tail;
+  u32 tail_index;
   CLIB_PAD_FROM_TO (0x1c, 0x28);
 
   /* [7:0] tx prefetch threshold
@@ -52,45 +52,24 @@ typedef volatile struct {
 } ixge_dma_regs_t;
 
 /* Only advanced descriptors are supported. */
-typedef volatile union {
+typedef union {
   struct {
     u64 packet_address;
     u64 head_address;
   } rx_to_hw;
 
   struct {
-    u32 rss_type : 4;
-    u32 packet_type : 13;
-    u32 rx_tcp_coallesce_count : 4;
-    u32 n_head_bytes : 10;
-    u32 is_split_header : 1;
-    
-    u32 reserved19 : 1;
-    u32 vm_loopback : 1;
-    u32 security : 1;
-    u32 time_stamp : 1;
-    u32 reserved12 : 4;
-    u32 low_latency_interrupt : 1;
-    u32 udp_checksum_is_valid : 1;
-    u32 outer_vlan_found_on_2_vlan_packet : 1;
-    u32 reserved8 : 1;
-    u32 non_unicast_ethernet_address : 1;
-    u32 ip4_checksum_done : 1;
-    u32 tcp_udp_checksum_done : 1;
-    u32 tcp_udp_checksum_is_udp : 1;
-    u32 is_vlan : 1;
-    u32 flow_directory_match : 1;
-    u32 is_eop : 1;
-    u32 descriptor_done : 1;
-
-    u32 ip4_checksum_error : 1;
-    u32 tcp_udp_checksum_error : 1;
-
-    u32 extended_error : 12;
+    u32 status[3];
     u16 n_packet_bytes_this_descriptor;
     u16 vlan_tag;
   } rx_from_hw;
 
+  struct {
+    u64 buffer_address;
+    u16 n_buffer_bytes;
+    u16 status0;
+    u32 status1;
+  } tx_to_hw;
 } ixge_descriptor_t;
 
 typedef volatile struct {
@@ -116,8 +95,9 @@ typedef volatile struct {
   /* sdp_data [7:0]
      sdp_is_output [15:8]
      sdp_is_native [23:16]
-     sdp_function [31:24] */
-  u32 extended_sdp_control;
+     sdp_function [31:24].
+  */
+  u32 software_defineable_pins_control;
   CLIB_PAD_FROM_TO (0x24, 0x28);
 
   /* [0] i2c clock in
@@ -197,7 +177,8 @@ typedef volatile struct {
   u32 rx_dma_descriptor_cache_config;
   CLIB_PAD_FROM_TO (0x2f24, 0x3000);
 
-  u32 rx_control;
+  /* 1 bit. */
+  u32 rx_enable;
   CLIB_PAD_FROM_TO (0x3004, 0x3008);
   /* [15:0] ether type (little endian)
      [31:16] opcode (big endian) */
@@ -216,7 +197,7 @@ typedef volatile struct {
   u32 flow_control_refresh_threshold;
   CLIB_PAD_FROM_TO (0x32a4, 0x3c00);
   /* For each of 8 traffic classes (units of bytes). */
-  u32 rx_packet_buffer_size[8];
+  u32 dcb_rx_packet_buffer_size[8];
   CLIB_PAD_FROM_TO (0x3c20, 0x3d00);
   u32 flow_control_config;
   CLIB_PAD_FROM_TO (0x3d04, 0x4200);
@@ -460,7 +441,8 @@ typedef volatile struct {
 
   /* [0] ethernet address [31:0]
      [1] [15:0] ethernet address [47:32]
-     [31] valid bit. */
+     [31] valid bit.
+     Index 0 is read from eeprom after reset. */
   u32 rx_ethernet_address[128][2];
 
   /* select one of 64 pools for each rx address. */
@@ -664,6 +646,7 @@ typedef enum {
 #define _64(a,f) _(a,f)
   foreach_ixge_counter
 #undef _
+#undef _64
   IXGE_N_COUNTER,
 } ixge_counter_type_t;
 
@@ -675,19 +658,65 @@ typedef struct {
 } ixge_phy_t;
 
 typedef struct {
-  vlib_main_t * vlib_main;
+  /* Cache aligned descriptors. */
+  ixge_descriptor_t * descriptors;
 
+  /* Number of descriptors in table. */
+  u32 n_descriptors;
+
+  /* Software head and tail pointers into descriptor ring. */
+  u32 head_index, tail_index;
+
+  /* Index into dma_queues vector. */
+  u32 queue_index;
+
+  /* Buffer indices corresponding to each descriptor. */
+  u32 * descriptor_buffer_indices;
+
+  /* Buffer indices to use to replenish each descriptor. */
+  u32 * rx_replenish_buffer_indices;
+} ixge_dma_queue_t;
+
+typedef struct {
+  ixge_regs_t * regs;
+
+  /* PCI bus device + function. */
+  u32 pci_dev_fn;
+
+  /* Either 0 or 1 for dual mac chips. */
   u32 unit;
 
+  /* VLIB interface for this instance. */
   u32 vlib_hw_if_index;
+
+  ixge_dma_queue_t * dma_queues[VLIB_N_RX_TX];
 
   /* Phy index (0 or 1) and address on MDI bus. */
   u32 phy_index;
   ixge_phy_t phys[2];
 
-  ixge_regs_t * regs;
-
+  /* Counters. */
   u64 counters[IXGE_N_COUNTER], counters_last_clear[IXGE_N_COUNTER];
+} ixge_device_t;
+
+typedef struct {
+  vlib_main_t * vlib_main;
+
+  /* Vector of devices. */
+  ixge_device_t * devices;
+
+  /* Descriptor ring sizes. */
+  u32 n_descriptors[VLIB_N_RX_TX];
+
+  /* RX buffer size.  Must be at least 1k; will be rounded to
+     next largest 1k size. */
+  u32 n_bytes_in_rx_buffer;
+
+  u32 n_descriptors_per_cache_line;
+
+  u32 vlib_buffer_free_list_index;
 } ixge_main_t;
+
+extern ixge_main_t ixge_main;
 
 #endif /* included_ixge_h */
