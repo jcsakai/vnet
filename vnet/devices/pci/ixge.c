@@ -190,12 +190,46 @@ static void ixge_phy_init (ixge_device_t * xd)
   } while (ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL) & XGE_PHY_CONTROL_RESET);
 }
 
+always_inline uword
+ixge_ring_diff (ixge_dma_queue_t * q, u32 i0, u32 i1)
+{
+  i32 d = i1 - i0;
+  ASSERT (i0 < q->n_descriptors);
+  ASSERT (i1 < q->n_descriptors);
+  return d < 0 ? -d : d;
+}
+
 static uword
 ixge_interface_tx (vlib_main_t * vm,
-		   vlib_node_runtime_t * rt,
+		   vlib_node_runtime_t * node,
 		   vlib_frame_t * f)
 {
+  ixge_main_t * xm = &ixge_main;
+  vlib_interface_output_runtime_t * rd = (void *) node->runtime_data;
+  vlib_hw_interface_t * hw_if = vlib_get_hw_interface (vm, rd->hw_if_index);
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, hw_if->dev_instance);
+  ixge_dma_queue_t * dq;
+  ixge_dma_regs_t * dr;
+  u32 * from, n_left_from, hw_head_index;
+  u32 queue_index = 0;		/* fixme parameter */
+  
+  from = vlib_frame_vector_args (f);
+  n_left_from = f->n_vectors;
+
+  dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], queue_index);
+  dr = get_dma_regs (xd, VLIB_TX, queue_index);
+
+  n_left_tx = dq->n_descriptors - dq->n_tx_current;
+
+  hw_head_index = dr->head_index;
+  diff = ixge_ring_diff (q, hw_head_index, dq->head_index);
+  if (diff)
+    {
+      n_left_tx += diff;
+      dq->descriptors[hw_head_index].
+
   ASSERT (0);
+
   return f->n_vectors;
 }
 
@@ -272,49 +306,6 @@ static VLIB_DEVICE_CLASS (ixge_device_class) = {
     .clear_counters = ixge_clear_hw_interface_counters,
 };
 
-static void ixge_device_init (ixge_main_t * xm)
-{
-  vlib_main_t * vm = xm->vlib_main;
-  ixge_device_t * xd;
-    
-  /* Reset chip(s). */
-  vec_foreach (xd, xm->devices)
-    {
-      const u32 reset_bit = 1 << 26;
-      xd->regs->control |= reset_bit;
-
-      /* No need to suspend.  Timed to take ~1e-6 secs */
-      while (xd->regs->control & reset_bit)
-	;
-
-      /* Software loaded. */
-      xd->regs->extended_control |= 1 << 28;
-
-      ixge_phy_init (xd);
-
-      {
-	u8 addr8[6];
-	u32 i, addr32[2];
-	clib_error_t * error;
-
-	addr32[0] = xd->regs->rx_ethernet_address0[0][0];
-	addr32[1] = xd->regs->rx_ethernet_address0[0][1];
-	for (i = 0; i < 6; i++)
-	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
-
-	error = ethernet_register_interface
-	  (vm,
-	   ixge_device_class.index,
-	   xd->index,
-	   /* ethernet address */ addr8,
-	   /* phy */ 0,
-	   &xd->vlib_hw_if_index);
-	if (error)
-	  clib_error_report (error);
-      }
-    }
-}
-
 always_inline ixge_dma_regs_t *
 get_dma_regs (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 qi)
 {
@@ -340,6 +331,8 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   if (! xm->n_descriptors_per_cache_line)
     xm->n_descriptors_per_cache_line = CLIB_CACHE_LINE_BYTES / sizeof (dq->descriptors[0]);
 
+  if (! xm->n_bytes_in_rx_buffer)
+    xm->n_bytes_in_rx_buffer = 1024;
   xm->n_bytes_in_rx_buffer = round_pow2 (xm->n_bytes_in_rx_buffer, 1024);
   if (! xm->vlib_buffer_free_list_index)
     {
@@ -377,6 +370,12 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 	  dq->descriptors[i].rx_to_hw.packet_address = vlib_physmem_virtual_to_physical (vm, b->data);
 	}
     }
+  else
+    {
+      u32 i;
+      for (i = 0; i < dq->n_descriptors; i++)
+	dq->descriptors[i] = xm->tx_descriptor_template;
+    }
 
   {
     ixge_dma_regs_t * dr = get_dma_regs (xd, rt, queue_index);
@@ -412,6 +411,53 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   }
 
   return error;
+}
+
+static void ixge_device_init (ixge_main_t * xm)
+{
+  vlib_main_t * vm = xm->vlib_main;
+  ixge_device_t * xd;
+    
+  /* Reset chip(s). */
+  vec_foreach (xd, xm->devices)
+    {
+      const u32 reset_bit = 1 << 26;
+      xd->regs->control |= reset_bit;
+
+      /* No need to suspend.  Timed to take ~1e-6 secs */
+      while (xd->regs->control & reset_bit)
+	;
+
+      /* Software loaded. */
+      xd->regs->extended_control |= 1 << 28;
+
+      ixge_phy_init (xd);
+
+      /* Register ethernet interface. */
+      {
+	u8 addr8[6];
+	u32 i, addr32[2];
+	clib_error_t * error;
+
+	addr32[0] = xd->regs->rx_ethernet_address0[0][0];
+	addr32[1] = xd->regs->rx_ethernet_address0[0][1];
+	for (i = 0; i < 6; i++)
+	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
+
+	error = ethernet_register_interface
+	  (vm,
+	   ixge_device_class.index,
+	   xd->index,
+	   /* ethernet address */ addr8,
+	   /* phy */ 0,
+	   &xd->vlib_hw_if_index);
+	if (error)
+	  clib_error_report (error);
+      }
+
+      ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
+      ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
+    }
 }
 
 static uword
@@ -452,11 +498,19 @@ clib_error_t * ixge_init (vlib_main_t * vm)
   clib_error_t * error;
 
   xm->vlib_main = vm;
+  memset (&xm->tx_descriptor_template, 0, sizeof (xm->tx_descriptor_template));
+  xm->tx_descriptor_template.tx_to_hw.status[0] =
+    (IXGE_TX_DESCRIPTOR_STATUS0_ADVANCED
+     | IXGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED
+     | IXGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS);
+
   error = unix_physmem_init (vm, /* physical_memory_required */ 1);
   if (error)
     return error;
 
-  return vlib_call_init_function (vm, pci_bus_init);
+  error = vlib_call_init_function (vm, pci_bus_init);
+
+  return error;
 }
 
 VLIB_INIT_FUNCTION (ixge_init);

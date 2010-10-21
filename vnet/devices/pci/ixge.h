@@ -48,8 +48,8 @@ typedef volatile struct {
     struct {
       u32 unused[2];
 
-      /* Lo bit enables TX descriptor completion write back. */
-      u32 tx_descriptor_completion_address[2];
+      /* [0] enables head write back. */
+      u32 tx_descriptor_head_writeback_address[2];
     } tx;
   };
 } ixge_dma_regs_t;
@@ -69,9 +69,21 @@ typedef union {
 
   struct {
     u64 buffer_address;
-    u16 n_buffer_bytes;
-    u16 status0;
-    u32 status1;
+    u32 status[2];
+#define IXGE_TX_DESCRIPTOR_STATUS0_ADVANCED (3 << 20)
+#define IXGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED (1 << (24 + 5))
+#define IXGE_TX_DESCRIPTOR_STATUS0_LOG2_REPORT_STATUS (24 + 3)
+#define IXGE_TX_DESCRIPTOR_STATUS0_REPORT_STATUS (1 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_REPORT_STATUS)
+#define IXGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS (1 << (24 + 1))
+#define IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET (24 + 0)
+#define IXGE_TX_DESCRIPTOR_STATUS0_IS_END_OF_PACKET (1 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
+#define IXGE_TX_DESCRIPTOR_STATUS1_DONE (1 << 0)
+#define IXGE_TX_DESCRIPTOR_STATUS1_CONTEXT(i) (/* valid */ (1 << 7) | ((i) << 4))
+#define IXGE_TX_DESCRIPTOR_STATUS1_IPSEC_OFFLOAD (1 << (8 + 2))
+#define IXGE_TX_DESCRIPTOR_STATUS1_INSERT_TCP_UDP_CHECKSUM (1 << (8 + 1))
+#define IXGE_TX_DESCRIPTOR_STATUS1_INSERT_IP4_CHECKSUM (1 << (8 + 0))
+#define IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER(l) ((l) << 0)
+#define IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET(l) ((l) << 14)
   } tx_to_hw;
 } ixge_descriptor_t;
 
@@ -677,6 +689,9 @@ typedef struct {
   /* Software head and tail pointers into descriptor ring. */
   u32 head_index, tail_index;
 
+  /* For TX rings the number of descriptors currently active on transmit ring. */
+  u32 n_tx_current;
+
   /* Index into dma_queues vector. */
   u32 queue_index;
 
@@ -729,6 +744,12 @@ typedef struct {
   u32 vlib_buffer_free_list_index;
 
   u32 process_node_index;
+
+  /* Template for initializing TX descriptors. */
+  ixge_descriptor_t tx_descriptor_template;
+
+  /* Vector of buffers for which TX is done and can be freed. */
+  u32 * tx_to_free_buffers;
 } ixge_main_t;
 
 extern ixge_main_t ixge_main;
