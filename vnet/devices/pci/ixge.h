@@ -49,27 +49,26 @@ typedef volatile struct {
       u32 unused[2];
 
       /* [0] enables head write back. */
-      u32 tx_descriptor_head_writeback_address[2];
+      u32 head_index_write_back_address[2];
     } tx;
   };
 } ixge_dma_regs_t;
 
 /* Only advanced descriptors are supported. */
-typedef union {
-  struct {
-    u64 packet_address;
-    u64 head_address;
-  } rx_to_hw;
+typedef struct {
+  u64 packet_address;
+  u64 head_address;
+} ixge_rx_to_hw_descriptor_t;
 
-  struct {
-    u32 status[3];
-    u16 n_packet_bytes_this_descriptor;
-    u16 vlan_tag;
-  } rx_from_hw;
+typedef struct {
+  u32 status[3];
+  u16 n_packet_bytes_this_descriptor;
+  u16 vlan_tag;
+} ixge_rx_from_hw_descriptor_t;
 
-  struct {
-    u64 buffer_address;
-    u32 status[2];
+typedef struct {
+  u64 buffer_address;
+  u32 status[2];
 #define IXGE_TX_DESCRIPTOR_STATUS0_ADVANCED (3 << 20)
 #define IXGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED (1 << (24 + 5))
 #define IXGE_TX_DESCRIPTOR_STATUS0_LOG2_REPORT_STATUS (24 + 3)
@@ -84,7 +83,12 @@ typedef union {
 #define IXGE_TX_DESCRIPTOR_STATUS1_INSERT_IP4_CHECKSUM (1 << (8 + 0))
 #define IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER(l) ((l) << 0)
 #define IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET(l) ((l) << 14)
-  } tx_to_hw;
+} ixge_tx_descriptor_t;
+
+typedef union {
+  ixge_rx_to_hw_descriptor_t rx_to_hw;
+  ixge_rx_from_hw_descriptor_t rx_from_hw;
+  ixge_tx_descriptor_t tx;
 } ixge_descriptor_t;
 
 typedef volatile struct {
@@ -689,17 +693,25 @@ typedef struct {
   /* Software head and tail pointers into descriptor ring. */
   u32 head_index, tail_index;
 
-  /* For TX rings the number of descriptors currently active on transmit ring. */
-  u32 n_tx_current;
-
   /* Index into dma_queues vector. */
   u32 queue_index;
 
-  /* Buffer indices corresponding to each descriptor. */
+  /* Buffer indices corresponding to each active descriptor. */
   u32 * descriptor_buffer_indices;
 
-  /* Buffer indices to use to replenish each descriptor. */
-  u32 * rx_replenish_buffer_indices;
+  union {
+    struct {
+      /* For TX rings the number of descriptors currently active on transmit ring. */
+      u32 n_descriptors_active;
+
+      u32 * head_index_write_back;
+    } tx;
+
+    struct {
+      /* Buffer indices to use to replenish each descriptor. */
+      u32 * replenish_buffer_indices;
+    } rx;
+  };
 } ixge_dma_queue_t;
 
 typedef struct {
@@ -745,11 +757,11 @@ typedef struct {
 
   u32 process_node_index;
 
-  /* Template for initializing TX descriptors. */
-  ixge_descriptor_t tx_descriptor_template;
+  /* Template and mask for initializing/validating TX descriptors. */
+  ixge_tx_descriptor_t tx_descriptor_template, tx_descriptor_template_mask;
 
   /* Vector of buffers for which TX is done and can be freed. */
-  u32 * tx_to_free_buffers;
+  u32 * tx_buffers_pending_free;
 } ixge_main_t;
 
 extern ixge_main_t ixge_main;

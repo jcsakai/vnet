@@ -199,6 +199,87 @@ ixge_ring_diff (ixge_dma_queue_t * q, u32 i0, u32 i1)
   return d < 0 ? -d : d;
 }
 
+always_inline ixge_dma_regs_t *
+get_dma_regs (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 qi)
+{
+  ixge_regs_t * r = xd->regs;
+  ASSERT (qi < 128);
+  if (rt == VLIB_RX)
+    return qi < 64 ? &r->rx_dma0[qi] : &r->rx_dma1[qi - 64];
+  else
+    return &r->tx_dma[qi];
+}
+
+always_inline uword
+ixge_tx_descriptor_matches_template (ixge_main_t * xm, ixge_tx_descriptor_t * d)
+{
+  int i;
+  for (i = 0; i < ARRAY_LEN (d->status); i++)
+    if ((d->status[i] & xm->tx_descriptor_template_mask.status[i])
+	!= xm->tx_descriptor_template.status[i])
+      return 0;
+  return 1;
+}
+
+static uword
+ixge_tx_no_wrap (ixge_main_t * xm,
+		 ixge_device_t * xd,
+		 ixge_dma_queue_t * dq,
+		 u32 * buffers,
+		 u32 start_descriptor_index,
+		 u32 n_descriptors,
+		 u32 * last_is_sop)
+{
+  vlib_main_t * vm = xm->vlib_main;
+  ixge_tx_descriptor_t * d;
+  u32 n_left = n_descriptors;
+  u32 * to_free = vec_end (xm->tx_buffers_pending_free);
+  u32 * to_tx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
+  u32 is_sop = *last_is_sop;
+
+  ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
+  d = &dq->descriptors[start_descriptor_index].tx;
+  is_sop = 0;
+
+  while (n_left > 0)
+    {
+      u32 bi0, fi0, len0;
+      vlib_buffer_t * b0;
+      u8 is_eop0;
+
+      bi0 = buffers[0];
+
+      to_free[0] = fi0 = to_tx[0];
+      to_tx[0] = bi0;
+
+      buffers += 1;
+      n_left -= 1;
+      to_tx += 1;
+      to_free += fi0 != 0;
+
+      b0 = vlib_get_buffer (vm, bi0);
+
+      is_eop0 = (b0->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
+      len0 = vlib_buffer_length_in_chain (vm, b0);
+      len0 = is_sop ? len0 : 0;
+
+      ASSERT (ixge_tx_descriptor_matches_template (xm, d));
+      d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, bi0) + b0->current_data;
+      d[0].status[0] |=
+	((is_eop0 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
+	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (b0->current_length));
+      ASSERT (d[0].status[1] == 0);
+      d[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len0);
+
+      is_sop = is_eop0;
+    }
+
+  _vec_len (xm->tx_buffers_pending_free) = to_free - xm->tx_buffers_pending_free;
+  *last_is_sop = is_sop;
+
+  return 0;
+}
+
 static uword
 ixge_interface_tx (vlib_main_t * vm,
 		   vlib_node_runtime_t * node,
@@ -209,26 +290,79 @@ ixge_interface_tx (vlib_main_t * vm,
   vlib_hw_interface_t * hw_if = vlib_get_hw_interface (vm, rd->hw_if_index);
   ixge_device_t * xd = vec_elt_at_index (xm->devices, hw_if->dev_instance);
   ixge_dma_queue_t * dq;
-  ixge_dma_regs_t * dr;
-  u32 * from, n_left_from, hw_head_index;
+  u32 * from, n_left_from, n_left_tx, n_descriptors_to_tx;
   u32 queue_index = 0;		/* fixme parameter */
+  u32 is_sop = 1;
   
   from = vlib_frame_vector_args (f);
   n_left_from = f->n_vectors;
 
   dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], queue_index);
-  dr = get_dma_regs (xd, VLIB_TX, queue_index);
 
-  n_left_tx = dq->n_descriptors - dq->n_tx_current;
+  n_left_tx = dq->n_descriptors - dq->tx.n_descriptors_active;
 
-  hw_head_index = dr->head_index;
-  diff = ixge_ring_diff (q, hw_head_index, dq->head_index);
-  if (diff)
+  /* There might be room on the ring due to packets already transmitted. */
+  {
+    u32 hw_head_index = dq->tx.head_index_write_back[0];
+    n_left_tx += ixge_ring_diff (dq, hw_head_index, dq->head_index);
+    dq->head_index = hw_head_index;
+  }
+
+  n_descriptors_to_tx = clib_min (n_left_tx, n_left_from);
+
+  _vec_len (xm->tx_buffers_pending_free) = 0;
+
+  /* Process from tail to end of descriptor ring. */
+  if (n_descriptors_to_tx > 0 && dq->tail_index < dq->n_descriptors)
     {
-      n_left_tx += diff;
-      dq->descriptors[hw_head_index].
+      u32 n = clib_min (dq->n_descriptors - dq->tail_index, n_descriptors_to_tx);
+      n = ixge_tx_no_wrap (xm, xd, dq, from, dq->tail_index, n, &is_sop);
+      from += n;
+      n_left_from -= n;
+      n_descriptors_to_tx -= n;
+      dq->tail_index += n;
+      ASSERT (dq->tail_index <= dq->n_descriptors);
+      if (dq->tail_index == dq->n_descriptors)
+	dq->tail_index = 0;
+    }
 
-  ASSERT (0);
+  if (n_descriptors_to_tx > 0)
+    {
+      u32 n = ixge_tx_no_wrap (xm, xd, dq, from, 0, n_descriptors_to_tx, &is_sop);
+      from += n;
+      n_left_from -= n;
+      ASSERT (n == n_descriptors_to_tx);
+      dq->tail_index += n;
+      ASSERT (dq->tail_index <= dq->n_descriptors);
+      if (dq->tail_index == dq->n_descriptors)
+	dq->tail_index = 0;
+    }
+
+  /* Give new descriptors to hardware. */
+  {
+    ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_TX, queue_index);
+    dr->tail_index = dq->tail_index;
+  }
+
+  /* Free any buffers that are done. */
+  {
+    u32 n = _vec_len (xm->tx_buffers_pending_free);
+    if (n > 0)
+      {
+	vlib_buffer_free (vm, xm->tx_buffers_pending_free,
+			  /* stride */ 1,
+			  n,
+			  /* follow_buffer_next */ 0);
+	_vec_len (xm->tx_buffers_pending_free) = 0;
+      }
+  }
+
+  /* Not enough room on ring: drop the buffers. */
+  if (n_left_from > 0)
+    {
+      /* Back up to last start of packet and free from there. */
+      ASSERT (0);
+    }
 
   return f->n_vectors;
 }
@@ -306,17 +440,6 @@ static VLIB_DEVICE_CLASS (ixge_device_class) = {
     .clear_counters = ixge_clear_hw_interface_counters,
 };
 
-always_inline ixge_dma_regs_t *
-get_dma_regs (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 qi)
-{
-  ixge_regs_t * r = xd->regs;
-  ASSERT (qi < 128);
-  if (rt == VLIB_RX)
-    return qi < 64 ? &r->rx_dma0[qi] : &r->rx_dma1[qi - 64];
-  else
-    return &r->tx_dma[qi];
-}
-
 static clib_error_t *
 ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 {
@@ -373,8 +496,13 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   else
     {
       u32 i;
+
+      dq->tx.head_index_write_back = vlib_physmem_alloc (vm, &error, CLIB_CACHE_LINE_BYTES);
+
       for (i = 0; i < dq->n_descriptors; i++)
-	dq->descriptors[i] = xm->tx_descriptor_template;
+	dq->descriptors[i].tx = xm->tx_descriptor_template;
+
+      vec_validate (xm->tx_buffers_pending_free, dq->n_descriptors - 1);
     }
 
   {
@@ -402,12 +530,24 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 	/* Give hardware all but last cache line of descriptors. */
 	dq->tail_index = dq->n_descriptors - xm->n_descriptors_per_cache_line;
       }
+    else
+      {
+	/* Make sure its initialized before hardware can get to it. */
+	dq->tx.head_index_write_back[0] = dq->head_index;
+
+	a = vlib_physmem_virtual_to_physical (vm, dq->tx.head_index_write_back);
+	dr->tx.head_index_write_back_address[0] = /* enable bit */ 1 | a;
+	dr->tx.head_index_write_back_address[1] = a >> 32;
+      }
+
+    /* Enable this queue and wait for hardware to initialize before adding to tail. */
+    dr->control |= 1 << 25;
+    while (! (dr->control & (1 << 25)))
+      ;
 
     /* Set head/tail indices and enable DMA. */
     dr->head_index = dq->head_index;
     dr->tail_index = dq->tail_index;
-
-    dr->control |= 1 << 25;
   }
 
   return error;
@@ -421,15 +561,17 @@ static void ixge_device_init (ixge_main_t * xm)
   /* Reset chip(s). */
   vec_foreach (xd, xm->devices)
     {
+      ixge_regs_t * r = xd->regs;
       const u32 reset_bit = 1 << 26;
-      xd->regs->control |= reset_bit;
+
+      r->control |= reset_bit;
 
       /* No need to suspend.  Timed to take ~1e-6 secs */
-      while (xd->regs->control & reset_bit)
+      while (r->control & reset_bit)
 	;
 
       /* Software loaded. */
-      xd->regs->extended_control |= 1 << 28;
+      r->extended_control |= 1 << 28;
 
       ixge_phy_init (xd);
 
@@ -439,8 +581,8 @@ static void ixge_device_init (ixge_main_t * xm)
 	u32 i, addr32[2];
 	clib_error_t * error;
 
-	addr32[0] = xd->regs->rx_ethernet_address0[0][0];
-	addr32[1] = xd->regs->rx_ethernet_address0[0][1];
+	addr32[0] = r->rx_ethernet_address0[0][0];
+	addr32[1] = r->rx_ethernet_address0[0][1];
 	for (i = 0; i < 6; i++)
 	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
 
@@ -457,6 +599,10 @@ static void ixge_device_init (ixge_main_t * xm)
 
       ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
+
+      /* Enable TX & RX. */
+      r->tx_dma_control |= (1 << 0);
+      r->rx_enable |= 1;
     }
 }
 
@@ -499,10 +645,13 @@ clib_error_t * ixge_init (vlib_main_t * vm)
 
   xm->vlib_main = vm;
   memset (&xm->tx_descriptor_template, 0, sizeof (xm->tx_descriptor_template));
-  xm->tx_descriptor_template.tx_to_hw.status[0] =
+  memset (&xm->tx_descriptor_template_mask, 0, sizeof (xm->tx_descriptor_template_mask));
+  xm->tx_descriptor_template.status[0] =
     (IXGE_TX_DESCRIPTOR_STATUS0_ADVANCED
      | IXGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED
      | IXGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS);
+  xm->tx_descriptor_template_mask.status[0] = 0xffff0000;
+  xm->tx_descriptor_template_mask.status[1] = 0x00003fff;
 
   error = unix_physmem_init (vm, /* physical_memory_required */ 1);
   if (error)
