@@ -105,11 +105,7 @@ vnet_rewrite_get_data_internal (vnet_rewrite_header_t * rw, int max_size)
 always_inline void
 vnet_rewrite_copy_one (vnet_rewrite_data_t * p0, vnet_rewrite_data_t * rw0, int i)
 {
-#ifdef CLIB_HAVE_VEC128
-  u8x16_store_unaligned (rw0[-i], p0 - i);
-#else
   p0[-i] = rw0[-i];
-#endif
 }
 
 always_inline void
