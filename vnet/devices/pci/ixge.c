@@ -376,19 +376,23 @@ static u8 * format_ixge_device_name (u8 * s, va_list * args)
 		 format_os_pci_handle, xd->pci_device.os_handle);
 }
 
+#define IXGE_COUNTER_IS_64_BIT (1 << 0)
+#define IXGE_COUNTER_NOT_CLEAR_ON_READ (1 << 1)
+
+static u8 ixge_counter_flags[] = {
+#define _(a,f) 0,
+#define _64(a,f) IXGE_COUNTER_IS_64_BIT,
+  foreach_ixge_counter
+#undef _
+#undef _64
+};
+
 static void ixge_update_counters (ixge_device_t * xd)
 {
   /* Byte offset for counter registers. */
   static u32 reg_offsets[] = {
 #define _(a,f) (a) / sizeof (u32),
 #define _64(a,f) _(a,f)
-    foreach_ixge_counter
-#undef _
-#undef _64
-  };
-  static u8 is_64bit[] = {
-#define _(a,f) 0,
-#define _64(a,f) 1,
     foreach_ixge_counter
 #undef _
 #undef _64
@@ -400,17 +404,20 @@ static void ixge_update_counters (ixge_device_t * xd)
     {
       u32 o = reg_offsets[i];
       xd->counters[i] += r[o];
-      if (is_64bit[i])
+      if (ixge_counter_flags[i] & IXGE_COUNTER_NOT_CLEAR_ON_READ)
+	r[o] = 0;
+      if (ixge_counter_flags[i] & IXGE_COUNTER_IS_64_BIT)
 	xd->counters[i] += (u64) r[o+1] << (u64) 32;
     }
 }
 
 static u8 * format_ixge_device (u8 * s, va_list * args)
 {
-  u32 i = va_arg (*args, u32);
+  u32 dev_instance = va_arg (*args, u32);
   ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, i);
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, dev_instance);
   ixge_phy_t * phy = xd->phys + xd->phy_index;
+  uword indent = format_get_indent (s);
 
   ixge_update_counters (xd);
 
@@ -420,6 +427,27 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
     s = format (s, "SFP optics %U", format_sfp_eeprom, &xd->sfp_eeprom);
   else
     s = format (s, "PHY not found");
+
+  {
+    u32 i;
+    u64 v;
+    static char * names[] = {
+#define _(a,f) #f,
+#define _64(a,f) _(a,f)
+    foreach_ixge_counter
+#undef _
+#undef _64
+    };
+
+    for (i = 0; i < ARRAY_LEN (names); i++)
+      {
+	v = xd->counters[i] - xd->counters_last_clear[i];
+	if (v != 0)
+	  s = format (s, "\n%U%-40s%Ld",
+		      format_white_space, indent,
+		      names[i], v);
+      }
+  }
 
   return s;
 }
