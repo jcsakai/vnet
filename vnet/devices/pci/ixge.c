@@ -1,6 +1,7 @@
 #include <vnet/devices/pci/ixge.h>
 #include <vnet/devices/xge/xge.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vlib/unix/unix.h>
 #include <vlib/unix/pci.h>
 
 ixge_main_t ixge_main;
@@ -448,7 +449,13 @@ static vlib_node_registration_t ixge_process_node = {
 clib_error_t * ixge_init (vlib_main_t * vm)
 {
   ixge_main_t * xm = &ixge_main;
+  clib_error_t * error;
+
   xm->vlib_main = vm;
+  error = unix_physmem_init (vm, /* physical_memory_required */ 1);
+  if (error)
+    return error;
+
   return vlib_call_init_function (vm, pci_bus_init);
 }
 
@@ -512,7 +519,6 @@ static PCI_REGISTER_DEVICE (ixge_pci_device_registration) = {
 #define _(t,i) { .vendor_id = PCI_VENDOR_ID_INTEL, .device_id = i, },
     foreach_ixge_pci_device_id
 #undef _
-    { .vendor_id = 0x104c, .device_id = 0x8024, },
     { 0 },
   },
 };

@@ -19,9 +19,6 @@ vnet_main_init (vlib_main_t * vm)
   if ((error = vlib_call_init_function (vm, ethernet_arp_init)))
     return error;
 
-  if ((error = unix_physmem_init (vm, /* fail_if_physical_memory_not_present */ 0)))
-    return error;
-
   /* FIXME */
   if ((error = vlib_call_init_function (vm, ixge_init)))
     return error;
