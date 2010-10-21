@@ -29,17 +29,8 @@
 #include <vlib/vlib.h>
 #include <vnet/vnet/l3_types.h>
 
-/* Not worth using vector unit for unaligned stores for Altivec. */
-#if defined (__ALTIVEC__)
-#undef CLIB_HAVE_VEC128
-#endif
-
-/* Basic data type for painting rewrite strings. */
-#ifdef CLIB_HAVE_VEC128
-typedef u8x16 vnet_rewrite_data_t;
-#else
+/* Consider using vector types for speed? */
 typedef uword vnet_rewrite_data_t;
-#endif
 
 typedef PACKED (struct {
   /* Interface to mark re-written packets with. */

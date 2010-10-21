@@ -143,30 +143,30 @@ typedef volatile struct {
   } pf_foo;
 
   struct {
-    u32 interrupt_status_write_1_to_clear;
+    u32 status_write_1_to_clear;
     CLIB_PAD_FROM_TO (0x804, 0x808);
-    u32 interrupt_status_write_1_to_set;
+    u32 status_write_1_to_set;
     CLIB_PAD_FROM_TO (0x80c, 0x810);
-    u32 interrupt_auto_clear_enable;
+    u32 auto_clear_enable;
     CLIB_PAD_FROM_TO (0x814, 0x820);
-    u32 interrupt_throttle0[24];
-    u32 interrupt_enable_write_1_to_set;
+    u32 throttle0[24];
+    u32 enable_write_1_to_set;
     CLIB_PAD_FROM_TO (0x884, 0x888);
-    u32 interrupt_enable_write_1_to_clear;
+    u32 enable_write_1_to_clear;
     CLIB_PAD_FROM_TO (0x88c, 0x890);
-    u32 interrupt_enable_auto_clear;
+    u32 enable_auto_clear;
     u32 msi_to_eitr_select;
-    u32 gpie_interrupt_enable;
+    u32 gpie_enable;
     CLIB_PAD_FROM_TO (0x89c, 0x900);
-    u32 interrupt_vector_allocation[64];
-    u32 interrupt_vector_allocation_misc;
+    u32 vector_allocation[64];
+    u32 vector_allocation_misc;
     CLIB_PAD_FROM_TO (0xa04, 0xa90);
     /* 64 queues in [0] and [1]. */
-    u32 interrupt_status1_write_1_to_clear[4];
-    u32 interrupt_enable1_write_1_to_set[4];
-    u32 interrupt_enable1_write_1_to_clear[4];
+    u32 status1_write_1_to_clear[4];
+    u32 enable1_write_1_to_set[4];
+    u32 enable1_write_1_to_clear[4];
     CLIB_PAD_FROM_TO (0xac0, 0xad0);
-    u32 interrupt_enable1_auto_clear[4];
+    u32 enable1_auto_clear[4];
     CLIB_PAD_FROM_TO (0xae0, 0x1000);
   } interrupt;
 
@@ -267,7 +267,7 @@ typedef volatile struct {
     CLIB_PAD_FROM_TO (0x4328, 0x4900);
   } xge_mac;
 
-  CLIB_PAD_FROM_TO (0x4900, 0x4904);
+  u32 tx_dcb_control;
   u32 tx_dcb_descriptor_plane_queue_select;
   u32 tx_dcb_descriptor_plane_t1_config;
   u32 tx_dcb_descriptor_plane_t1_status;
@@ -635,7 +635,7 @@ typedef volatile struct {
   _ (0x4008, rx_error_symbol_errors)			\
   _ (0x4034, xge_mac_local_faults)			\
   _ (0x4038, xge_mac_remote_faults)			\
-  _ (0x403c, rx_length_errors)				\
+  _ (0x4040, rx_length_errors)				\
   _ (0x41a4, rx_xons)					\
   _ (0x41a8, rx_xoffs)					\
   _ (0x40a4, rx_undersize_packets)			\

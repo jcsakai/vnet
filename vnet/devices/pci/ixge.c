@@ -239,7 +239,6 @@ ixge_tx_no_wrap (ixge_main_t * xm,
 
   ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
   d = &dq->descriptors[start_descriptor_index].tx;
-  is_sop = 0;
 
   while (n_left > 0)
     {
@@ -272,12 +271,13 @@ ixge_tx_no_wrap (ixge_main_t * xm,
       d[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len0);
 
       is_sop = is_eop0;
+      d += 1;
     }
 
   _vec_len (xm->tx_buffers_pending_free) = to_free - xm->tx_buffers_pending_free;
   *last_is_sop = is_sop;
 
-  return 0;
+  return n_descriptors;
 }
 
 static uword
@@ -341,7 +341,16 @@ ixge_interface_tx (vlib_main_t * vm,
   /* Give new descriptors to hardware. */
   {
     ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_TX, queue_index);
+
+    CLIB_MEMORY_BARRIER ();
+
     dr->tail_index = dq->tail_index;
+
+    { u32 tmp[2];
+      tmp[0] = dr->head_index;
+      tmp[1] = dr->tail_index;
+      clib_warning ("head 0x%x tail 0x%x", tmp[0], tmp[1]);
+    }
   }
 
   /* Free any buffers that are done. */
@@ -568,6 +577,14 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 	dr->tx.head_index_write_back_address[1] = a >> 32;
       }
 
+    if (rt == VLIB_RX)
+      xd->regs->rx_enable |= 1;
+    else
+      {
+	xd->regs->tx_dcb_control &= ~(1 << 6);
+	xd->regs->tx_dma_control |= (1 << 0);
+      }
+
     /* Enable this queue and wait for hardware to initialize before adding to tail. */
     dr->control |= 1 << 25;
     while (! (dr->control & (1 << 25)))
@@ -628,10 +645,52 @@ static void ixge_device_init (ixge_main_t * xm)
       ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
-      /* Enable TX & RX. */
-      r->tx_dma_control |= (1 << 0);
-      r->rx_enable |= 1;
+      xd->regs->xge_mac.control[0] |= 1<< 15;
     }
+}
+
+static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd)
+{
+  vlib_main_t * vm = xm->vlib_main;
+  ixge_regs_t * r = xd->regs;
+  u32 i, s;
+  s = r->interrupt.status_write_1_to_clear;
+  r->interrupt.status_write_1_to_clear = s;
+  foreach_set_bit (i, s, ({
+    if (i >= 0 && i < 16)
+      ASSERT (0);
+    else
+      {
+	ELOG_TYPE_DECLARE (e) = {
+	    .function = (char *) __FUNCTION__,
+	    .format = "ixge %d, %s",
+	    .format_args = "i1t1",
+	    .n_enum_strings = 16,
+	    .enum_strings = {
+		"flow director",
+		"rx miss",
+		"pci exception",
+		"mailbox",
+		"link status change",
+		"linksec key exchange",
+		"manageability event",
+		"reserved23",
+		"sdp0",
+		"sdp1",
+		"sdp2",
+		"sdp3",
+		"ecc",
+		"reserved29",
+		"tcp timer",
+		"reserved31",
+	    },
+	};
+	struct { u8 instance; u8 index; } * ed;
+	ed = ELOG_DATA (&vm->elog_main, e);
+	ed->instance = xd->index;
+	ed->index = i - 16;
+      }
+  }));
 }
 
 static uword
@@ -654,6 +713,7 @@ ixge_process (vlib_main_t * vm,
 	  if (was_up != is_up)
 	    vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
 					 is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+	  ixge_interrupt (xm, xd);
 	}
     }
 	    
