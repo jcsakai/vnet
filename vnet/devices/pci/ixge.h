@@ -824,7 +824,10 @@ typedef struct {
   /* PCI bus info. */
   pci_device_t pci_device;
 
-  u32 index;
+  u16 device_index;
+
+  /* 0 or 1. */
+  u16 pci_function;
 
   /* VLIB interface for this instance. */
   u32 vlib_hw_if_index;

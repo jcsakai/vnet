@@ -162,7 +162,15 @@ ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
       xd->regs->core_analog_config = v;
     }
 
-  xd->regs->xge_mac.auto_negotiation_control |= 1 << 12;
+  {
+    u32 v;
+
+    v = xd->regs->xge_mac.auto_negotiation_control;
+    v &= ~(7 << 13);
+    v |= 1 << 12;
+    xd->regs->xge_mac.auto_negotiation_control = v;
+  }
+      
 
   return /* no error */ 0;
 }
@@ -193,7 +201,7 @@ static void ixge_phy_init (ixge_device_t * xd)
 	u8 start_address[1];
 	u32 timed_out;
 
-	ib->private = xd->index;
+	ib->private = xd->device_index;
 	ib->put_bits = ixge_i2c_put_bits;
 	ib->get_bits = ixge_i2c_get_bits;
 	i2c_init (ib);
@@ -206,7 +214,7 @@ static void ixge_phy_init (ixge_device_t * xd)
 	  xd->sfp_eeprom.id = SFP_ID_unknown;
 	else
 	  {
-	    clib_error_t * e = ixge_phy_init_from_eeprom (xd, 99);
+	    clib_error_t * e = ixge_phy_init_from_eeprom (xd, 5 + xd->pci_function);
 	    if (e)
 	      clib_error_report (e);
 	  }
@@ -227,7 +235,7 @@ static void ixge_phy_init (ixge_device_t * xd)
     };
     struct { u32 instance, id, address; } * ed;
     ed = ELOG_DATA (&vm->elog_main, e);
-    ed->instance = xd->index;
+    ed->instance = xd->device_index;
     ed->id = phy->id;
     ed->address = phy->mdio_address;
   }
@@ -396,12 +404,6 @@ ixge_interface_tx (vlib_main_t * vm,
     CLIB_MEMORY_BARRIER ();
 
     dr->tail_index = dq->tail_index;
-
-    { u32 tmp[2];
-      tmp[0] = dr->head_index;
-      tmp[1] = dr->tail_index;
-      clib_warning ("head 0x%x tail 0x%x", tmp[0], tmp[1]);
-    }
   }
 
   /* Free any buffers that are done. */
@@ -685,7 +687,7 @@ static void ixge_device_init (ixge_main_t * xm)
 	error = ethernet_register_interface
 	  (vm,
 	   ixge_device_class.index,
-	   xd->index,
+	   xd->device_index,
 	   /* ethernet address */ addr8,
 	   /* phy */ 0,
 	   &xd->vlib_hw_if_index);
@@ -696,20 +698,23 @@ static void ixge_device_init (ixge_main_t * xm)
       ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
-      xd->regs->xge_mac.control |= 1<< 15;
+      if (0)
+	/* sets mac loopback */
+	xd->regs->xge_mac.control |= 1<< 15;
 
-      {
-	u16 tmp[1];
-	clib_error_t * e;
-	e = os_read_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
-	if (e) clib_error_report (e);
-	tmp[0] |= 1 << 2;
-	e = os_write_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
-	if (e) clib_error_report (e);
-	e = os_read_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
-	if (e) clib_error_report (e);
-	clib_warning ("0x%x", tmp[0]);
-      }
+      /* Kernel should have already set pci master for us.
+	 If its not set you don't get much DMA done. */
+      if (0)
+	{
+	  u16 tmp[1];
+	  clib_error_t * e;
+	  e = os_read_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
+	  if (e) clib_error_report (e);
+	  ASSERT (tmp[0] & (1 << 2));
+	  tmp[0] |= 1 << 2;
+	  e = os_write_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
+	  if (e) clib_error_report (e);
+	}
     }
 }
 
@@ -751,10 +756,15 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd)
 	};
 	struct { u8 instance; u8 index; } * ed;
 	ed = ELOG_DATA (&vm->elog_main, e);
-	ed->instance = xd->index;
+	ed->instance = xd->device_index;
 	ed->index = i - 16;
       }
   }));
+
+  s = r->pcie.pcie_interrupt_status;
+  r->pcie.pcie_interrupt_status = s;
+  if (s != 0)
+    clib_warning ("0x%x", s);
 }
 
 static uword
@@ -831,7 +841,8 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   vec_add2 (xm->devices, xd, 1);
   xd->pci_device = dev[0];
   xd->regs = r;
-  xd->index = xd - xm->devices;
+  xd->device_index = xd - xm->devices;
+  xd->pci_function = dev->bus_address.slot_function & 1;
 
   if (vec_len (xm->devices) == 1)
     {
