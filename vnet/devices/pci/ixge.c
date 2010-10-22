@@ -646,6 +646,19 @@ static void ixge_device_init (ixge_main_t * xm)
       ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
       xd->regs->xge_mac.control[0] |= 1<< 15;
+
+      {
+	u16 tmp[1];
+	clib_error_t * e;
+	e = os_read_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
+	if (e) clib_error_report (e);
+	tmp[0] |= 1 << 2;
+	e = os_write_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
+	if (e) clib_error_report (e);
+	e = os_read_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
+	if (e) clib_error_report (e);
+	clib_warning ("0x%x", tmp[0]);
+      }
     }
 }
 
