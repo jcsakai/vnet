@@ -326,7 +326,6 @@ ixge_tx_no_wrap (ixge_main_t * xm,
       d[0].status[0] |=
 	((is_eop0 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
 	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (b0->current_length));
-      ASSERT (d[0].status[1] == 0);
       d[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len0);
 
       is_sop = is_eop0;
@@ -505,7 +504,7 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
       {
 	v = xd->counters[i] - xd->counters_last_clear[i];
 	if (v != 0)
-	  s = format (s, "\n%U%-40s%Ld",
+	  s = format (s, "\n%U%-40s%20Ld",
 		      format_white_space, indent,
 		      names[i], v);
       }
@@ -814,6 +813,9 @@ clib_error_t * ixge_init (vlib_main_t * vm)
      | IXGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS);
   xm->tx_descriptor_template_mask.status[0] = 0xffff0000;
   xm->tx_descriptor_template_mask.status[1] = 0x00003fff;
+
+  xm->tx_descriptor_template_mask.status[0] &=
+    ~(IXGE_TX_DESCRIPTOR_STATUS0_IS_END_OF_PACKET);
 
   error = unix_physmem_init (vm, /* physical_memory_required */ 1);
   if (error)
