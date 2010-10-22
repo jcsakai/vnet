@@ -122,6 +122,51 @@ static void ixge_i2c_get_bits (i2c_bus_t * b, int * scl, int * sda)
   *scl = (v & (1 << 0)) != 0;
 }
 
+static u16 ixge_read_eeprom (ixge_device_t * xd, u32 address)
+{
+  ixge_regs_t * r = xd->regs;
+  u32 v;
+  r->eeprom_read = ((/* start bit */ (1 << 0)) | (address << 2));
+  /* Wait for done bit. */
+  while (! ((v = r->eeprom_read) & (1 << 1)))
+    ;
+  return v >> 16;
+}
+
+static clib_error_t *
+ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
+{
+  u16 a, id, reg_values_addr;
+
+  a = ixge_read_eeprom (xd, 0x2b);
+  if (a == 0 || a == 0xffff)
+    return clib_error_create ("no init sequence in eeprom");
+
+  while (1)
+    {
+      id = ixge_read_eeprom (xd, ++a);
+      if (id == 0xffff)
+	break;
+      reg_values_addr = ixge_read_eeprom (xd, ++a);
+      if (id == sfp_type)
+	break;
+    }
+  if (id != sfp_type)
+    return clib_error_create ("failed to find id 0x%x", sfp_type);
+
+  while (1)
+    {
+      u16 v = ixge_read_eeprom (xd, ++reg_values_addr);
+      if (v == 0xffff)
+	break;
+      xd->regs->core_analog_config = v;
+    }
+
+  xd->regs->xge_mac.auto_negotiation_control |= 1 << 12;
+
+  return /* no error */ 0;
+}
+
 static void ixge_phy_init (ixge_device_t * xd)
 {
   ixge_main_t * xm = &ixge_main;
@@ -159,6 +204,12 @@ static void ixge_phy_init (ixge_device_t * xd)
 				    &xd->sfp_eeprom, 128);
 	if (timed_out || ! sfp_eeprom_is_valid (&xd->sfp_eeprom))
 	  xd->sfp_eeprom.id = SFP_ID_unknown;
+	else
+	  {
+	    clib_error_t * e = ixge_phy_init_from_eeprom (xd, 99);
+	    if (e)
+	      clib_error_report (e);
+	  }
 
 	phy->mdio_address = ~0;
 	return;
@@ -645,7 +696,7 @@ static void ixge_device_init (ixge_main_t * xm)
       ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
-      xd->regs->xge_mac.control[0] |= 1<< 15;
+      xd->regs->xge_mac.control |= 1<< 15;
 
       {
 	u16 tmp[1];

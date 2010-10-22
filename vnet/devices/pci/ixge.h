@@ -11,6 +11,14 @@ typedef volatile struct {
   u32 descriptor_address[2];
   u32 n_descriptor_bytes;
 
+  /* [5] rx/tx descriptor dca enable
+     [6] rx packet head dca
+     [7] rx packet tail dca
+     [9] rx/tx descriptor relaxed order
+     [11] rx/tx descriptor write back relaxed order
+     [13] rx/tx data write/read relaxed order
+     [15] rx data write relaxed order
+     [31:24] apic id for cpu's cache. */
   u32 dca_control;
 
   u32 head_index;
@@ -161,12 +169,13 @@ typedef volatile struct {
     u32 vector_allocation[64];
     u32 vector_allocation_misc;
     CLIB_PAD_FROM_TO (0xa04, 0xa90);
-    /* 64 queues in [0] and [1]. */
-    u32 status1_write_1_to_clear[4];
-    u32 enable1_write_1_to_set[4];
-    u32 enable1_write_1_to_clear[4];
+
+    /* 128 queues? 64 queues in [0] and [1]. */
+    u32 queue_status_write_1_to_clear[4];
+    u32 queue_enable_write_1_to_set[4];
+    u32 queue_enable_write_1_to_clear[4];
     CLIB_PAD_FROM_TO (0xac0, 0xad0);
-    u32 enable1_auto_clear[4];
+    u32 queue_enable_auto_clear[4];
     CLIB_PAD_FROM_TO (0xae0, 0x1000);
   } interrupt;
 
@@ -202,7 +211,10 @@ typedef volatile struct {
   /* [15:0] ether type (little endian)
      [31:16] opcode (big endian) */
   u32 flow_control_control;
-  CLIB_PAD_FROM_TO (0x300c, 0x3028);
+  CLIB_PAD_FROM_TO (0x300c, 0x3020);
+  /* 3 bit traffic class for each of 8 priorities. */
+  u32 rx_priority_to_traffic_class;
+  CLIB_PAD_FROM_TO (0x3024, 0x3028);
   u32 rx_coallesce_data_buffer_control;
   CLIB_PAD_FROM_TO (0x302c, 0x3190);
   u32 rx_packet_buffer_flush_detect;
@@ -235,20 +247,84 @@ typedef volatile struct {
   } gige_mac;
 
   struct {
-    u32 control[2];
+    /* [0] tx crc enable
+       [2] enable frames up to max frame size register [31:16]
+       [10] pad frames < 64 bytes if specified by user
+       [15] loopback enable
+       [16] mdc hi speed
+       [17] turn off mdc between mdio packets */
+    u32 control;
+
+    /* [5] rx symbol error (all bits clear on read)
+       [6] rx illegal symbol
+       [7] rx idle error
+       [8] rx local fault
+       [9] rx remote fault */
+    u32 status;
+
     u32 pause_and_pace_control;
     CLIB_PAD_FROM_TO (0x424c, 0x425c);
     u32 phy_command;
     u32 phy_data;
     CLIB_PAD_FROM_TO (0x4264, 0x4268);
-    u32 max_frame_size;
+
+    /* [31:16] max frame size in bytes. */
+    u32 rx_max_frame_size;
     CLIB_PAD_FROM_TO (0x426c, 0x4288);
+
+    /* [0]
+         [2] pcs receive link up? (latch lo)
+	 [7] local fault
+       [1]
+         [0] pcs 10g base r capable
+         [1] pcs 10g base x capable
+         [2] pcs 10g base w capable
+	 [10] rx local fault
+	 [11] tx local fault
+	 [15:14] 2 => device present at this address (else not present) */
     u32 xgxs_status[2];
-    u32 pcs_status;
+
+    u32 base_x_pcs_status;
+
+    /* [0] pass unrecognized flow control frames
+       [1] discard pause frames
+       [2] rx priority flow control enable (only in dcb mode)
+       [3] rx flow control enable. */
     u32 flow_control;
+
+    /* [3:0] tx lanes change polarity
+       [7:4] rx lanes change polarity
+       [11:8] swizzle tx lanes
+       [15:12] swizzle rx lanes
+       4 x 2 bit tx lane swap
+       4 x 2 bit rx lane swap. */
     u32 serdes_control;
+
     u32 fifo_control;
+
+    /* [0] force link up
+       [1] autoneg ack2 bit to transmit
+       [6:2] autoneg selector field to transmit
+       [8:7] 10g pma/pmd type 0 => xaui, 1 kx4, 2 cx4
+       [9] 1g pma/pmd type 0 => sfi, 1 => kx/bx
+       [10] disable 10g on without main power
+       [11] restart autoneg on transition to dx power state
+       [12] restart autoneg
+       [15:13] link mode:
+         0 => 1g no autoneg
+	 1 => 10g kx4 parallel link no autoneg
+	 2 => 1g bx autoneg
+	 3 => 10g sfi serdes
+	 4 => kx4/kx/kr
+	 5 => xgmii 1g/100m
+	 6 => kx4/kx/kr 1g an
+	 7 kx4/kx/kr sgmii.
+       [16] kr support
+       [17] fec requested
+       [18] fec ability
+       etc. */
     u32 auto_negotiation_control;
+
     u32 link_status;
     u32 auto_negotiation_control2;
     CLIB_PAD_FROM_TO (0x42ac, 0x42b0);
@@ -272,6 +348,8 @@ typedef volatile struct {
   u32 tx_dcb_descriptor_plane_t1_config;
   u32 tx_dcb_descriptor_plane_t1_status;
   CLIB_PAD_FROM_TO (0x4910, 0x4950);
+
+  /* For each TC in units of 1k bytes. */
   u32 tx_packet_buffer_thresholds[8];
   CLIB_PAD_FROM_TO (0x4970, 0x4980);
   struct {
@@ -375,6 +453,9 @@ typedef volatile struct {
   CLIB_PAD_FROM_TO (0x8104, 0x8110);
   u32 vf_tx_enable[2];
   CLIB_PAD_FROM_TO (0x8118, 0x8120);
+  /* [0] dcb mode enable
+     [1] virtualization mode enable
+     [3:2] number of tcs/qs per pool. */
   u32 multiple_tx_queues_command;
   CLIB_PAD_FROM_TO (0x8124, 0x8200);
   u32 pf_vf_anti_spoof[8];
@@ -473,9 +554,13 @@ typedef volatile struct {
 
   /* select one of 64 pools for each rx address. */
   u32 rx_ethernet_address_pool_select[128][2];
-  CLIB_PAD_FROM_TO (0xaa00, 0xcc00);
+  CLIB_PAD_FROM_TO (0xaa00, 0xc800);
+  u32 tx_priority_to_traffic_class;
+  CLIB_PAD_FROM_TO (0xc804, 0xcc00);
 
+  /* In bytes units of 1k.  Total packet buffer is 160k. */
   u32 tx_packet_buffer_sizes[8];
+
   CLIB_PAD_FROM_TO (0xcc20, 0xcd10);
   u32 tx_manageability_tc_mapping;
   CLIB_PAD_FROM_TO (0xcd14, 0xcd20);
@@ -548,6 +633,10 @@ typedef volatile struct {
   } pf_bar;
 
   u32 eeprom_flash_control;
+  /* [0] start
+     [1] done
+     [15:2] address
+     [31:16] read data. */
   u32 eeprom_read;
   CLIB_PAD_FROM_TO (0x10018, 0x1001c);
   u32 flash_access;
@@ -569,8 +658,17 @@ typedef volatile struct {
   struct {
     u32 control;
     CLIB_PAD_FROM_TO (0x11004, 0x11010);
+    /* [3:0] enable counters
+       [7:4] leaky bucket counter mode
+       [29] reset
+       [30] stop
+       [31] start. */
     u32 counter_control;
-    /* [7:0],[15:8],[23:16],[31:24] event for counters 0-3. */
+    /* [7:0],[15:8],[23:16],[31:24] event for counters 0-3.
+       event codes:
+       0x0 bad tlp
+       0x10 reqs that reached timeout
+       etc. */
     u32 counter_event;
     CLIB_PAD_FROM_TO (0x11018, 0x11020);
     u32 counters_clear_on_read[4];
@@ -585,8 +683,14 @@ typedef volatile struct {
     u32 mirrored_revision_id;
     CLIB_PAD_FROM_TO (0x11068, 0x11070);
     u32 dca_requester_id_information;
+    /* [0] disable
+       [4:1] mode: 0 => legacy, 1 => dca 1.0. */
     u32 dca_control;
     CLIB_PAD_FROM_TO (0x11078, 0x110b0);
+    /* [0] pci completion abort
+       [1] unsupported i/o address
+       [2] wrong byte enable
+       [3] pci timeout */
     u32 pcie_interrupt_status;
     CLIB_PAD_FROM_TO (0x110b4, 0x110b8);
     u32 pcie_interrupt_enable;
