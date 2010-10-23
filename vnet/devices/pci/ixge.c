@@ -250,12 +250,22 @@ static void ixge_phy_init (ixge_device_t * xd)
 }
 
 always_inline uword
-ixge_ring_diff (ixge_dma_queue_t * q, u32 i0, u32 i1)
+ixge_ring_sub (ixge_dma_queue_t * q, u32 i0, u32 i1)
 {
   i32 d = i1 - i0;
   ASSERT (i0 < q->n_descriptors);
   ASSERT (i1 < q->n_descriptors);
   return d < 0 ? -d : d;
+}
+
+always_inline uword
+ixge_ring_add (ixge_dma_queue_t * q, u32 i0, u32 i1)
+{
+  u32 d = i0 + i1;
+  ASSERT (i0 < q->n_descriptors);
+  ASSERT (i1 < q->n_descriptors);
+  d -= d >= q->n_descriptors ? q->n_descriptors : 0;
+  return d;
 }
 
 always_inline ixge_dma_regs_t *
@@ -362,7 +372,7 @@ ixge_interface_tx (vlib_main_t * vm,
   /* There might be room on the ring due to packets already transmitted. */
   {
     u32 hw_head_index = dq->tx.head_index_write_back[0];
-    n_left_tx += ixge_ring_diff (dq, hw_head_index, dq->head_index);
+    n_left_tx += ixge_ring_sub (dq, hw_head_index, dq->head_index);
     dq->head_index = hw_head_index;
   }
 
@@ -427,6 +437,282 @@ ixge_interface_tx (vlib_main_t * vm,
 
   return f->n_vectors;
 }
+
+#define foreach_ixge_rx_error				\
+  _ (none, "no error")					\
+  _ (ip4_checksum_errors, "ip4 checksum errors")	\
+  _ (mac_errors, "ethernet mac errors")
+
+typedef enum {
+#define _(f,s) IXGE_RX_ERROR_##f,
+  foreach_ixge_rx_error
+#undef _
+  IXGE_RX_N_ERROR,
+} ixge_rx_error_t;
+
+typedef enum {
+  IXGE_RX_NEXT_ETHERNET_INPUT,
+  IXGE_RX_NEXT_DROP,
+  IXGE_RX_N_NEXT,
+} ixge_rx_next_t;
+
+typedef struct {
+  vlib_node_runtime_t * node;
+
+  u32 next_index;
+
+  u32 saved_start_of_packet_buffer_index;
+
+  u32 is_start_of_packet;
+
+  u32 n_descriptors_done_total;
+
+  u32 n_descriptors_done_this_call;
+} ixge_rx_queue_no_wrap_state_t;
+
+static uword
+ixge_rx_queue_no_wrap (ixge_main_t * xm,
+		       ixge_device_t * xd,
+		       ixge_dma_queue_t * dq,
+		       ixge_rx_queue_no_wrap_state_t * s,
+		       u32 start_descriptor_index,
+		       u32 n_descriptors)
+{
+  vlib_main_t * vm = xm->vlib_main;
+  ixge_descriptor_t * d;
+  u32 n_descriptors_left = n_descriptors;
+  u32 * to_rx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
+  u32 * to_add;
+  u32 bi_sop = s->saved_start_of_packet_buffer_index;
+  u32 is_sop = s->is_start_of_packet;
+  u32 next_index, n_left_to_next, * to_next;
+  vlib_buffer_t * b_sop;
+  u32 n_packets = 0;
+
+  ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
+  d = &dq->descriptors[start_descriptor_index];
+
+  b_sop = 0;
+  next_index = s->next_index;
+
+  {
+    uword l = vec_len (xm->rx_buffers_to_add);
+
+    if (l < n_descriptors_left)
+      {
+	u32 n_to_alloc = 2 * dq->n_descriptors - l;
+	u32 n_allocated;
+
+	vec_validate (xm->rx_buffers_to_add, n_to_alloc + l - 1);
+
+	_vec_len (xm->rx_buffers_to_add) = l;
+	n_allocated = vlib_buffer_alloc_from_free_list
+	  (vm, xm->rx_buffers_to_add + l, n_to_alloc,
+	   xm->vlib_buffer_free_list_index);
+	_vec_len (xm->rx_buffers_to_add) += n_allocated;
+	ASSERT (vec_len (xm->rx_buffers_to_add) >= n_descriptors_left);
+      }
+
+    /* Add buffers from end of vector going backwards. */
+    to_add = vec_end (xm->rx_buffers_to_add) - 1;
+  }
+
+  while (n_descriptors_left > 0)
+    {
+      vlib_get_next_frame (vm, s->node, next_index,
+			   to_next, n_left_to_next);
+
+      while (n_descriptors_left > 0 && n_left_to_next > 0)
+	{
+	  u32 bi0, fi0;
+	  vlib_buffer_t * b0;
+	  u32 s20;
+	  u8 is_eop0, next0, error0;
+
+	  bi0 = to_rx[0];
+	  ASSERT (to_add >= xm->rx_buffers_to_add);
+	  fi0 = to_add[0];
+
+	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, bi0));
+	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, fi0));
+
+	  b0 = vlib_get_buffer (vm, bi0);
+
+	  s20 = d[0].rx_from_hw.status[2];
+	  if (! (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+	    goto found_hw_owned_descriptor;
+	  is_eop0 = (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+
+	  b0->flags |= (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b0->current_length = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
+
+	  /* Give new buffer to hardware. */
+	  d[0].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi0);
+	  d[0].rx_to_hw.head_address = d[0].rx_to_hw.tail_address;
+	  to_rx[0] = fi0;
+	  to_rx += 1;
+	  to_add -= 1;
+
+	  next0 = is_sop ? IXGE_RX_NEXT_ETHERNET_INPUT : next0;
+
+	  error0 = IXGE_RX_ERROR_none;
+
+	  next0 = error0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : next0;
+
+	  b0->error = s->node->errors[error0];
+
+	  bi_sop = is_sop ? bi0 : bi_sop;
+	  to_next[0] = bi_sop;
+	  to_next += is_eop0;
+	  n_left_to_next -= is_eop0;
+	  n_packets += is_eop0;
+	  d += 1;
+	  n_descriptors_left -= 1;
+
+	  is_sop = is_eop0;
+
+	  if (PREDICT_FALSE (next0 != next_index))
+	    {
+	      vlib_put_next_frame (vm, s->node, next_index, n_left_to_next + 1);
+	      next_index = next0;
+	      vlib_get_next_frame (vm, s->node, next_index, to_next, n_left_to_next);
+	      to_next[0] = bi_sop;
+	      to_next += is_eop0;
+	      n_left_to_next -= is_eop0;
+	    }
+	}
+
+      vlib_put_next_frame (vm, s->node, next_index, n_left_to_next);
+    }
+
+ found_hw_owned_descriptor:
+  if (n_descriptors_left > 0)
+    vlib_put_next_frame (vm, s->node, next_index, n_left_to_next);
+
+  _vec_len (xm->rx_buffers_to_add) = (to_add + 1) - xm->rx_buffers_to_add;
+
+  {
+    u32 n_done = n_descriptors - n_descriptors_left;
+
+    s->n_descriptors_done_this_call = n_done;
+    s->n_descriptors_done_total += n_done;
+    s->is_start_of_packet = is_sop;
+    s->saved_start_of_packet_buffer_index = bi_sop;
+    s->next_index = next_index;
+
+    return n_packets;
+  }
+}
+
+static uword
+ixge_rx_queue (ixge_main_t * xm,
+	       ixge_device_t * xd,
+	       ixge_dma_queue_t * dq,
+	       ixge_rx_queue_no_wrap_state_t * s,
+	       u32 sw_head_index,
+	       u32 hw_head_index)
+{
+  uword n_packets = 0;
+
+  if (hw_head_index == sw_head_index)
+    goto done;
+
+  if (hw_head_index < sw_head_index)
+    {
+      u32 n_tried = dq->n_descriptors - sw_head_index;
+      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, s, sw_head_index, n_tried);
+      sw_head_index = ixge_ring_add (dq, sw_head_index, s->n_descriptors_done_this_call);
+      if (s->n_descriptors_done_this_call != n_tried)
+	goto done;
+    }
+  if (hw_head_index >= sw_head_index)
+    {
+      u32 n_tried = hw_head_index - sw_head_index;
+      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, s, sw_head_index, n_tried);
+      sw_head_index = ixge_ring_add (dq, sw_head_index, s->n_descriptors_done_this_call);
+    }
+
+ done:
+  dq->head_index = sw_head_index;
+  dq->tail_index = ixge_ring_add (dq, dq->tail_index, s->n_descriptors_done_total);
+
+  /* Give head/tail back to hardware. */
+  {
+    ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
+
+    CLIB_MEMORY_BARRIER ();
+    dr->head_index = dq->head_index;
+    dr->tail_index = dq->tail_index;
+  }
+
+  return n_packets;
+}
+
+static uword
+ixge_rx (vlib_main_t * vm,
+	 vlib_node_runtime_t * node,
+	 vlib_frame_t * f)
+{
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd;
+  ixge_dma_queue_t * dq;
+  static ixge_rx_queue_no_wrap_state_t state;
+  ixge_rx_queue_no_wrap_state_t * s = &state;
+  uword n_rx_packets = 0;
+
+  if (! s->node)
+    {
+      s->node = node;
+      s->next_index = node->cached_next_index;
+    }
+
+  vec_foreach (xd, xm->devices)
+    {
+      vec_foreach (dq, xd->dma_queues[VLIB_RX])
+	{
+	  ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
+	  u32 hw_head_index = dr->head_index;
+	  u32 sw_head_index = dq->head_index;
+	  if (hw_head_index == sw_head_index)
+	    continue;
+	  
+	  s->is_start_of_packet = 1;
+	  s->saved_start_of_packet_buffer_index = ~0;
+	  s->n_descriptors_done_total = 0;
+
+	  n_rx_packets += ixge_rx_queue (xm, xd, dq, s,
+					 sw_head_index, hw_head_index);
+	}
+    }
+
+  return n_rx_packets;
+}
+
+static char * ixge_rx_error_strings[] = {
+#define _(n,s) s,
+    foreach_ixge_rx_error
+#undef _
+};
+
+static VLIB_REGISTER_NODE (ixge_rx_node) = {
+  .function = ixge_rx,
+  .type = VLIB_NODE_TYPE_INPUT,
+  .name = "ixge-rx",
+
+  /* Will be enabled if/when hardware is detected. */
+  .flags = VLIB_NODE_FLAG_IS_DISABLED,
+
+  .format_trace = 0,		/* fixme */
+
+  .n_errors = IXGE_RX_N_ERROR,
+  .error_strings = ixge_rx_error_strings,
+
+  .n_next_nodes = IXGE_RX_N_NEXT,
+  .next_nodes = {
+    [IXGE_RX_NEXT_DROP] = "error-drop",
+    [IXGE_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
+  },
+};
 
 static u8 * format_ixge_device_name (u8 * s, va_list * args)
 {
@@ -579,7 +865,7 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
       for (i = 0; i < n_alloc; i++)
 	{
 	  vlib_buffer_t * b = vlib_get_buffer (vm, dq->descriptor_buffer_indices[i]);
-	  dq->descriptors[i].rx_to_hw.packet_address = vlib_physmem_virtual_to_physical (vm, b->data);
+	  dq->descriptors[i].rx_to_hw.tail_address = vlib_physmem_virtual_to_physical (vm, b->data);
 	}
     }
   else
@@ -629,6 +915,13 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 	dr->tx.head_index_write_back_address[1] = a >> 32;
       }
 
+    /* DMA on 82599 does not work with [13] rx data write relaxed ordering
+       and [12] undocumented set. */
+    if (rt == VLIB_RX)
+      dr->dca_control &= ~((1 << 13) | (1 << 12));
+
+    CLIB_MEMORY_BARRIER ();
+
     if (rt == VLIB_RX)
       xd->regs->rx_enable |= 1;
     else
@@ -668,7 +961,7 @@ static void ixge_device_init (ixge_main_t * xm)
 	;
 
       /* Software loaded. */
-      r->extended_control |= 1 << 28;
+      r->extended_control |= (1 << 28);
 
       ixge_phy_init (xd);
 
@@ -682,6 +975,8 @@ static void ixge_device_init (ixge_main_t * xm)
 	addr32[1] = r->rx_ethernet_address0[0][1];
 	for (i = 0; i < 6; i++)
 	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
+
+	clib_warning ("dev %d eth %U", xd->device_index, format_ethernet_address, addr8);
 
 	error = ethernet_register_interface
 	  (vm,
@@ -845,6 +1140,9 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   xd->regs = r;
   xd->device_index = xd - xm->devices;
   xd->pci_function = dev->bus_address.slot_function & 1;
+
+  /* Chip found so enable node. */
+  vlib_node_enable_disable (vm, ixge_rx_node.index, /* enable */ 1);
 
   if (vec_len (xm->devices) == 1)
     {

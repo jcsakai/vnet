@@ -12,12 +12,12 @@ typedef volatile struct {
   u32 n_descriptor_bytes;
 
   /* [5] rx/tx descriptor dca enable
-     [6] rx packet head dca
-     [7] rx packet tail dca
+     [6] rx packet head dca enable
+     [7] rx packet tail dca enable
      [9] rx/tx descriptor relaxed order
      [11] rx/tx descriptor write back relaxed order
      [13] rx/tx data write/read relaxed order
-     [15] rx data write relaxed order
+     [15] rx head data write relaxed order
      [31:24] apic id for cpu's cache. */
   u32 dca_control;
 
@@ -64,7 +64,7 @@ typedef volatile struct {
 
 /* Only advanced descriptors are supported. */
 typedef struct {
-  u64 packet_address;
+  u64 tail_address;
   u64 head_address;
 } ixge_rx_to_hw_descriptor_t;
 
@@ -73,6 +73,30 @@ typedef struct {
   u16 n_packet_bytes_this_descriptor;
   u16 vlan_tag;
 } ixge_rx_from_hw_descriptor_t;
+
+#define IXGE_RX_DESCRIPTOR_STATUS0_IS_LAYER2 (1 << (4 + 11))
+/* Valid if not layer2. */
+#define IXGE_RX_DESCRIPTOR_STATUS0_IS_IP4 (1 << (4 + 0))
+#define IXGE_RX_DESCRIPTOR_STATUS0_IS_IP4_EXT (1 << (4 + 1))
+#define IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6 (1 << (4 + 2))
+#define IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6_EXT (1 << (4 + 3))
+#define IXGE_RX_DESCRIPTOR_STATUS0_IS_TCP (1 << (4 + 4))
+#define IXGE_RX_DESCRIPTOR_STATUS0_IS_UDP (1 << (4 + 5))
+
+#define IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE (1 << (0 + 0))
+#define IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET (1 << (0 + 1))
+#define IXGE_RX_DESCRIPTOR_STATUS2_IS_VLAN (1 << (0 + 3))
+#define IXGE_RX_DESCRIPTOR_STATUS2_IS_UDP_CHECKSUMMED (1 << (0 + 4))
+#define IXGE_RX_DESCRIPTOR_STATUS2_IS_L4_CHECKSUMMED (1 << (0 + 5))
+#define IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED (1 << (0 + 6))
+#define IXGE_RX_DESCRIPTOR_STATUS2_IS_DOUBLE_VLAN (1 << (0 + 9))
+#define IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_COMPUTED (1 << (0 + 10))
+#define IXGE_RX_DESCRIPTOR_STATUS2_ETHERNET_ERROR (1 << (20 + 9))
+#define IXGE_RX_DESCRIPTOR_STATUS2_L4_CHECKSUM_ERROR (1 << (20 + 10))
+#define IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR (1 << (20 + 11))
+
+/* For layer2 packets stats0 bottom 3 bits give ether type index from filter. */
+#define IXGE_RX_DESCRIPTOR_STATUS0_LAYER2_ETHERNET_TYPE(s) ((s) & 7)
 
 typedef struct {
   u64 buffer_address;
@@ -869,6 +893,8 @@ typedef struct {
 
   /* Vector of buffers for which TX is done and can be freed. */
   u32 * tx_buffers_pending_free;
+
+  u32 * rx_buffers_to_add;
 } ixge_main_t;
 
 extern ixge_main_t ixge_main;
