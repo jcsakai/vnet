@@ -143,12 +143,13 @@ typedef volatile struct {
   u32 extended_control;
   CLIB_PAD_FROM_TO (0x1c, 0x20);
 
-  /* sdp_data [7:0]
+  /* software definable pins.
+     sdp_data [7:0]
      sdp_is_output [15:8]
      sdp_is_native [23:16]
      sdp_function [31:24].
   */
-  u32 software_defineable_pins_control;
+  u32 sdp_control;
   CLIB_PAD_FROM_TO (0x24, 0x28);
 
   /* [0] i2c clock in
@@ -181,25 +182,48 @@ typedef volatile struct {
     CLIB_PAD_FROM_TO (0x80c, 0x810);
     u32 auto_clear_enable;
     CLIB_PAD_FROM_TO (0x814, 0x820);
+
+    /* [11:3] minimum inter-interrupt interval
+         (2e-6 units; 20e-6 units for fast ethernet).
+       [15] low-latency interrupt moderation enable
+       [20:16] low-latency interrupt credit
+       [27:21] interval counter
+       [31] write disable for credit and counter (write only). */
     u32 throttle0[24];
+
     u32 enable_write_1_to_set;
     CLIB_PAD_FROM_TO (0x884, 0x888);
     u32 enable_write_1_to_clear;
     CLIB_PAD_FROM_TO (0x88c, 0x890);
     u32 enable_auto_clear;
     u32 msi_to_eitr_select;
-    u32 gpie_enable;
+    /* [3:0] spd 0-3 interrupt detection enable
+       [4] msi-x enable
+       [5] other clear disable (makes other bits in status not clear on read)
+       etc. */
+    u32 control;
     CLIB_PAD_FROM_TO (0x89c, 0x900);
-    u32 vector_allocation[64];
-    u32 vector_allocation_misc;
+
+    /* Defines interrupt mapping for 128 rx + 128 tx queues.
+       64 x 4 8 bit entries.
+       For register [i]:
+         [5:0] bit in interrupt status for rx queue 2*i + 0
+	 [7] valid bit
+	 [13:8] bit for tx queue 2*i + 0
+	 [15] valid bit
+	 similar for rx 2*i + 1 and tx 2*i + 1. */
+    u32 queue_interrupt_mapping[64];
+
+    /* tcp timer [7:0] and other interrupts [15:8] */
+    u32 misc_interrupt_mapping;
     CLIB_PAD_FROM_TO (0xa04, 0xa90);
 
-    /* 128 queues? 64 queues in [0] and [1]. */
-    u32 queue_status_write_1_to_clear[4];
-    u32 queue_enable_write_1_to_set[4];
-    u32 queue_enable_write_1_to_clear[4];
+    /* 64 interrupts determined by mappings. */
+    u32 status1_write_1_to_clear[4];
+    u32 status1_enable_write_1_to_set[4];
+    u32 status1_enable_write_1_to_clear[4];
     CLIB_PAD_FROM_TO (0xac0, 0xad0);
-    u32 queue_enable_auto_clear[4];
+    u32 status1_enable_auto_clear[4];
     CLIB_PAD_FROM_TO (0xae0, 0x1000);
   } interrupt;
 
@@ -350,7 +374,12 @@ typedef volatile struct {
     u32 auto_negotiation_control;
 
     u32 link_status;
+
+    /* [17:16] pma/pmd for 10g serial
+         0 => kr, 2 => sfi
+       [18] disable dme pages */
     u32 auto_negotiation_control2;
+
     CLIB_PAD_FROM_TO (0x42ac, 0x42b0);
     u32 link_partner_ability[2];
     CLIB_PAD_FROM_TO (0x42b8, 0x42d0);
@@ -707,7 +736,8 @@ typedef volatile struct {
     u32 mirrored_revision_id;
     CLIB_PAD_FROM_TO (0x11068, 0x11070);
     u32 dca_requester_id_information;
-    /* [0] disable
+
+    /* [0] global disable
        [4:1] mode: 0 => legacy, 1 => dca 1.0. */
     u32 dca_control;
     CLIB_PAD_FROM_TO (0x11078, 0x110b0);
