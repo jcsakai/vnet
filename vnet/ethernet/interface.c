@@ -84,10 +84,25 @@ static uword ethernet_set_rewrite (vlib_main_t * vm,
   return n_bytes;
 }
 
+static u8 * format_ethernet_interface (u8 * s, va_list * args)
+{
+  u32 hw_instance = va_arg (*args, u32);
+  ethernet_main_t * em = &ethernet_main;
+  ethernet_interface_t * eif;
+
+  eif = pool_elt_at_index (em->interfaces, hw_instance);
+
+  s = format (s, "Ethernet: address %U",
+	      format_ethernet_address, eif->address);
+
+  return s;
+}
+
 VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
   .name = "Ethernet",
   .format_address = format_ethernet_address,
   .format_header = format_ethernet_header_with_length,
+  .format_device = format_ethernet_interface,
   .link_up_down_function = ethernet_interface_link_up_down,
   .hw_address_len = 6,
   .unformat_hw_address = unformat_ethernet_address,

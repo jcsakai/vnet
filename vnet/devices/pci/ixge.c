@@ -758,6 +758,52 @@ static void ixge_update_counters (ixge_device_t * xd)
     }
 }
 
+#define foreach_ixge_pci_device_id		\
+  _ (82598, 0x10b6)				\
+  _ (82598_bx, 0x1508)				\
+  _ (82598af_dual_port, 0x10c6)			\
+  _ (82598af_single_port, 0x10c7)		\
+  _ (82598at, 0x10c8)				\
+  _ (82598at2, 0x150b)				\
+  _ (82598eb_sfp_lom, 0x10db)			\
+  _ (82598eb_cx4, 0x10dd)			\
+  _ (82598_cx4_dual_port, 0x10ec)		\
+  _ (82598_da_dual_port, 0x10f1)		\
+  _ (82598_sr_dual_port_em, 0x10e1)		\
+  _ (82598eb_xf_lr, 0x10f4)			\
+  _ (82599_kx4, 0x10f7)				\
+  _ (82599_kx4_mezz, 0x1514)			\
+  _ (82599_kr, 0x1517)				\
+  _ (82599_combo_backplane, 0x10f8)		\
+  _ (82599_cx4, 0x10f9)				\
+  _ (82599_sfp, 0x10fb)				\
+  _ (82599_backplane_fcoe, 0x152a)		\
+  _ (82599_sfp_fcoe, 0x1529)			\
+  _ (82599_sfp_em, 0x1507)			\
+  _ (82599_xaui_lom, 0x10fc)			\
+  _ (82599_t3_lom, 0x151c)			\
+  _ (x540t, 0x1528)
+
+static u8 * format_ixge_device_id (u8 * s, va_list * args)
+{
+  u32 device_id = va_arg (*args, u32);
+  char * t = 0;
+  switch (device_id)
+    {
+#define _(f,n) case n: t = #f; break;
+      foreach_ixge_pci_device_id;
+#undef _
+    default:
+      t = 0;
+      break;
+    }
+  if (t == 0)
+    s = format (s, "unknown 0x%x", device_id);
+  else
+    s = format (s, "%s", t);
+  return s;
+}
+
 static u8 * format_ixge_device (u8 * s, va_list * args)
 {
   u32 dev_instance = va_arg (*args, u32);
@@ -768,10 +814,13 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
 
   ixge_update_counters (xd);
 
+  s = format (s, "Intel 10G: %U", format_ixge_device_id, xd->device_id);
+
+  s = format (s, "\n%U", format_white_space, indent + 2);
   if (phy->mdio_address != ~0)
     s = format (s, "PHY address %d, id 0x%x", phy->mdio_address, phy->id);
   else if (xd->sfp_eeprom.id == SFP_ID_sfp)
-    s = format (s, "SFP optics %U", format_sfp_eeprom, &xd->sfp_eeprom);
+    s = format (s, "SFP %U", format_sfp_eeprom, &xd->sfp_eeprom);
   else
     s = format (s, "PHY not found");
 
@@ -790,8 +839,8 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
       {
 	v = xd->counters[i] - xd->counters_last_clear[i];
 	if (v != 0)
-	  s = format (s, "\n%U%-40s%20Ld",
-		      format_white_space, indent,
+	  s = format (s, "\n%U%-40s%16Ld",
+		      format_white_space, indent + 2,
 		      names[i], v);
       }
   }
@@ -976,8 +1025,6 @@ static void ixge_device_init (ixge_main_t * xm)
 	for (i = 0; i < 6; i++)
 	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
 
-	clib_warning ("dev %d eth %U", xd->device_index, format_ethernet_address, addr8);
-
 	error = ethernet_register_interface
 	  (vm,
 	   ixge_device_class.index,
@@ -1137,6 +1184,7 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
 
   vec_add2 (xm->devices, xd, 1);
   xd->pci_device = dev[0];
+  xd->device_id = xd->pci_device.config0.header.device_id;
   xd->regs = r;
   xd->device_index = xd - xm->devices;
   xd->pci_function = dev->bus_address.slot_function & 1;
@@ -1152,32 +1200,6 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
 
   return 0;
 }
-
-#define foreach_ixge_pci_device_id		\
-  _ (82598, 0x10b6)				\
-  _ (82598_bx, 0x1508)				\
-  _ (82598af_dual_port, 0x10c6)			\
-  _ (82598af_single_port, 0x10c7)		\
-  _ (82598at, 0x10c8)				\
-  _ (82598at2, 0x150b)				\
-  _ (82598eb_sfp_lom, 0x10db)			\
-  _ (82598eb_cx4, 0x10dd)			\
-  _ (82598_cx4_dual_port, 0x10ec)		\
-  _ (82598_da_dual_port, 0x10f1)		\
-  _ (82598_sr_dual_port_em, 0x10e1)		\
-  _ (82598eb_xf_lr, 0x10f4)			\
-  _ (82599_kx4, 0x10f7)				\
-  _ (82599_kx4_mezz, 0x1514)			\
-  _ (82599_kr, 0x1517)				\
-  _ (82599_combo_backplane, 0x10f8)		\
-  _ (82599_cx4, 0x10f9)				\
-  _ (82599_sfp, 0x10fb)				\
-  _ (82599_backplane_fcoe, 0x152a)		\
-  _ (82599_sfp_fcoe, 0x1529)			\
-  _ (82599_sfp_em, 0x1507)			\
-  _ (82599_xaui_lom, 0x10fc)			\
-  _ (82599_t3_lom, 0x151c)			\
-  _ (x540t, 0x1528)
 
 static PCI_REGISTER_DEVICE (ixge_pci_device_registration) = {
   .init_function = ixge_pci_init,

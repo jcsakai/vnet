@@ -68,10 +68,12 @@ u8 * format_sfp_eeprom (u8 * s, va_list * args)
     if (sfp_is_comatible (e, i))
       s = format (s, " %U", format_sfp_compatibility, i);
 
-  s = format (s, "\n%Uvendor: %U, part %U, revision %U, serial %U, date code %U",
+  s = format (s, "\n%Uvendor: %U, part %U",
 	      format_white_space, indent,
 	      format_space_terminated, sizeof (e->vendor_name), e->vendor_name,
-	      format_space_terminated, sizeof (e->vendor_part_number), e->vendor_part_number,
+	      format_space_terminated, sizeof (e->vendor_part_number), e->vendor_part_number);
+  s = format (s, "\n%Urevision: %U, serial: %U, date code: %U",
+	      format_white_space, indent,
 	      format_space_terminated, sizeof (e->vendor_revision), e->vendor_revision,
 	      format_space_terminated, sizeof (e->vendor_serial_number), e->vendor_serial_number,
 	      format_space_terminated, sizeof (e->vendor_date_code), e->vendor_date_code);

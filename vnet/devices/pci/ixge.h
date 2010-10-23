@@ -848,6 +848,9 @@ typedef struct {
   /* PCI bus info. */
   pci_device_t pci_device;
 
+  /* From PCI config space header. */
+  u32 device_id;
+
   u16 device_index;
 
   /* 0 or 1. */
