@@ -163,12 +163,65 @@ ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
     }
 
   {
-    u32 v;
+    u32 v, last, i;
 
+  again:
+    xd->regs->xge_mac.auto_negotiation_control2 &= ~(3 << 16);
+    xd->regs->xge_mac.auto_negotiation_control2 |= 2 << 16;
+
+#if 0
+    /* spd 5 => is_10g speed.
+       spd 3 => disable laser.  both outputs. */
+    xd->regs->sdp_control |= (1 << 5) | (1 << 3);
+    vlib_time_wait (&vlib_global_main, 250e-6);
+    xd->regs->sdp_control &= ~(1 << 3);
+    vlib_time_wait (&vlib_global_main, 250e-6);
+#endif
+
+    last = xd->regs->xge_mac.link_status;
     v = xd->regs->xge_mac.auto_negotiation_control;
     v &= ~(7 << 13);
-    v |= 1 << 12;
+    v |= (3 << 13);
+    v |= (1 << 12);
     xd->regs->xge_mac.auto_negotiation_control = v;
+
+    i = 0;
+    while (1)
+      {
+	v = xd->regs->xge_mac.link_status;
+	while (v != last)
+	  {
+	    ELOG_TYPE_DECLARE (e) = {
+	      .function = (char *) __FUNCTION__,
+	      .format = "ixge %d, link 0x%x",
+	      .format_args = "i4i4",
+	    };
+	    struct { u32 instance, link; } * ed;
+	    ed = ELOG_DATA (&vlib_global_main.elog_main, e);
+	    ed->instance = xd->device_index;
+	    ed->link = v;
+	    last = v;
+	  }
+	if (v & (1 << 30))
+	  break;
+	i++;
+	if (i > (1 << 20))
+	  {
+	    ELOG_TYPE_DECLARE (e) = {
+	      .function = (char *) __FUNCTION__,
+	      .format = "ixge %d, reset mac and try again",
+	      .format_args = "i4",
+	    };
+	    struct { u32 instance; } * ed;
+	    ed = ELOG_DATA (&vlib_global_main.elog_main, e);
+	    ed->instance = xd->device_index;
+
+	    xd->regs->control |= 1 << 3;
+	    while (xd->regs->control & (1 << 3))
+	      ;
+	    goto again;
+	  }
+      }
   }
       
 
@@ -974,10 +1027,7 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     if (rt == VLIB_RX)
       xd->regs->rx_enable |= 1;
     else
-      {
-	xd->regs->tx_dcb_control &= ~(1 << 6);
-	xd->regs->tx_dma_control |= (1 << 0);
-      }
+      xd->regs->tx_dma_control |= (1 << 0);
 
     /* Enable this queue and wait for hardware to initialize before adding to tail. */
     dr->control |= 1 << 25;
@@ -1124,10 +1174,14 @@ ixge_process (vlib_main_t * vm,
       vec_foreach (xd, xm->devices)
 	{
 	  uword was_up = vlib_hw_interface_is_link_up (vm, xd->vlib_hw_if_index);
-	  uword is_up = (xd->regs->xge_mac.link_status & (1 << 30)) != 0;
+	  u32 v = xd->regs->xge_mac.link_status;
+	  uword is_up = (v & (1 << 30)) != 0;
 	  if (was_up != is_up)
-	    vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
-					 is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+	    {
+	      clib_warning ("mode %d speed %d", (v >> 26) & 3, (v >> 28) & 3);
+	      vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
+					   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+	    }
 	  ixge_interrupt (xm, xd);
 	}
     }
