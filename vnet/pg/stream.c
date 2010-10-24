@@ -60,8 +60,8 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
   vlib_node_set_state (pg->vlib_main,
 		       pg_input_node.index,
 		       (clib_bitmap_is_zero (pg->enabled_streams)
-			? VLIB_NODE_STATE_POLLING
-			: VLIB_NODE_STATE_DISABLED));
+			? VLIB_NODE_STATE_DISABLED
+			: VLIB_NODE_STATE_POLLING));
 
   s->packet_accumulator = 0;
   s->time_last_generate = 0;
