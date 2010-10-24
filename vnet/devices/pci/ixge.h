@@ -373,6 +373,37 @@ typedef volatile struct {
        etc. */
     u32 auto_negotiation_control;
 
+    /* [0] signal detect 1g/100m
+       [1] fec signal detect
+       [2] 10g serial pcs fec block lock
+       [3] 10g serial high error rate
+       [4] 10g serial pcs block lock
+       [5] kx/kx4/kr autoneg next page received
+       [6] kx/kx4/kr backplane autoneg next page received
+       [7] link status clear to read
+       [11:8] 10g signal detect (4 lanes) (for serial just lane 0)
+       [12] 10g serial signal detect
+       [16:13] 10g parallel lane sync status
+       [17] 10g parallel align status
+       [18] 1g sync status
+       [19] kx/kx4/kr backplane autoneg is idle
+       [20] 1g autoneg enabled
+       [21] 1g pcs enabled for sgmii
+       [22] 10g xgxs enabled
+       [23] 10g serial fec enabled (forward error detection)
+       [24] 10g kr pcs enabled
+       [25] sgmii enabled
+       [27:26] mac link mode
+         0 => 1g
+	 1 => 10g parallel
+	 2 => 10g serial
+	 3 => autoneg
+       [29:28] link speed
+         1 => 100m
+         2 => 1g
+         3 => 10g
+       [30] link is up
+       [31] kx/kx4/kr backplane autoneg completed successfully. */
     u32 link_status;
 
     /* [17:16] pma/pmd for 10g serial
