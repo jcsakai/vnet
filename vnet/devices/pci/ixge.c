@@ -753,7 +753,7 @@ static VLIB_REGISTER_NODE (ixge_rx_node) = {
   .name = "ixge-rx",
 
   /* Will be enabled if/when hardware is detected. */
-  .flags = VLIB_NODE_FLAG_IS_DISABLED,
+  .state = VLIB_NODE_STATE_DISABLED,
 
   .format_trace = 0,		/* fixme */
 
@@ -1213,10 +1213,6 @@ clib_error_t * ixge_init (vlib_main_t * vm)
   xm->tx_descriptor_template_mask.status[0] &=
     ~(IXGE_TX_DESCRIPTOR_STATUS0_IS_END_OF_PACKET);
 
-  error = unix_physmem_init (vm, /* physical_memory_required */ 1);
-  if (error)
-    return error;
-
   error = vlib_call_init_function (vm, pci_bus_init);
 
   return error;
@@ -1232,6 +1228,11 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   void * r;
   ixge_device_t * xd;
   
+  /* Device found: make sure we have dma memory. */
+  error = unix_physmem_init (vm, /* physical_memory_required */ 1);
+  if (error)
+    return error;
+
   error = os_map_pci_resource (dev->os_handle, 0, &r);
   if (error)
     return error;
@@ -1244,7 +1245,7 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   xd->pci_function = dev->bus_address.slot_function & 1;
 
   /* Chip found so enable node. */
-  vlib_node_enable_disable (vm, ixge_rx_node.index, /* enable */ 1);
+  vlib_node_set_state (vm, ixge_rx_node.index, VLIB_NODE_STATE_POLLING);
 
   if (vec_len (xm->devices) == 1)
     {

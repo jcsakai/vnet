@@ -1584,5 +1584,5 @@ VLIB_REGISTER_NODE (pg_input_node) = {
   .format_trace = format_pg_input_trace,
 
   /* Input node will be left disabled until a stream is active. */
-  .flags = VLIB_NODE_FLAG_IS_DISABLED,
+  .state = VLIB_NODE_STATE_DISABLED,
 };
