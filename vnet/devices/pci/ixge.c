@@ -892,9 +892,10 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
       {
 	v = xd->counters[i] - xd->counters_last_clear[i];
 	if (v != 0)
-	  s = format (s, "\n%U%-40s%16Ld",
+	  s = format (s, "\n%U%-40U%16Ld",
 		      format_white_space, indent + 2,
-		      names[i], v);
+		      format_c_identifier, names[i],
+		      v);
       }
   }
 
