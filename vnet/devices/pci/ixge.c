@@ -944,6 +944,18 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
 
   s = format (s, "Intel 10G: %U", format_ixge_device_id, xd->device_id);
 
+  {
+    pcie_config_regs_t * r = pci_config_find_capability (&xd->pci_device.config0, PCI_CAP_ID_PCIE);
+
+    s = format (s, "\n%U", format_white_space, indent + 2);
+    if (r)
+      s = format (s, "PCIE %.1fGb/s width x%d",
+		  (2.5 * (r->link_status & 0xf)),
+		  (r->link_status >> 4) & 0x3f);
+    else
+      s = format (s, "PCIE unknown speed and width");
+  }
+
   s = format (s, "\n%U", format_white_space, indent + 2);
   if (phy->mdio_address != ~0)
     s = format (s, "PHY address %d, id 0x%x", phy->mdio_address, phy->id);
@@ -1170,6 +1182,9 @@ static void ixge_device_init (ixge_main_t * xm)
       /* RX queue gets mapped to interrupt bit 0.
 	 We don't use TX interrupts. */
       r->interrupt.queue_mapping[0] = ((1 << 7) | 0) << 0;
+
+      /* Enable frames up to size in mac frame size register. */
+      r->xge_mac.control |= 1 << 2;
 
       if (0)
 	/* sets mac loopback */
