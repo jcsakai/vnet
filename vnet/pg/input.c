@@ -25,6 +25,7 @@
 
 #include <vlib/vlib.h>
 #include <vnet/pg/pg.h>
+#include <vnet/vnet/buffer.h>
 
 static int
 validate_buffer_data2 (vlib_buffer_t * b, pg_stream_t * s,
@@ -1144,6 +1145,9 @@ init_buffers_inline (vlib_main_t * vm,
       b0->sw_if_index[VLIB_TX] =
 	b1->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
+      ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
+      ASSERT (b1->flags & VNET_BUFFER_LOCALLY_GENERATED);
+
       if (set_data)
 	{
 	  memcpy (b0->data, data, n_data);
@@ -1169,6 +1173,8 @@ init_buffers_inline (vlib_main_t * vm,
 
       b0->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
       b0->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
+
+      ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
 
       if (set_data)
 	memcpy (b0->data, data, n_data);
@@ -1207,10 +1213,13 @@ pg_stream_fill_helper (pg_main_t * pg,
 {
   vlib_main_t * vm = pg->vlib_main;
   vlib_buffer_free_list_t * f;
+  uword is_start_of_packet = bi == s->buffer_indices;
 
   f = vlib_buffer_get_free_list (vm, bi->free_list_index);
   f->buffer_init_function = pg_buffer_init;
   f->buffer_init_function_opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
+  if (is_start_of_packet)
+    f->buffer_init_template.flags |= VNET_BUFFER_LOCALLY_GENERATED;
 
   if (! vlib_buffer_alloc_from_free_list (vm,
 					  buffers,
@@ -1231,7 +1240,7 @@ pg_stream_fill_helper (pg_main_t * pg,
   if (next_buffers)
     pg_set_next_buffer_pointers (pg, s, buffers, next_buffers, n_alloc);
 
-  if (bi == s->buffer_indices)
+  if (is_start_of_packet)
     {
       pg_generate_set_lengths (pg, s, buffers, n_alloc);
       if (vec_len (s->buffer_indices) > 1)

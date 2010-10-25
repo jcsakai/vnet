@@ -236,7 +236,6 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
 	  icmp46_header_t * icmp0, * icmp1;
-	  ip_buffer_opaque_t * i0, * i1;
 	  u32 bi0, src0, dst0;
 	  u32 bi1, src1, dst1;
 	  ip_csum_t sum0, sum1;
@@ -253,13 +252,11 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  p1 = vlib_get_buffer (vm, bi1);
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
-	  i0 = vlib_get_buffer_opaque (p0);
-	  i1 = vlib_get_buffer_opaque (p1);
 	  icmp0 = ip4_next_header (ip0);
 	  icmp1 = ip4_next_header (ip1);
 
-	  i0->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
-	  i1->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
+	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
+	  p1->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 
 	  icmp0->type = ICMP4_echo_reply;
 	  icmp1->type = ICMP4_echo_reply;
@@ -307,7 +304,6 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
 	  icmp46_header_t * icmp0;
-	  ip_buffer_opaque_t * i0;
 	  u32 bi0, src0, dst0;
 	  ip_csum_t sum0;
       
@@ -320,10 +316,9 @@ ip4_icmp_echo_request (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, bi0);
 	  ip0 = vlib_buffer_get_current (p0);
-	  i0 = vlib_get_buffer_opaque (p0);
 	  icmp0 = ip4_next_header (ip0);
 
-	  i0->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
+	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 
 	  icmp0->type = ICMP4_echo_reply;
 	  src0 = ip0->src_address.data_u32;

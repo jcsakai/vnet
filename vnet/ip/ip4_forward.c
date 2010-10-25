@@ -1355,6 +1355,12 @@ ip4_lookup_init (vlib_main_t * vm)
   ip_lookup_init (&im->lookup_main, /* is_ip6 */ 0);
 
   {
+    pg_node_t * pn;
+    pn = pg_get_node (ip4_lookup_node.index);
+    pn->unformat_edit = unformat_pg_ip4_header;
+  }
+
+  {
     ethernet_and_arp_header_t h;
 
     memset (&h, 0, sizeof (h));
@@ -2193,8 +2199,8 @@ ip4_rewrite (vlib_main_t * vm,
 	     Works either endian, so no need for byte swap. */
 	  {
 	    i32 ttl0 = ip0->ttl, ttl1 = ip1->ttl;
-	    u8 decrement0 = (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
-	    u8 decrement1 = (i1->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
+	    u8 decrement0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
+	    u8 decrement1 = (p1->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
 
 	    /* Input node should have reject packets with ttl 0. */
 	    ASSERT (ip0->ttl > 0);
@@ -2298,7 +2304,7 @@ ip4_rewrite (vlib_main_t * vm,
 	  /* Decrement TTL & update checksum. */
 	  {
 	    i32 ttl0 = ip0->ttl;
-	    u8 decrement0 = (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
+	    u8 decrement0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
 
 	    checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
 

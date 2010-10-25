@@ -2162,8 +2162,8 @@ ip6_rewrite (vlib_main_t * vm,
 	    ASSERT (ip0->hop_limit > 0);
 	    ASSERT (ip1->hop_limit > 0);
 
-	    hop_limit0 -= (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
-	    hop_limit1 -= (i1->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
+	    hop_limit0 -= (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
+	    hop_limit1 -= (p1->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
 
 	    ip0->hop_limit = hop_limit0;
 	    ip1->hop_limit = hop_limit1;
@@ -2245,7 +2245,7 @@ ip6_rewrite (vlib_main_t * vm,
 
 	    ASSERT (ip0->hop_limit > 0);
 
-	    hop_limit0 -= (i0->flags & IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED) ? 0 : 1;
+	    hop_limit0 -= (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
 
 	    ip0->hop_limit = hop_limit0;
 
@@ -2337,6 +2337,12 @@ ip6_lookup_init (vlib_main_t * vm)
   find_fib_by_table_index_or_id (im, /* table id */ 0, IP6_ROUTE_FLAG_TABLE_ID);
 
   ip_lookup_init (&im->lookup_main, /* is_ip6 */ 1);
+
+  {
+    pg_node_t * pn;
+    pn = pg_get_node (ip6_lookup_node.index);
+    pn->unformat_edit = unformat_pg_ip6_header;
+  }
 
   {
     icmp6_neighbor_solicitation_for_ethernet_t p;

@@ -242,7 +242,6 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0, * p1;
 	  ip6_header_t * ip0, * ip1;
-	  ip_buffer_opaque_t * i0, * i1;
 	  icmp46_header_t * icmp0, * icmp1;
 	  ip6_address_t tmp0, tmp1;
 	  ip_csum_t sum0, sum1;
@@ -260,8 +259,6 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  p1 = vlib_get_buffer (vm, bi1);
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
-	  i0 = vlib_get_buffer_opaque (p0);
-	  i1 = vlib_get_buffer_opaque (p1);
 	  icmp0 = ip6_next_header (ip0);
 	  icmp1 = ip6_next_header (ip1);
 
@@ -295,15 +292,14 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  ip0->hop_limit = im->host_config.ttl;
 	  ip1->hop_limit = im->host_config.ttl;
 
-	  i0->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
-	  i1->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
+	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
+	  p1->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 	}
   
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
 	  ip6_header_t * ip0;
-	  ip_buffer_opaque_t * i0;
 	  icmp46_header_t * icmp0;
 	  u32 bi0;
 	  ip6_address_t tmp0;
@@ -318,7 +314,6 @@ ip6_icmp_echo_request (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, bi0);
 	  ip0 = vlib_buffer_get_current (p0);
-	  i0 = vlib_get_buffer_opaque (p0);
 	  icmp0 = ip6_next_header (ip0);
 
 	  /* Check icmp type to echo reply and update icmp checksum. */
@@ -335,7 +330,7 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  ip0->dst_address = tmp0;
 
 	  ip0->hop_limit = im->host_config.ttl;
-	  i0->flags |= IP_BUFFER_OPAQUE_FLAG_LOCALLY_GENERATED;
+	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 	}
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);
