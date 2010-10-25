@@ -169,23 +169,24 @@ ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
     xd->regs->xge_mac.auto_negotiation_control2 &= ~(3 << 16);
     xd->regs->xge_mac.auto_negotiation_control2 |= 2 << 16;
 
-#if 0
-    /* spd 5 => is_10g speed.
-       spd 3 => disable laser.  both outputs. */
-    xd->regs->sdp_control |= (1 << 5) | (1 << 3);
-    vlib_time_wait (&vlib_global_main, 250e-6);
-    xd->regs->sdp_control &= ~(1 << 3);
-    vlib_time_wait (&vlib_global_main, 250e-6);
-#endif
-
-    last = xd->regs->xge_mac.link_status;
     v = xd->regs->xge_mac.auto_negotiation_control;
+    v &= ~(3 << 7);
+    v |= (1 << 7);
     v &= ~(7 << 13);
     v |= (3 << 13);
     v |= (1 << 12);
     xd->regs->xge_mac.auto_negotiation_control = v;
 
+    /* spd 5 => is_10g speed.
+       spd 3 => disable laser.  both outputs. */
+    /* Configure pins 3 & 5 as output. */
+    v = ((1 << 3) | (1 << 5)) << 8;
+    /* Select 10g and enable laser. */
+    v |= ((1 << 5) | (0 << 3));
+    xd->regs->sdp_control = v;
+
     i = 0;
+    last = 0;
     while (1)
       {
 	v = xd->regs->xge_mac.link_status;
@@ -223,7 +224,6 @@ ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
 	  }
       }
   }
-      
 
   return /* no error */ 0;
 }
@@ -521,23 +521,24 @@ typedef struct {
   u32 n_descriptors_done_total;
 
   u32 n_descriptors_done_this_call;
-} ixge_rx_queue_no_wrap_state_t;
+} ixge_rx_state_t;
 
 static uword
 ixge_rx_queue_no_wrap (ixge_main_t * xm,
 		       ixge_device_t * xd,
 		       ixge_dma_queue_t * dq,
-		       ixge_rx_queue_no_wrap_state_t * s,
+		       ixge_rx_state_t * rx_state,
 		       u32 start_descriptor_index,
 		       u32 n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
+  vlib_node_runtime_t * node = rx_state->node;
   ixge_descriptor_t * d;
   u32 n_descriptors_left = n_descriptors;
   u32 * to_rx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
   u32 * to_add;
-  u32 bi_sop = s->saved_start_of_packet_buffer_index;
-  u32 is_sop = s->is_start_of_packet;
+  u32 bi_sop = rx_state->saved_start_of_packet_buffer_index;
+  u32 is_sop = rx_state->is_start_of_packet;
   u32 next_index, n_left_to_next, * to_next;
   vlib_buffer_t * b_sop;
   u32 n_packets = 0;
@@ -546,7 +547,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
   d = &dq->descriptors[start_descriptor_index];
 
   b_sop = 0;
-  next_index = s->next_index;
+  next_index = rx_state->next_index;
 
   {
     uword l = vec_len (xm->rx_buffers_to_add);
@@ -572,7 +573,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 
   while (n_descriptors_left > 0)
     {
-      vlib_get_next_frame (vm, s->node, next_index,
+      vlib_get_next_frame (vm, node, next_index,
 			   to_next, n_left_to_next);
 
       while (n_descriptors_left > 0 && n_left_to_next > 0)
@@ -612,7 +613,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 
 	  next0 = error0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : next0;
 
-	  b0->error = s->node->errors[error0];
+	  b0->error = node->errors[error0];
 
 	  bi_sop = is_sop ? bi0 : bi_sop;
 	  to_next[0] = bi_sop;
@@ -626,32 +627,32 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 
 	  if (PREDICT_FALSE (next0 != next_index))
 	    {
-	      vlib_put_next_frame (vm, s->node, next_index, n_left_to_next + 1);
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
 	      next_index = next0;
-	      vlib_get_next_frame (vm, s->node, next_index, to_next, n_left_to_next);
+	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 	      to_next[0] = bi_sop;
 	      to_next += is_eop0;
 	      n_left_to_next -= is_eop0;
 	    }
 	}
 
-      vlib_put_next_frame (vm, s->node, next_index, n_left_to_next);
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
  found_hw_owned_descriptor:
   if (n_descriptors_left > 0)
-    vlib_put_next_frame (vm, s->node, next_index, n_left_to_next);
+    vlib_put_next_frame (vm, node, next_index, n_left_to_next);
 
   _vec_len (xm->rx_buffers_to_add) = (to_add + 1) - xm->rx_buffers_to_add;
 
   {
     u32 n_done = n_descriptors - n_descriptors_left;
 
-    s->n_descriptors_done_this_call = n_done;
-    s->n_descriptors_done_total += n_done;
-    s->is_start_of_packet = is_sop;
-    s->saved_start_of_packet_buffer_index = bi_sop;
-    s->next_index = next_index;
+    rx_state->n_descriptors_done_this_call = n_done;
+    rx_state->n_descriptors_done_total += n_done;
+    rx_state->is_start_of_packet = is_sop;
+    rx_state->saved_start_of_packet_buffer_index = bi_sop;
+    rx_state->next_index = next_index;
 
     return n_packets;
   }
@@ -660,82 +661,156 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 static uword
 ixge_rx_queue (ixge_main_t * xm,
 	       ixge_device_t * xd,
-	       ixge_dma_queue_t * dq,
-	       ixge_rx_queue_no_wrap_state_t * s,
-	       u32 sw_head_index,
-	       u32 hw_head_index)
+	       ixge_rx_state_t * rx_state,
+	       u32 queue_index)
 {
+  ixge_dma_queue_t * dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], queue_index);
+  ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
   uword n_packets = 0;
+  u32 hw_head_index, sw_head_index;
 
+  rx_state->is_start_of_packet = 1;
+  rx_state->saved_start_of_packet_buffer_index = ~0;
+  rx_state->n_descriptors_done_total = 0;
+
+  /* Fetch head from hardware and compare to where we think we are. */
+  hw_head_index = dr->head_index;
+  sw_head_index = dq->head_index;
   if (hw_head_index == sw_head_index)
     goto done;
 
   if (hw_head_index < sw_head_index)
     {
       u32 n_tried = dq->n_descriptors - sw_head_index;
-      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, s, sw_head_index, n_tried);
-      sw_head_index = ixge_ring_add (dq, sw_head_index, s->n_descriptors_done_this_call);
-      if (s->n_descriptors_done_this_call != n_tried)
+      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
+      sw_head_index = ixge_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
+      if (rx_state->n_descriptors_done_this_call != n_tried)
 	goto done;
     }
   if (hw_head_index >= sw_head_index)
     {
       u32 n_tried = hw_head_index - sw_head_index;
-      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, s, sw_head_index, n_tried);
-      sw_head_index = ixge_ring_add (dq, sw_head_index, s->n_descriptors_done_this_call);
+      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
+      sw_head_index = ixge_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
     }
 
  done:
   dq->head_index = sw_head_index;
-  dq->tail_index = ixge_ring_add (dq, dq->tail_index, s->n_descriptors_done_total);
+  dq->tail_index = ixge_ring_add (dq, dq->tail_index, rx_state->n_descriptors_done_total);
 
   /* Give head/tail back to hardware. */
-  {
-    ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
+  CLIB_MEMORY_BARRIER ();
 
-    CLIB_MEMORY_BARRIER ();
-    dr->head_index = dq->head_index;
-    dr->tail_index = dq->tail_index;
-  }
+  dr->head_index = dq->head_index;
+  dr->tail_index = dq->tail_index;
 
   return n_packets;
 }
 
+static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
+{
+  vlib_main_t * vm = xm->vlib_main;
+  ixge_regs_t * r = xd->regs;
+
+  {
+    ELOG_TYPE_DECLARE (e) = {
+      .function = (char *) __FUNCTION__,
+      .format = "ixge %d, %s",
+      .format_args = "i1t1",
+      .n_enum_strings = 16,
+      .enum_strings = {
+	"flow director",
+	"rx miss",
+	"pci exception",
+	"mailbox",
+	"link status change",
+	"linksec key exchange",
+	"manageability event",
+	"reserved23",
+	"sdp0",
+	"sdp1",
+	"sdp2",
+	"sdp3",
+	"ecc",
+	"reserved29",
+	"tcp timer",
+	"reserved31",
+      },
+    };
+    struct { u8 instance; u8 index; } * ed;
+    ed = ELOG_DATA (&vm->elog_main, e);
+    ed->instance = xd->device_index;
+    ed->index = i - 16;
+  }
+
+  if (i == 20)
+    {
+      uword was_up = vlib_hw_interface_is_link_up (vm, xd->vlib_hw_if_index);
+      u32 v = r->xge_mac.link_status;
+      uword is_up = (v & (1 << 30)) != 0;
+      if (was_up != is_up)
+	{
+	  clib_warning ("mode %d speed %d", (v >> 26) & 3, (v >> 28) & 3);
+	  vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
+				       is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+	}
+    }
+
+  {
+    u32 s = r->pcie.pcie_interrupt_status;
+    r->pcie.pcie_interrupt_status = s;
+    if (s != 0)
+      clib_warning ("0x%x", s);
+  }
+}
+
 static uword
-ixge_rx (vlib_main_t * vm,
-	 vlib_node_runtime_t * node,
-	 vlib_frame_t * f)
+ixge_device_input (ixge_main_t * xm,
+		   ixge_device_t * xd,
+		   ixge_rx_state_t * rx_state)
+{
+  ixge_regs_t * r = xd->regs;
+  u32 i, s;
+  uword n_rx_packets = 0;
+
+  s = r->interrupt.status_write_1_to_clear;
+  r->interrupt.status_write_1_to_clear = s;
+  foreach_set_bit (i, s, ({
+    if (i < 16)
+      n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
+    else
+      ixge_interrupt (xm, xd, i);
+  }));
+
+  return n_rx_packets;
+}
+
+static uword
+ixge_input (vlib_main_t * vm,
+	    vlib_node_runtime_t * node,
+	    vlib_frame_t * f)
 {
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd;
-  ixge_dma_queue_t * dq;
-  static ixge_rx_queue_no_wrap_state_t state;
-  ixge_rx_queue_no_wrap_state_t * s = &state;
+  ixge_rx_state_t _rx_state, * rx_state = &_rx_state;
   uword n_rx_packets = 0;
 
-  if (! s->node)
-    {
-      s->node = node;
-      s->next_index = node->cached_next_index;
+  rx_state->node = node;
+  rx_state->next_index = node->cached_next_index;
+
+  /* Fetch interrupting device. */
+  if (node->state == VLIB_NODE_STATE_INTERRUPT)
+    {    
+      uword i;
+      foreach_set_bit (i, node->runtime_data[0], ({
+	xd = vec_elt_at_index (xm->devices, i);
+	n_rx_packets += ixge_device_input (xm, xd, rx_state);
+      }));
     }
-
-  vec_foreach (xd, xm->devices)
+  else
     {
-      vec_foreach (dq, xd->dma_queues[VLIB_RX])
-	{
-	  ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
-	  u32 hw_head_index = dr->head_index;
-	  u32 sw_head_index = dq->head_index;
-	  if (hw_head_index == sw_head_index)
-	    continue;
-	  
-	  s->is_start_of_packet = 1;
-	  s->saved_start_of_packet_buffer_index = ~0;
-	  s->n_descriptors_done_total = 0;
-
-	  n_rx_packets += ixge_rx_queue (xm, xd, dq, s,
-					 sw_head_index, hw_head_index);
-	}
+      vec_foreach (xd, xm->devices)
+	n_rx_packets += ixge_device_input (xm, xd, rx_state);
     }
 
   return n_rx_packets;
@@ -747,10 +822,10 @@ static char * ixge_rx_error_strings[] = {
 #undef _
 };
 
-static VLIB_REGISTER_NODE (ixge_rx_node) = {
-  .function = ixge_rx,
+static VLIB_REGISTER_NODE (ixge_input_node) = {
+  .function = ixge_input,
   .type = VLIB_NODE_TYPE_INPUT,
-  .name = "ixge-rx",
+  .name = "ixge-input",
 
   /* Will be enabled if/when hardware is detected. */
   .state = VLIB_NODE_STATE_DISABLED,
@@ -1090,6 +1165,12 @@ static void ixge_device_init (ixge_main_t * xm)
       ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
+      if (0) r->interrupt.misc_mapping = ((1 << 7) | 0) << 8;
+
+      /* RX queue gets mapped to interrupt bit 0.
+	 We don't use TX interrupts. */
+      r->interrupt.queue_mapping[0] = ((1 << 7) | 0) << 0;
+
       if (0)
 	/* sets mac loopback */
 	xd->regs->xge_mac.control |= 1<< 15;
@@ -1107,56 +1188,10 @@ static void ixge_device_init (ixge_main_t * xm)
 	  e = os_write_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
 	  if (e) clib_error_report (e);
 	}
+
+      /* Enable all interrupts. */
+      if (0) r->interrupt.enable_write_1_to_set = ~0;
     }
-}
-
-static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd)
-{
-  vlib_main_t * vm = xm->vlib_main;
-  ixge_regs_t * r = xd->regs;
-  u32 i, s;
-  s = r->interrupt.status_write_1_to_clear;
-  r->interrupt.status_write_1_to_clear = s;
-  foreach_set_bit (i, s, ({
-    if (i >= 0 && i < 16)
-      ASSERT (0);
-    else
-      {
-	ELOG_TYPE_DECLARE (e) = {
-	    .function = (char *) __FUNCTION__,
-	    .format = "ixge %d, %s",
-	    .format_args = "i1t1",
-	    .n_enum_strings = 16,
-	    .enum_strings = {
-		"flow director",
-		"rx miss",
-		"pci exception",
-		"mailbox",
-		"link status change",
-		"linksec key exchange",
-		"manageability event",
-		"reserved23",
-		"sdp0",
-		"sdp1",
-		"sdp2",
-		"sdp3",
-		"ecc",
-		"reserved29",
-		"tcp timer",
-		"reserved31",
-	    },
-	};
-	struct { u8 instance; u8 index; } * ed;
-	ed = ELOG_DATA (&vm->elog_main, e);
-	ed->instance = xd->device_index;
-	ed->index = i - 16;
-      }
-  }));
-
-  s = r->pcie.pcie_interrupt_status;
-  r->pcie.pcie_interrupt_status = s;
-  if (s != 0)
-    clib_warning ("0x%x", s);
 }
 
 static uword
@@ -1165,25 +1200,40 @@ ixge_process (vlib_main_t * vm,
 	      vlib_frame_t * f)
 {
   ixge_main_t * xm = &ixge_main;
+  uword event_type, * event_data = 0;
     
   ixge_device_init (xm);
 
   while (1)
     {
-      ixge_device_t * xd;
-      vlib_process_suspend (vm, 250e-3);
-      vec_foreach (xd, xm->devices)
+      /* 36 bit stat counters could overflow in ~50 secs.
+	 We poll every 30 secs to be conservative. */
+	vlib_process_wait_for_event_or_clock (vm, 30. /* seconds */);
+
+	event_type = vlib_process_get_events (vm, &event_data);
+
+	switch (event_type) {
+	case ~0:
+	    /* No events found: timer expired. */
+	    break;
+
+	default:
+	    ASSERT (0);
+	}
+
+	if (event_data)
+	    _vec_len (event_data) = 0;
+
+	/* Query stats every 30 secs. */
 	{
-	  uword was_up = vlib_hw_interface_is_link_up (vm, xd->vlib_hw_if_index);
-	  u32 v = xd->regs->xge_mac.link_status;
-	  uword is_up = (v & (1 << 30)) != 0;
-	  if (was_up != is_up)
+	  f64 now = vlib_time_now (vm);
+	  if (now - xm->time_last_stats_update > 30)
 	    {
-	      clib_warning ("mode %d speed %d", (v >> 26) & 3, (v >> 28) & 3);
-	      vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
-					   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+	      ixge_device_t * xd;
+	      xm->time_last_stats_update = now;
+	      vec_foreach (xd, xm->devices)
+		ixge_update_counters (xd);
 	    }
-	  ixge_interrupt (xm, xd);
 	}
     }
 	    
@@ -1246,7 +1296,13 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   xd->pci_function = dev->bus_address.slot_function & 1;
 
   /* Chip found so enable node. */
-  vlib_node_set_state (vm, ixge_rx_node.index, VLIB_NODE_STATE_POLLING);
+  {
+    linux_pci_device_t * lp = pci_dev_for_linux (dev);
+
+    vlib_node_set_state (vm, ixge_input_node.index, VLIB_NODE_STATE_POLLING);
+    lp->device_input_node_index = ixge_input_node.index;
+    lp->device_opaque = xd->device_index;
+  }
 
   if (vec_len (xm->devices) == 1)
     {

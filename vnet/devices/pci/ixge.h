@@ -212,10 +212,10 @@ typedef volatile struct {
 	 [13:8] bit for tx queue 2*i + 0
 	 [15] valid bit
 	 similar for rx 2*i + 1 and tx 2*i + 1. */
-    u32 queue_interrupt_mapping[64];
+    u32 queue_mapping[64];
 
     /* tcp timer [7:0] and other interrupts [15:8] */
-    u32 misc_interrupt_mapping;
+    u32 misc_mapping;
     CLIB_PAD_FROM_TO (0xa04, 0xa90);
 
     /* 64 interrupts determined by mappings. */
@@ -959,6 +959,8 @@ typedef struct {
   u32 * tx_buffers_pending_free;
 
   u32 * rx_buffers_to_add;
+
+  f64 time_last_stats_update;
 } ixge_main_t;
 
 extern ixge_main_t ixge_main;
