@@ -1301,7 +1301,7 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
 
     vlib_node_set_state (vm, ixge_input_node.index, VLIB_NODE_STATE_POLLING);
     lp->device_input_node_index = ixge_input_node.index;
-    lp->device_opaque = xd->device_index;
+    lp->device_index = xd->device_index;
   }
 
   if (vec_len (xm->devices) == 1)
