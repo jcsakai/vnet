@@ -51,9 +51,10 @@ tcp_pg_edit_function (pg_main_t * pg,
       n_packets -= 1;
       packets += 1;
 
+      ASSERT (p0->current_data == 0);
       ip0 = (void *) (p0->data + ip_offset);
       tcp0 = (void *) (p0->data + tcp_offset);
-      tcp_len0 = p0->current_length - tcp_offset;
+      tcp_len0 = clib_net_to_host_u16 (ip0->length) - sizeof (ip0[0]);
 
       /* Initialize checksum with header. */
       sum0 = clib_mem_unaligned (&ip0->src_address, u64);
@@ -64,7 +65,7 @@ tcp_pg_edit_function (pg_main_t * pg,
       /* Invalidate possibly old checksum. */
       tcp0->checksum = 0;
 
-      sum0 = ip_incremental_checksum (sum0, tcp0, tcp_len0);
+      sum0 = ip_incremental_checksum_buffer (vm, p0, tcp_offset, tcp_len0, sum0);
 
       tcp0->checksum = ~ ip_csum_fold (sum0);
     }

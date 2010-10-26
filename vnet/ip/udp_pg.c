@@ -56,10 +56,10 @@ udp_pg_edit_function_inline (pg_main_t * pg,
 
       ip0 = (void *) (p0->data + ip_offset);
       udp0 = (void *) (p0->data + udp_offset);
-      udp_len0 = p0->current_length - udp_offset;
+      udp_len0 = clib_net_to_host_u16 (ip0->length) - sizeof (ip0[0]);
 
       if (flags & UDP_PG_EDIT_LENGTH)
-	udp0->length = clib_host_to_net_u16 (udp_len0);
+	udp0->length = vlib_buffer_length_in_chain (vm, p0) - ip_offset;
 
       /* Initialize checksum with header. */
       if (flags & UDP_PG_EDIT_CHECKSUM)
@@ -74,7 +74,7 @@ udp_pg_edit_function_inline (pg_main_t * pg,
 	  /* Invalidate possibly old checksum. */
 	  udp0->checksum = 0;
 
-	  sum0 = ip_incremental_checksum (sum0, udp0, udp_len0);
+	  sum0 = ip_incremental_checksum_buffer (vm, p0, udp_offset, udp_len0, sum0);
 
 	  sum0 = ~ ip_csum_fold (sum0);
 
