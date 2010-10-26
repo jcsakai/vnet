@@ -379,12 +379,6 @@ static u8 * format_ixge_rx_from_hw_descriptor (u8 * s, va_list * va)
   return s;
 }
 
-static u8 * format_ixge_tx_dma_descriptor (u8 * s, va_list * va)
-{
-  ASSERT (0);
-  return s;
-}
-
 static u8 * format_ixge_dma_trace (u8 * s, va_list * va)
 {
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
@@ -437,14 +431,6 @@ static u8 * format_ixge_dma_rx_trace (u8 * s, va_list * va)
   vlib_node_t * node = va_arg (*va, vlib_node_t *);
   ixge_dma_trace_t * t = va_arg (*va, ixge_dma_trace_t *);
   return format (s, "%U", format_ixge_dma_trace, vm, node, t, VLIB_RX);
-}
-
-static u8 * format_ixge_dma_tx_trace (u8 * s, va_list * va)
-{
-  vlib_main_t * vm = va_arg (*va, vlib_main_t *);
-  vlib_node_t * node = va_arg (*va, vlib_node_t *);
-  ixge_dma_trace_t * t = va_arg (*va, ixge_dma_trace_t *);
-  return format (s, "%U", format_ixge_dma_trace, vm, node, t, VLIB_TX);
 }
 
 typedef struct {
@@ -749,6 +735,14 @@ ixge_tx_descriptor_matches_template (ixge_main_t * xm, ixge_tx_descriptor_t * d)
   return 1;
 }
 
+typedef struct {
+  u32 is_start_of_packet;
+
+  u32 n_bytes_in_packet;
+
+  ixge_tx_descriptor_t * start_of_packet_descriptor;
+} ixge_tx_state_t;
+
 static uword
 ixge_tx_no_wrap (ixge_main_t * xm,
 		 ixge_device_t * xd,
@@ -756,53 +750,126 @@ ixge_tx_no_wrap (ixge_main_t * xm,
 		 u32 * buffers,
 		 u32 start_descriptor_index,
 		 u32 n_descriptors,
-		 u32 * last_is_sop)
+		 ixge_tx_state_t * tx_state)
 {
   vlib_main_t * vm = xm->vlib_main;
-  ixge_tx_descriptor_t * d;
+  ixge_tx_descriptor_t * d, * d_sop;
   u32 n_left = n_descriptors;
   u32 * to_free = vec_end (xm->tx_buffers_pending_free);
   u32 * to_tx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
-  u32 is_sop = *last_is_sop;
+  u32 is_sop = tx_state->is_start_of_packet;
+  u32 len_sop = tx_state->n_bytes_in_packet;
 
   ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
   d = &dq->descriptors[start_descriptor_index].tx;
+  d_sop = tx_state->start_of_packet_descriptor;
+
+  while (n_left >= 4)
+    {
+      vlib_buffer_t * b0, * b1;
+      u32 bi0, fi0, len0;
+      u32 bi1, fi1, len1;
+      u8 is_eop0, is_eop1;
+
+      /* Prefetch next iteration. */
+      vlib_prefetch_buffer_with_index (vm, buffers[2], LOAD);
+      vlib_prefetch_buffer_with_index (vm, buffers[3], LOAD);
+      CLIB_PREFETCH (d + 2, 32, STORE);
+
+      bi0 = buffers[0];
+      bi1 = buffers[1];
+
+      to_free[0] = fi0 = to_tx[0];
+      to_tx[0] = bi0;
+      to_free += fi0 != 0;
+
+      to_free[0] = fi1 = to_tx[1];
+      to_tx[1] = bi1;
+      to_free += fi1 != 0;
+
+      buffers += 2;
+      n_left -= 2;
+      to_tx += 2;
+
+      b0 = vlib_get_buffer (vm, bi0);
+      b1 = vlib_get_buffer (vm, bi1);
+
+      is_eop0 = (b0->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
+      is_eop1 = (b1->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
+
+      len0 = b0->current_length;
+      len1 = b0->current_length;
+
+      ASSERT (ixge_tx_descriptor_matches_template (xm, d + 0));
+      ASSERT (ixge_tx_descriptor_matches_template (xm, d + 1));
+
+      d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, bi0) + b0->current_data;
+      d[1].buffer_address = vlib_get_buffer_data_physical_address (vm, bi1) + b1->current_data;
+
+      d[0].status[0] |=
+	((is_eop0 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
+	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (len0));
+      d[1].status[0] |=
+	((is_eop1 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
+	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (len1));
+      d += 2;
+
+      len_sop = (is_sop ? 0 : len_sop) + len0;
+      d_sop = is_sop ? d : d_sop;
+      d_sop[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
+
+      is_sop = is_eop0;
+
+      len_sop = (is_sop ? 0 : len_sop) + len1;
+      d_sop = is_sop ? d : d_sop;
+      d_sop[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
+
+      is_sop = is_eop1;
+    }
 
   while (n_left > 0)
     {
-      u32 bi0, fi0, len0;
       vlib_buffer_t * b0;
+      u32 bi0, fi0, len0;
       u8 is_eop0;
 
       bi0 = buffers[0];
 
       to_free[0] = fi0 = to_tx[0];
       to_tx[0] = bi0;
+      to_free += fi0 != 0;
 
       buffers += 1;
       n_left -= 1;
       to_tx += 1;
-      to_free += fi0 != 0;
 
       b0 = vlib_get_buffer (vm, bi0);
 
       is_eop0 = (b0->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
-      len0 = vlib_buffer_length_in_chain (vm, b0);
-      len0 = is_sop ? len0 : 0;
 
-      ASSERT (ixge_tx_descriptor_matches_template (xm, d));
+      len0 = b0->current_length;
+
+      ASSERT (ixge_tx_descriptor_matches_template (xm, d + 0));
+
       d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, bi0) + b0->current_data;
+
       d[0].status[0] |=
 	((is_eop0 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
-	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (b0->current_length));
-      d[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len0);
+	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (len0));
+      d += 1;
+
+      len_sop = (is_sop ? 0 : len_sop) + len0;
+      d_sop = is_sop ? d : d_sop;
+      d_sop[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
 
       is_sop = is_eop0;
-      d += 1;
     }
 
   _vec_len (xm->tx_buffers_pending_free) = to_free - xm->tx_buffers_pending_free;
-  *last_is_sop = is_sop;
+
+  tx_state->is_start_of_packet = is_sop;
+  tx_state->start_of_packet_descriptor = d_sop;
+  tx_state->n_bytes_in_packet = len_sop;
 
   return n_descriptors;
 }
@@ -818,7 +885,11 @@ ixge_interface_tx (vlib_main_t * vm,
   ixge_dma_queue_t * dq;
   u32 * from, n_left_from, n_left_tx, n_descriptors_to_tx;
   u32 queue_index = 0;		/* fixme parameter */
-  u32 is_sop = 1;
+  ixge_tx_state_t tx_state;
+
+  tx_state.is_start_of_packet = 1;
+  tx_state.start_of_packet_descriptor = 0;
+  tx_state.n_bytes_in_packet = 0;
   
   from = vlib_frame_vector_args (f);
   n_left_from = f->n_vectors;
@@ -842,7 +913,7 @@ ixge_interface_tx (vlib_main_t * vm,
   if (n_descriptors_to_tx > 0 && dq->tail_index < dq->n_descriptors)
     {
       u32 n = clib_min (dq->n_descriptors - dq->tail_index, n_descriptors_to_tx);
-      n = ixge_tx_no_wrap (xm, xd, dq, from, dq->tail_index, n, &is_sop);
+      n = ixge_tx_no_wrap (xm, xd, dq, from, dq->tail_index, n, &tx_state);
       from += n;
       n_left_from -= n;
       n_descriptors_to_tx -= n;
@@ -854,7 +925,7 @@ ixge_interface_tx (vlib_main_t * vm,
 
   if (n_descriptors_to_tx > 0)
     {
-      u32 n = ixge_tx_no_wrap (xm, xd, dq, from, 0, n_descriptors_to_tx, &is_sop);
+      u32 n = ixge_tx_no_wrap (xm, xd, dq, from, 0, n_descriptors_to_tx, &tx_state);
       from += n;
       n_left_from -= n;
       ASSERT (n == n_descriptors_to_tx);
@@ -863,6 +934,9 @@ ixge_interface_tx (vlib_main_t * vm,
       if (dq->tail_index == dq->n_descriptors)
 	dq->tail_index = 0;
     }
+
+  /* We should only get full packets. */
+  ASSERT (tx_state.is_start_of_packet);
 
   /* Give new descriptors to hardware. */
   {
