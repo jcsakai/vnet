@@ -1610,6 +1610,9 @@ u32 ip4_tcp_udp_checksum (vlib_buffer_t * p0)
 
   ip0 = vlib_buffer_get_current (p0);
 
+  /* Broken for multi buffer packets. */
+  ASSERT (! (p0->flags & VLIB_BUFFER_NEXT_PRESENT));
+
   ASSERT (ip0->protocol == IP_PROTOCOL_TCP
 	  || ip0->protocol == IP_PROTOCOL_UDP);
 

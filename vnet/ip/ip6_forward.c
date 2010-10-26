@@ -1613,6 +1613,8 @@ static u32 ip6_tcp_udp_icmp_validate_checksum (vlib_buffer_t * p0)
       return p0->flags;
     }
 
+  /* Broken for multi buffer packets. */
+  ASSERT (! (p0->flags & VLIB_BUFFER_NEXT_PRESENT));
   sum16 = ip6_tcp_udp_icmp_compute_checksum (ip0);
 
   p0->flags |= (IP_BUFFER_L4_CHECKSUM_COMPUTED
