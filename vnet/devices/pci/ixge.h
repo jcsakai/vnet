@@ -90,7 +90,7 @@ typedef struct {
 #define IXGE_RX_DESCRIPTOR_STATUS2_IS_L4_CHECKSUMMED (1 << (0 + 5))
 #define IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED (1 << (0 + 6))
 #define IXGE_RX_DESCRIPTOR_STATUS2_IS_DOUBLE_VLAN (1 << (0 + 9))
-#define IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_COMPUTED (1 << (0 + 10))
+#define IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_ERROR (1 << (0 + 10))
 #define IXGE_RX_DESCRIPTOR_STATUS2_ETHERNET_ERROR (1 << (20 + 9))
 #define IXGE_RX_DESCRIPTOR_STATUS2_L4_CHECKSUM_ERROR (1 << (20 + 10))
 #define IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR (1 << (20 + 11))
@@ -220,8 +220,8 @@ typedef volatile struct {
 
     /* 64 interrupts determined by mappings. */
     u32 status1_write_1_to_clear[4];
-    u32 status1_enable_write_1_to_set[4];
-    u32 status1_enable_write_1_to_clear[4];
+    u32 enable1_write_1_to_set[4];
+    u32 enable1_write_1_to_clear[4];
     CLIB_PAD_FROM_TO (0xac0, 0xad0);
     u32 status1_enable_auto_clear[4];
     CLIB_PAD_FROM_TO (0xae0, 0x1000);
@@ -795,6 +795,29 @@ typedef volatile struct {
   u32 link_sec_software_firmware_interface;
 } ixge_regs_t;
 
+always_inline void
+ixge_throttle_queue_interrupt (ixge_regs_t * r,
+			       u32 queue_interrupt_index,
+			       f64 inter_interrupt_interval_in_secs)
+{
+  volatile u32 * tr =
+    (queue_interrupt_index < ARRAY_LEN (r->interrupt.throttle0)
+     ? &r->interrupt.throttle0[queue_interrupt_index]
+     : &r->interrupt_throttle1[queue_interrupt_index]);
+  ASSERT (queue_interrupt_index < 128);
+  u32 v;
+  i32 i, mask = (1 << 9) - 1;
+
+  i = flt_round_nearest (inter_interrupt_interval_in_secs / 2e-6);
+  i = i < 1 ? 1 : i;
+  i = i >= mask ? mask : i;
+
+  v = tr[0];
+  v &= ~(mask << 3);
+  v |= i << 3;
+  tr[0] = v;
+}
+
 #define foreach_ixge_counter				\
   _ (0x40d0, rx_total_packets)				\
   _64 (0x40c0, rx_total_bytes)				\
@@ -918,7 +941,7 @@ typedef struct {
   u16 pci_function;
 
   /* VLIB interface for this instance. */
-  u32 vlib_hw_if_index;
+  u32 vlib_hw_if_index, vlib_sw_if_index;
 
   ixge_dma_queue_t * dma_queues[VLIB_N_RX_TX];
 
