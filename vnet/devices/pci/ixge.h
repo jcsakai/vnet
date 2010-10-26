@@ -5,6 +5,8 @@
 #include <vlib/pci/pci.h>
 #include <vnet/devices/i2c/i2c.h>
 #include <vnet/devices/optics/sfp.h>
+#include <vnet/ip/ip4_packet.h>
+#include <vnet/ip/ip6_packet.h>
 
 typedef volatile struct {
   /* [31:7] 128 byte aligned. */
@@ -82,6 +84,7 @@ typedef struct {
 #define IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6_EXT (1 << (4 + 3))
 #define IXGE_RX_DESCRIPTOR_STATUS0_IS_TCP (1 << (4 + 4))
 #define IXGE_RX_DESCRIPTOR_STATUS0_IS_UDP (1 << (4 + 5))
+#define IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET(s) (((s) >> 21) & 0x3ff)
 
 #define IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE (1 << (0 + 0))
 #define IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET (1 << (0 + 1))
@@ -461,10 +464,20 @@ typedef volatile struct {
   /* little endian. */
   u32 extended_vlan_ether_type;
   CLIB_PAD_FROM_TO (0x507c, 0x5080);
+  /* [1] store/dma bad packets
+     [8] accept all multicast
+     [9] accept all unicast
+     [10] accept all broadcast. */
   u32 filter_control;
   CLIB_PAD_FROM_TO (0x5084, 0x5088);
+  /* [15:0] vlan ethernet type (0x8100) little endian
+     [28] cfi bit expected
+     [29] drop packets with unexpected cfi bit 
+     [30] vlan filter enable. */
   u32 vlan_control;
   CLIB_PAD_FROM_TO (0x508c, 0x5090);
+  /* [1:0] hi bit of ethernet address for 12 bit index into multicast table
+       0 => 47, 1 => 46, 2 => 45, 3 => 43. */
   u32 multicast_control;
   CLIB_PAD_FROM_TO (0x5094, 0x5100);
   u32 fcoe_rx_control;
@@ -475,8 +488,19 @@ typedef volatile struct {
   CLIB_PAD_FROM_TO (0x5114, 0x5120);
   u32 rx_message_type_lo;
   CLIB_PAD_FROM_TO (0x5124, 0x5128);
+  /* [15:0] ethernet type (little endian)
+     [18:16] matche pri in vlan tag
+     [19] priority match enable
+     [25:20] virtualization pool
+     [26] pool enable
+     [27] is fcoe
+     [30] ieee 1588 timestamp enable
+     [31] filter enable.
+     (See ethernet_type_queue_select.) */
   u32 ethernet_type_queue_filter[8];
   CLIB_PAD_FROM_TO (0x5148, 0x5160);
+  /* [7:0] l2 ethernet type and
+     [15:8] l2 ethernet type or */
   u32 management_decision_filters1[8];
   u32 vf_vm_tx_switch_loopback_enable[2];
   u32 rx_time_sync_control;
@@ -493,11 +517,13 @@ typedef volatile struct {
   u32 vf_rx_enable[2];
   u32 rx_timestamp_lo;
   CLIB_PAD_FROM_TO (0x51ec, 0x5200);
-  u32 multicast_filter[128];
+  /* 12 bits determined by multicast_control
+     lookup bits in this vector. */
+  u32 multicast_enable[128];
 
   /* [0] ethernet address [31:0]
      [1] [15:0] ethernet address [47:32]
-     [31] valid bit.
+         [31] valid bit.
      Index 0 is read from eeprom after reset. */
   u32 rx_ethernet_address0[16][2];
 
@@ -517,7 +543,11 @@ typedef volatile struct {
   u32 management_control_to_host;
   CLIB_PAD_FROM_TO (0x5854, 0x5880);
   u32 wake_up_ip6_address_table[4];
+  
+  /* unicast_and broadcast_and vlan_and ip_address_and
+     etc. */
   u32 management_decision_filters[8];
+
   u32 management_ip4_or_ip6_address_filters[4][4];
   CLIB_PAD_FROM_TO (0x58f0, 0x5900);
   u32 wake_up_packet_length;
@@ -622,9 +652,8 @@ typedef volatile struct {
     CLIB_PAD_FROM_TO (0x8f84, 0x9000);
   } rx_link_security;
 
-  u32 wake_up_flexible_host_filter_table0[4][16][4];
-  u32 tco_flexible_filter_table[2][16][4];
-  u32 wake_up_flexible_host_filter_table1[2][16][4];
+  /* 4 wake up, 2 management, 2 wake up. */
+  u32 flexible_filters[8][16][4];
   CLIB_PAD_FROM_TO (0x9800, 0xa000);
 
   /* 4096 bits. */
@@ -657,16 +686,44 @@ typedef volatile struct {
 
   ixge_dma_regs_t rx_dma1[64];
 
-  u32 src_address_queue_filter[128];
-  u32 dst_address_queue_filter[128];
-  u32 src_dst_port_queue_filter[128];
-  u32 five_tuple_queue_filter[128];
+  struct {
+    /* Bigendian ip4 src/dst address. */
+    u32 src_address[128];
+    u32 dst_address[128];
 
-  u32 l3_l4_tuple_immediate_rx_interrupt[128];
+    /* TCP/UDP ports [15:0] src [31:16] dst; bigendian. */
+    u32 tcp_udp_port[128];
+
+    /* [1:0] protocol tcp, udp, sctp, other
+       [4:2] match priority (highest wins)
+       [13:8] pool
+       [25] src address match disable
+       [26] dst address match disable
+       [27] src port match disable
+       [28] dst port match disable
+       [29] protocol match disable
+       [30] pool match disable
+       [31] enable. */
+    u32 control[128];
+
+    /* [12] size bypass
+       [19:13] must be 0x80
+       [20] low-latency interrupt
+       [27:21] rx queue. */
+    u32 interrupt[128];
+  } ip4_filters;
+
   CLIB_PAD_FROM_TO (0xea00, 0xeb00);
+  /* 4 bit rss output index indexed by 7 bit hash.
+     128 8 bit fields = 32 registers. */
   u32 redirection_table_82599[32];
+
   u32 rss_random_key_82599[10];
   CLIB_PAD_FROM_TO (0xeba8, 0xec00);
+  /* [15:0] reserved
+     [22:16] rx queue index
+     [29] low-latency interrupt on match
+     [31] enable */
   u32 ethernet_type_queue_select[8];
   CLIB_PAD_FROM_TO (0xec20, 0xec30);
   u32 syn_packet_queue_filter;
@@ -686,22 +743,58 @@ typedef volatile struct {
   } fcoe_redirection;
 
   struct {
+    /* [1:0] packet buffer allocation 0 => disabled, else 64k*2^(f-1)
+       [3] packet buffer initialization done
+       [4] perfetch match mode
+       [5] report status in rss field of rx descriptors
+       [7] report status always
+       [14:8] drop queue
+       [20:16] flex 2 byte packet offset (units of 2 bytes)
+       [27:24] max linked list length
+       [31:28] full threshold. */
     u32 control;
     CLIB_PAD_FROM_TO (0xee04, 0xee0c);
-    u32 src_ipv6[7];
-    u32 hash_signature;
+
+    u32 data[8];
+
+    /* [1:0] 0 => no action, 1 => add, 2 => remove, 3 => query.
+       [2] valid filter found by query command
+       [3] filter update override
+       [4] ip6 adress table
+       [6:5] l4 protocol reserved, udp, tcp, sctp
+       [7] is ip6
+       [8] clear head/tail
+       [9] packet drop action
+       [10] matched packet generates low-latency interrupt
+       [11] last in linked list
+       [12] collision
+       [15] rx queue enable
+       [22:16] rx queue
+       [29:24] pool. */
     u32 command;
+
     CLIB_PAD_FROM_TO (0xee30, 0xee3c);
-    /* dst ip4 src ip4 tcp udp */
-    u32 masks0[4];
+    /* ip4 dst/src address, tcp ports, udp ports.
+       set bits mean bit is ignored. */
+    u32 ip4_masks[4];
     u32 filter_length;
     u32 usage_stats;
     u32 failed_usage_stats;
     u32 filters_match_stats;
     u32 filters_miss_stats;
-    CLIB_PAD_FROM_TO (0xee60, 0xee70);
-    /* other ip6 */
-    u32 masks1[2];
+    CLIB_PAD_FROM_TO (0xee60, 0xee68);
+    /* Lookup, signature. */
+    u32 hash_keys[2];
+    /* [15:0] ip6 src address 1 bit per byte
+       [31:16] ip6 dst address. */
+    u32 ip6_mask;
+    /* [0] vlan id
+       [1] vlan priority
+       [2] pool
+       [3] ip protocol
+       [4] flex
+       [5] dst ip6. */
+    u32 other_mask;
     CLIB_PAD_FROM_TO (0xee78, 0xf000);
   } flow_director;
 
@@ -709,7 +802,7 @@ typedef volatile struct {
     u32 l2_control[64];
     u32 vlan_pool_filter[64];
     u32 vlan_pool_filter_bitmap[128];
-    u32 unicast_table[128];
+    u32 dst_ethernet_address[128];
     u32 mirror_rule[4];
     u32 mirror_rule_vlan[8];
     u32 mirror_rule_pool[8];
@@ -795,6 +888,37 @@ typedef volatile struct {
   u32 link_sec_software_firmware_interface;
 } ixge_regs_t;
 
+typedef union {
+  struct {
+    /* Addresses bigendian. */
+    union {
+      struct {
+	ip6_address_t src_address;
+	u32 unused[1];
+      } ip6;
+      struct {
+	u32 unused[3];
+	ip4_address_t src_address, dst_address;
+      } ip4;
+    };
+
+    /* [15:0] src port (little endian).
+       [31:16] dst port. */
+    u32 tcp_udp_ports;
+
+    /* [15:0] vlan (cfi bit set to 0).
+       [31:16] flex bytes.  bigendian. */
+    u32 vlan_and_flex_word;
+
+    /* [14:0] hash
+       [15] bucket valid
+       [31:16] signature (signature filers)/sw-index (perfect match). */
+    u32 hash;
+  };
+
+  u32 as_u32[8];
+} ixge_flow_director_key_t;
+
 always_inline void
 ixge_throttle_queue_interrupt (ixge_regs_t * r,
 			       u32 queue_interrupt_index,
@@ -821,12 +945,8 @@ ixge_throttle_queue_interrupt (ixge_regs_t * r,
 #define foreach_ixge_counter				\
   _ (0x40d0, rx_total_packets)				\
   _64 (0x40c0, rx_total_bytes)				\
-  _ (0x4074, rx_good_packets)				\
-  _64 (0x4088, rx_good_bytes)				\
-  _ (0x407c, rx_multicast_packets)			\
-  _ (0x4078, rx_broadcast_packets)			\
-  _ (0x41b0, rx_good_non_filtered_packets)		\
-  _64 (0x41b4, rx_good_non_filtered_bytes)		\
+  _ (0x41b0, rx_good_packets_before_filtering)		\
+  _64 (0x41b4, rx_good_bytes_before_filtering)		\
   _ (0x2f50, rx_dma_good_packets)			\
   _64 (0x2f54, rx_dma_good_bytes)			\
   _ (0x2f5c, rx_dma_duplicated_good_packets)		\
@@ -835,6 +955,10 @@ ixge_throttle_queue_interrupt (ixge_regs_t * r,
   _64 (0x2f6c, rx_dma_good_loopback_bytes)		\
   _ (0x2f74, rx_dma_good_duplicated_loopback_packets)	\
   _64 (0x2f78, rx_dma_good_duplicated_loopback_bytes)	\
+  _ (0x4074, rx_good_packets)				\
+  _64 (0x4088, rx_good_bytes)				\
+  _ (0x407c, rx_multicast_packets)			\
+  _ (0x4078, rx_broadcast_packets)			\
   _ (0x405c, rx_64_byte_packets)			\
   _ (0x4060, rx_65_127_byte_packets)			\
   _ (0x4064, rx_128_255_byte_packets)			\

@@ -322,33 +322,41 @@ static u8 * format_ixge_rx_from_hw_descriptor (u8 * s, va_list * va)
   ixge_rx_from_hw_descriptor_t * d = va_arg (*va, ixge_rx_from_hw_descriptor_t *);
   u32 s0 = d->status[0], s2 = d->status[2];
   u32 is_ip4, is_ip6, is_ip, is_tcp, is_udp;
+  uword indent = format_get_indent (s);
 
   s = format (s, "%s-owned",
 	      (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE) ? "sw" : "hw");
+  s = format (s, ", length this descriptor %d, l3 offset %d",
+	      d->n_packet_bytes_this_descriptor,
+	      IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s0));
   if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET)
     s = format (s, ", end-of-packet");
 
+  s = format (s, "\n%U", format_white_space, indent);
+
   if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_ETHERNET_ERROR)
-    s = format (s, ", layer2 error");
+    s = format (s, "layer2 error");
+
   if (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_LAYER2)
     {
-      s = format (s, ", layer 2 type %d", (s0 & 0x1f));
+      s = format (s, "layer 2 type %d", (s0 & 0x1f));
       return s;
     }
 
   if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_VLAN)
-    s = format (s, ", vlan header 0x%x", d->vlan_tag);
+    s = format (s, "vlan header 0x%x\n%U", d->vlan_tag,
+		format_white_space, indent);
 
   if ((is_ip4 = (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP4)))
     {
-      s = format (s, ", ip4%s",
+      s = format (s, "ip4%s",
 		  (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP4_EXT) ? " options" : "");
       if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED)
 	s = format (s, " checksum %s",
 		    (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR) ? "bad" : "ok");
     }
   if ((is_ip6 = (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6)))
-    s = format (s, ", ip6%s",
+    s = format (s, "ip6%s",
 		(s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6_EXT) ? " extended" : "");
   is_tcp = is_udp = 0;
   if ((is_ip = (is_ip4 | is_ip6)))
@@ -1605,6 +1613,9 @@ static void ixge_device_init (ixge_main_t * xm)
 	f64 line_rate_max_pps = 10e9 / (8 * (64 + /* interframe padding */ 20));
 	ixge_throttle_queue_interrupt (r, 0, .75 * xm->n_descriptors[VLIB_RX] / line_rate_max_pps);
       }
+
+      /* Accept all broadcast packets.  Multicasts must be explicitly added to dst_ethernet_address*/
+      r->filter_control |= (1 << 10);
 
       /* Enable frames up to size in mac frame size register. */
       r->xge_mac.control |= 1 << 2;
