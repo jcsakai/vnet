@@ -762,7 +762,7 @@ ixge_tx_no_wrap (ixge_main_t * xm,
 
   ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
   d = &dq->descriptors[start_descriptor_index].tx;
-  d_sop = tx_state->start_of_packet_descriptor;
+  d_sop = is_sop ? d : tx_state->start_of_packet_descriptor;
 
   while (n_left >= 4)
     {
@@ -798,7 +798,7 @@ ixge_tx_no_wrap (ixge_main_t * xm,
       is_eop1 = (b1->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
 
       len0 = b0->current_length;
-      len1 = b0->current_length;
+      len1 = b1->current_length;
 
       ASSERT (ixge_tx_descriptor_matches_template (xm, d + 0));
       ASSERT (ixge_tx_descriptor_matches_template (xm, d + 1));
@@ -812,17 +812,18 @@ ixge_tx_no_wrap (ixge_main_t * xm,
       d[1].status[0] |=
 	((is_eop1 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
 	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (len1));
-      d += 2;
 
       len_sop = (is_sop ? 0 : len_sop) + len0;
-      d_sop = is_sop ? d : d_sop;
       d_sop[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
+      d += 1;
+      d_sop = is_sop ? d : d_sop;
 
       is_sop = is_eop0;
 
       len_sop = (is_sop ? 0 : len_sop) + len1;
-      d_sop = is_sop ? d : d_sop;
       d_sop[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
+      d += 1;
+      d_sop = is_sop ? d : d_sop;
 
       is_sop = is_eop1;
     }
@@ -856,11 +857,11 @@ ixge_tx_no_wrap (ixge_main_t * xm,
       d[0].status[0] |=
 	((is_eop0 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
 	 | IXGE_TX_DESCRIPTOR_STATUS0_N_BYTES_THIS_BUFFER (len0));
-      d += 1;
 
       len_sop = (is_sop ? 0 : len_sop) + len0;
-      d_sop = is_sop ? d : d_sop;
       d_sop[0].status[1] = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
+      d += 1;
+      d_sop = is_sop ? d : d_sop;
 
       is_sop = is_eop0;
     }
