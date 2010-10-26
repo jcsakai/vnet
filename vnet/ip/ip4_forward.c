@@ -1277,7 +1277,7 @@ ip4_sw_interface_add_del (vlib_main_t * vm,
 
   if (! rx_cm->node_index_by_feature_index)
     {
-      char * start_nodes[] = { "ip4-input", "ip4-input-no-csum", };
+      char * start_nodes[] = { "ip4-input", "ip4-input-no-checksum", };
       char * feature_nodes[] = {
 	[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_RX] = "ip4-source-check-via-rx",
 	[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_ANY] = "ip4-source-check-via-any",

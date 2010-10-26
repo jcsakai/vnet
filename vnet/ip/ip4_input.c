@@ -326,7 +326,7 @@ VLIB_REGISTER_NODE (ip4_input_node) = {
 
 static VLIB_REGISTER_NODE (ip4_input_no_checksum_node) = {
   .function = ip4_input_no_checksum,
-  .name = "ip4-input-no-csum",
+  .name = "ip4-input-no-checksum",
   .vector_size = sizeof (u32),
 
   .n_next_nodes = IP4_INPUT_N_NEXT,
