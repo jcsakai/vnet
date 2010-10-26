@@ -19,9 +19,11 @@ vnet_main_init (vlib_main_t * vm)
   if ((error = vlib_call_init_function (vm, ethernet_arp_init)))
     return error;
 
-  /* FIXME */
   if ((error = vlib_call_init_function (vm, ixge_init)))
-    return error;
+    {
+      clib_error_report (error);
+      error = unix_physmem_init (vm, /* physical_memory_required */ 0);
+    }
 
   vlib_unix_cli_set_prompt ("VNET: ");
 
