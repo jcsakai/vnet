@@ -1235,10 +1235,14 @@ ixge_input (vlib_main_t * vm,
       foreach_set_bit (i, node->runtime_data[0], ({
 	xd = vec_elt_at_index (xm->devices, i);
 	n_rx_packets += ixge_device_input (xm, xd, rx_state);
+
+	/* Re-enable interrupts since we're in interrupt mode. */
+	xd->regs->interrupt.enable_write_1_to_set = ~0;
       }));
     }
   else
     {
+      /* Poll all devices for input/interrupts. */
       vec_foreach (xd, xm->devices)
 	n_rx_packets += ixge_device_input (xm, xd, rx_state);
     }
@@ -1652,7 +1656,9 @@ static void ixge_device_init (ixge_main_t * xm)
 	}
 
       /* Enable all interrupts. */
-      r->interrupt.enable_write_1_to_set = ~0;
+#define IXGE_INTERRUPT_DISABLE 1
+      if (! IXGE_INTERRUPT_DISABLE)
+	r->interrupt.enable_write_1_to_set = ~0;
     }
 }
 
@@ -1761,7 +1767,10 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   {
     linux_pci_device_t * lp = pci_dev_for_linux (dev);
 
-    vlib_node_set_state (vm, ixge_input_node.index, VLIB_NODE_STATE_INTERRUPT);
+    vlib_node_set_state (vm, ixge_input_node.index,
+			 (IXGE_INTERRUPT_DISABLE
+			  ? VLIB_NODE_STATE_POLLING
+			  : VLIB_NODE_STATE_INTERRUPT));
     lp->device_input_node_index = ixge_input_node.index;
     lp->device_index = xd->device_index;
   }
@@ -1771,6 +1780,12 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
       vlib_register_node (vm, &ixge_process_node);
       xm->process_node_index = ixge_process_node.index;
     }
+
+  os_add_pci_disable_interrupts_reg
+    (dev->os_handle,
+     /* resource */ 0,
+     STRUCT_OFFSET_OF (ixge_regs_t, interrupt.enable_write_1_to_clear),
+     /* value to write */ ~0);
 
   return 0;
 }

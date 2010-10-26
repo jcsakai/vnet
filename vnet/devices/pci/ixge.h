@@ -969,8 +969,8 @@ ixge_throttle_queue_interrupt (ixge_regs_t * r,
   _ (0x4120, rx_ip_checksum_errors)			\
   _ (0x4004, rx_illegal_symbol_errors)			\
   _ (0x4008, rx_error_symbol_errors)			\
-  _ (0x4034, xge_mac_local_faults)			\
-  _ (0x4038, xge_mac_remote_faults)			\
+  _ (0x4034, rx_mac_local_faults)			\
+  _ (0x4038, rx_mac_remote_faults)			\
   _ (0x4040, rx_length_errors)				\
   _ (0x41a4, rx_xons)					\
   _ (0x41a8, rx_xoffs)					\
