@@ -1042,82 +1042,216 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
       vlib_get_next_frame (vm, node, next_index,
 			   to_next, n_left_to_next);
 
+      while (n_descriptors_left >= 4 && n_left_to_next >= 2)
+	{
+	  vlib_buffer_t * b0, * b1;
+	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
+	  u32 bi1, fi1, len1, l3_offset1, s21, s01;
+	  u8 is_eop0, error0, next0;
+	  u8 is_eop1, error1, next1;
+
+	  vlib_prefetch_buffer_with_index (vm, to_rx[2], STORE);
+	  vlib_prefetch_buffer_with_index (vm, to_rx[3], STORE);
+	  CLIB_PREFETCH (d + 2, 32, LOAD);
+
+	  s00 = d[0].rx_from_hw.status[0];
+	  s01 = d[1].rx_from_hw.status[0];
+
+	  s20 = d[0].rx_from_hw.status[2];
+	  s21 = d[1].rx_from_hw.status[2];
+
+	  if (! ((s20 | s21) & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+	    goto found_hw_owned_descriptor_x2;
+
+	  bi0 = to_rx[0];
+	  bi1 = to_rx[1];
+
+	  ASSERT (to_add - 1 >= xm->rx_buffers_to_add);
+	  fi0 = to_add[0];
+	  fi1 = to_add[-1];
+
+	  to_rx[0] = fi0;
+	  to_rx[1] = fi1;
+	  to_rx += 2;
+	  to_add -= 2;
+
+	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, bi0));
+	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, bi1));
+	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, fi0));
+	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, fi1));
+
+	  b0 = vlib_get_buffer (vm, bi0);
+	  b1 = vlib_get_buffer (vm, bi1);
+
+	  is_eop0 = (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+	  is_eop1 = (s21 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+
+	  ixge_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
+						 &next0, &error0,
+						 &next1, &error1);
+
+	  next0 = is_sop ? next0 : next_index_sop;
+	  next1 = is_eop0 ? next1 : next0;
+	  next_index_sop = next1;
+
+	  b0->flags |= (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b1->flags |= (!is_eop1 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+
+	  b0->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
+	  b1->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
+
+	  b0->error = node->errors[error0];
+	  b1->error = node->errors[error1];
+
+	  len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
+	  len1 = d[1].rx_from_hw.n_packet_bytes_this_descriptor;
+	  n_bytes += len0 + len1;
+	  n_packets += is_eop0 + is_eop1;
+
+	  /* Give new buffers to hardware. */
+	  d[0].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi0);
+	  d[1].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi1);
+	  d[0].rx_to_hw.head_address = 0; /* must set low bit to zero */
+	  d[1].rx_to_hw.head_address = 0; /* must set low bit to zero */
+	  d += 2;
+	  n_descriptors_left -= 2;
+
+	  /* Point to either l2 or l3 header depending on next. */
+	  l3_offset0 = (is_sop && next0 != IXGE_RX_NEXT_ETHERNET_INPUT
+			? IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s00)
+			: 0);
+	  l3_offset1 = (is_eop0 && next1 != IXGE_RX_NEXT_ETHERNET_INPUT
+			? IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s01)
+			: 0);
+
+	  b0->current_length = len0 + l3_offset0;
+	  b1->current_length = len1 + l3_offset1;
+	  b0->current_data = l3_offset0;
+	  b1->current_data = l3_offset1;
+
+	  b_last->next_buffer = is_sop ? 0 : bi0;
+	  b0->next_buffer = is_eop0 ? 0 : bi1;
+	  b_last = b1;
+
+	  if (PREDICT_TRUE (next0 == next_index && next1 == next_index))
+	    {
+	      bi_sop = is_sop ? bi0 : bi_sop;
+	      to_next[0] = bi_sop;
+	      to_next += is_eop0;
+	      n_left_to_next -= is_eop0;
+
+	      bi_sop = is_eop0 ? bi1 : bi_sop;
+	      to_next[0] = bi_sop;
+	      to_next += is_eop1;
+	      n_left_to_next -= is_eop1;
+
+	      is_sop = is_eop1;
+	    }
+	  else
+	    {
+	      bi_sop = is_sop ? bi0 : bi_sop;
+	      if (next0 != next_index && is_eop0)
+		vlib_set_next_frame_buffer (vm, node, next0, bi_sop);
+	      bi_sop = is_eop0 ? bi1 : bi_sop;
+	      if (next1 != next_index && is_eop1)
+		vlib_set_next_frame_buffer (vm, node, next1, bi_sop);
+	      is_sop = is_eop1;
+
+	      if (next0 == next1)
+		{
+		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+		  next_index = next0;
+		  vlib_get_next_frame (vm, node, next_index,
+				       to_next, n_left_to_next);
+		}
+	    }
+	}
+
+      /* Bail out of dual loop and proceed with single loop. */
+    found_hw_owned_descriptor_x2:
+
       while (n_descriptors_left > 0 && n_left_to_next > 0)
 	{
-	  u32 bi0, fi0, len0, l3_offset0;
 	  vlib_buffer_t * b0;
-	  u32 s20, s00;
+	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
 	  u8 is_eop0, error0, next0;
+
+	  s00 = d[0].rx_from_hw.status[0];
+	  s20 = d[0].rx_from_hw.status[2];
+	  if (! (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+	    goto found_hw_owned_descriptor_x1;
 
 	  bi0 = to_rx[0];
 	  ASSERT (to_add >= xm->rx_buffers_to_add);
 	  fi0 = to_add[0];
+
+	  to_rx[0] = fi0;
+	  to_rx += 1;
+	  to_add -= 1;
 
 	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, bi0));
 	  ASSERT (VLIB_BUFFER_KNOWN_ALLOCATED == vlib_buffer_is_known (vm, fi0));
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
-	  s00 = d[0].rx_from_hw.status[0];
-	  s20 = d[0].rx_from_hw.status[2];
-	  if (! (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
-	    goto found_hw_owned_descriptor;
 	  is_eop0 = (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
 	  ixge_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0);
-	  next_index_sop = is_sop ? next0 : next_index_sop;
+
+	  next0 = is_sop ? next0 : next_index_sop;
+	  next_index_sop = next0;
 
 	  b0->flags |= (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
-	  len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
-
-	  l3_offset0 = (is_sop && next0 != IXGE_RX_NEXT_ETHERNET_INPUT
-			? IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s00)
-			: 0);
-
-	  /* Point to either l2 or l3 header depending on next. */
-	  b0->current_length = len0 + l3_offset0;
-	  b0->current_data = l3_offset0;
-
-	  n_bytes += len0;
 
 	  b0->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
+
+	  b0->error = node->errors[error0];
+
+	  len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
+	  n_bytes += len0;
+	  n_packets += is_eop0;
 
 	  /* Give new buffer to hardware. */
 	  d[0].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi0);
 	  d[0].rx_to_hw.head_address = 0; /* must set low bit to zero */
-	  to_rx[0] = fi0;
-	  to_rx += 1;
-	  to_add -= 1;
+	  d += 1;
+	  n_descriptors_left -= 1;
 
-	  b0->error = node->errors[error0];
+	  /* Point to either l2 or l3 header depending on next. */
+	  l3_offset0 = (is_sop && next0 != IXGE_RX_NEXT_ETHERNET_INPUT
+			? IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s00)
+			: 0);
+	  b0->current_length = len0 + l3_offset0;
+	  b0->current_data = l3_offset0;
 
 	  b_last->next_buffer = is_sop ? 0 : bi0;
 	  b_last = b0;
 
-	  bi_sop = is_sop ? bi0 : bi_sop;
-	  to_next[0] = bi_sop;
-	  to_next += is_eop0;
-	  n_left_to_next -= is_eop0;
-	  n_packets += is_eop0;
-	  d += 1;
-	  n_descriptors_left -= 1;
-
-	  is_sop = is_eop0;
-
-	  if (PREDICT_FALSE (next_index_sop != next_index))
+	  if (PREDICT_TRUE (next0 == next_index))
 	    {
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
-	      next_index = next_index_sop;
-	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+	      bi_sop = is_sop ? bi0 : bi_sop;
 	      to_next[0] = bi_sop;
 	      to_next += is_eop0;
 	      n_left_to_next -= is_eop0;
+	      is_sop = is_eop0;
+	    }
+	  else
+	    {
+	      bi_sop = is_sop ? bi0 : bi_sop;
+	      if (next0 != next_index && is_eop0)
+		vlib_set_next_frame_buffer (vm, node, next0, bi_sop);
+	      is_sop = is_eop0;
+
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+	      next_index = next0;
+	      vlib_get_next_frame (vm, node, next_index,
+				   to_next, n_left_to_next);
 	    }
 	}
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
- found_hw_owned_descriptor:
+ found_hw_owned_descriptor_x1:
   if (n_descriptors_left > 0)
     vlib_put_next_frame (vm, node, next_index, n_left_to_next);
 
