@@ -309,7 +309,9 @@ typedef struct {
 
   u16 device_index;
 
-  u16 queue_index;
+  u8 queue_index;
+
+  u8 is_start_of_packet;
 
   /* Copy of VLIB buffer; packet data stored in pre_data. */
   vlib_buffer_t buffer;
@@ -414,7 +416,7 @@ static u8 * format_ixge_dma_trace (u8 * s, va_list * va)
 	      format_white_space, indent);
 
   f = node->format_buffer;
-  if (! f)
+  if (! f || ! t->is_start_of_packet)
     f = format_hex_bytes;
   s = format (s, "%U", f, t->buffer.pre_data, sizeof (t->buffer.pre_data));
 
@@ -445,6 +447,7 @@ typedef struct {
   u32 saved_start_of_packet_buffer_index;
 
   u32 saved_start_of_packet_next_index;
+  u32 saved_last_buffer_index;
 
   u32 is_start_of_packet;
 
@@ -533,16 +536,19 @@ ixge_rx_trace (ixge_main_t * xm,
 					   bd[1].status[0], bd[1].status[2],
 					   &next0, &error0,
 					   &next1, &error1);
+
     next_index_sop = is_sop ? next0 : next_index_sop;
-    is_sop = (b0->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
     vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
+    t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
+    t0->is_start_of_packet = is_sop;
+    is_sop = (b0->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
 
     next_index_sop = is_sop ? next1 : next_index_sop;
-    is_sop = (b1->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
     vlib_trace_buffer (vm, node, next_index_sop, b1, /* follow_chain */ 0);
-
-    t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
     t1 = vlib_add_trace (vm, node, b1, sizeof (t1[0]));
+    t1->is_start_of_packet = is_sop;
+    is_sop = (b1->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
+
     t0->queue_index = dq->queue_index;
     t1->queue_index = dq->queue_index;
     t0->device_index = xd->device_index;
@@ -578,10 +584,11 @@ ixge_rx_trace (ixge_main_t * xm,
 					   &next0, &error0);
 
     next_index_sop = is_sop ? next0 : next_index_sop;
-    is_sop = (b0->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
     vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
-
     t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
+    t0->is_start_of_packet = is_sop;
+    is_sop = (b0->flags & VLIB_BUFFER_NEXT_PRESENT) == 0;
+
     t0->queue_index = dq->queue_index;
     t0->device_index = xd->device_index;
     t0->before.rx_from_hw = bd[0];
@@ -882,18 +889,19 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
   u32 * to_rx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
   u32 * to_add;
   u32 bi_sop = rx_state->saved_start_of_packet_buffer_index;
+  u32 bi_last = rx_state->saved_last_buffer_index;
   u32 next_index_sop = rx_state->saved_start_of_packet_next_index;
   u32 is_sop = rx_state->is_start_of_packet;
   u32 next_index, n_left_to_next, * to_next;
-  vlib_buffer_t * b_sop;
   u32 n_packets = 0;
   u32 n_bytes = 0;
   u32 n_trace = vlib_get_trace_count (vm, node);
+  vlib_buffer_t * b_last, b_dummy;
 
   ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
   d = &dq->descriptors[start_descriptor_index];
 
-  b_sop = 0;
+  b_last = bi_last != ~0 ? vlib_get_buffer (vm, bi_last) : &b_dummy;
   next_index = rx_state->next_index;
 
   if (n_trace > 0)
@@ -987,6 +995,9 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 
 	  b0->error = node->errors[error0];
 
+	  b_last->next_buffer = is_sop ? 0 : bi0;
+	  b_last = b0;
+
 	  bi_sop = is_sop ? bi0 : bi_sop;
 	  to_next[0] = bi_sop;
 	  to_next += is_eop0;
@@ -1041,6 +1052,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
     rx_state->n_descriptors_done_total += n_done;
     rx_state->is_start_of_packet = is_sop;
     rx_state->saved_start_of_packet_buffer_index = bi_sop;
+    rx_state->saved_last_buffer_index = bi_last;
     rx_state->saved_start_of_packet_next_index = next_index_sop;
     rx_state->next_index = next_index;
     rx_state->n_bytes += n_bytes;
@@ -1062,6 +1074,7 @@ ixge_rx_queue (ixge_main_t * xm,
 
   rx_state->is_start_of_packet = 1;
   rx_state->saved_start_of_packet_buffer_index = ~0;
+  rx_state->saved_last_buffer_index = ~0;
   rx_state->n_descriptors_done_total = 0;
   rx_state->n_bytes = 0;
 
