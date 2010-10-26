@@ -97,4 +97,36 @@ always_inline u16 ip_csum_fold (ip_csum_t c)
 /* Checksum routine. */
 ip_csum_t ip_incremental_checksum (ip_csum_t sum, void * data, uword n_bytes);
 
+always_inline ip_csum_t
+ip_incremental_checksum_buffer (vlib_main_t * vm, vlib_buffer_t * first_buffer,
+				u32 first_buffer_offset,
+				u32 n_bytes_to_checksum,
+				ip_csum_t sum)
+{
+  vlib_buffer_t * b = first_buffer;
+  u32 n_bytes_left = n_bytes_to_checksum;
+  ASSERT (b->current_length >= first_buffer_offset);
+  void * h;
+  u32 n;
+
+  n = clib_min (n_bytes_left, b->current_length);
+  h = vlib_buffer_get_current (b) + first_buffer_offset;
+  sum = ip_incremental_checksum (sum, h, n);
+  if (PREDICT_FALSE (b->flags & VLIB_BUFFER_NEXT_PRESENT))
+    {
+      while (1)
+	{
+	  n_bytes_left -= n;
+	  if (n_bytes_left == 0)
+	    break;
+	  b = vlib_get_buffer (vm, b->next_buffer);
+	  n = clib_min (n_bytes_left, b->current_length);
+	  h = vlib_buffer_get_current (b);
+	  sum = ip_incremental_checksum (sum, h, n);
+	}
+    }
+
+  return sum;
+}
+
 #endif /* included_ip_packet_h */
