@@ -14,6 +14,7 @@ libvnet_la_SOURCES +=					\
   vnet/vnet/rewrite.c				
 
 nobase_include_HEADERS +=			\
+  vnet/vnet/buffer.h				\
   vnet/vnet/config.h				\
   vnet/vnet/l3_types.h				\
   vnet/vnet/rewrite.h

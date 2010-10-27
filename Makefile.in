@@ -185,6 +185,7 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
+PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -309,14 +310,15 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/devices/xge/xge.c vnet/devices/xge/xge.h \
 	vnet/devices/i2c/i2c.c vnet/devices/i2c/i2c.h \
 	vnet/unix/tuntap.c
-nobase_include_HEADERS = vnet/vnet/config.h vnet/vnet/l3_types.h \
-	vnet/vnet/rewrite.h vnet/ethernet/error.def \
-	vnet/ethernet/ethernet.h vnet/ethernet/packet.h \
-	vnet/ethernet/phy.h vnet/ethernet/phy_reg.h \
-	vnet/ethernet/types.def vnet/ppp/error.def vnet/ppp/ppp.h \
-	vnet/ppp/packet.h vnet/hdlc/error.def vnet/hdlc/hdlc.h \
-	vnet/hdlc/packet.h vnet/ip/format.h vnet/ip/icmp46_packet.h \
-	vnet/ip/icmp6.h vnet/ip/ip.h vnet/ip/ip4.h vnet/ip/ip4_error.h \
+nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
+	vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
+	vnet/ethernet/error.def vnet/ethernet/ethernet.h \
+	vnet/ethernet/packet.h vnet/ethernet/phy.h \
+	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
+	vnet/ppp/error.def vnet/ppp/ppp.h vnet/ppp/packet.h \
+	vnet/hdlc/error.def vnet/hdlc/hdlc.h vnet/hdlc/packet.h \
+	vnet/ip/format.h vnet/ip/icmp46_packet.h vnet/ip/icmp6.h \
+	vnet/ip/ip.h vnet/ip/ip4.h vnet/ip/ip4_error.h \
 	vnet/ip/ip4_packet.h vnet/ip/ip6.h vnet/ip/ip6_error.h \
 	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
 	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
