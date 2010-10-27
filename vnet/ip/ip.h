@@ -134,6 +134,38 @@ ip_get_tcp_udp_port_info (ip_main_t * im, u32 port)
   return p ? vec_elt_at_index (im->port_infos, p[0]) : 0;
 }
       
+always_inline ip_csum_t
+ip_incremental_checksum_buffer (vlib_main_t * vm, vlib_buffer_t * first_buffer,
+				u32 first_buffer_offset,
+				u32 n_bytes_to_checksum,
+				ip_csum_t sum)
+{
+  vlib_buffer_t * b = first_buffer;
+  u32 n_bytes_left = n_bytes_to_checksum;
+  ASSERT (b->current_length >= first_buffer_offset);
+  void * h;
+  u32 n;
+
+  n = clib_min (n_bytes_left, b->current_length);
+  h = vlib_buffer_get_current (b) + first_buffer_offset;
+  sum = ip_incremental_checksum (sum, h, n);
+  if (PREDICT_FALSE (b->flags & VLIB_BUFFER_NEXT_PRESENT))
+    {
+      while (1)
+	{
+	  n_bytes_left -= n;
+	  if (n_bytes_left == 0)
+	    break;
+	  b = vlib_get_buffer (vm, b->next_buffer);
+	  n = clib_min (n_bytes_left, b->current_length);
+	  h = vlib_buffer_get_current (b);
+	  sum = ip_incremental_checksum (sum, h, n);
+	}
+    }
+
+  return sum;
+}
+
 extern vlib_cli_command_t set_interface_ip_command;
 extern vlib_cli_command_t vlib_cli_ip4_command, vlib_cli_show_ip4_command;
 extern vlib_cli_command_t vlib_cli_ip6_command, vlib_cli_show_ip6_command;
