@@ -63,7 +63,7 @@ ip_csum_with_carry (ip_csum_t sum, ip_csum_t x)
 
 /* Update checksum changing field at even byte offset from 0 -> x. */
 always_inline ip_csum_t
-ip_csum_add_even (ip_csum_t c, ip_csum_t x)
+_ip_csum_add_even (ip_csum_t c, ip_csum_t x)
 {
   ip_csum_t d;
 
@@ -77,8 +77,29 @@ ip_csum_add_even (ip_csum_t c, ip_csum_t x)
 
 /* Update checksum changing field at even byte offset from x -> 0. */
 always_inline ip_csum_t
-ip_csum_sub_even (ip_csum_t c, ip_csum_t x)
+_ip_csum_sub_even (ip_csum_t c, ip_csum_t x)
 { return ip_csum_with_carry (c, x); }
+
+always_inline ip_csum_t
+ip_csum_update_inline (ip_csum_t sum, ip_csum_t old, ip_csum_t new,
+		       u32 field_byte_offset, u32 field_n_bytes)
+{
+  /* Checksum is bigendian so single bytes go into high bits of
+     16 bit words. */
+  if ((field_byte_offset % 2) == 0 && field_n_bytes == 1)
+    {
+      old = clib_host_to_net_u16 (old << 8);
+      new = clib_host_to_net_u16 (new << 8);
+    }
+  sum = _ip_csum_sub_even (sum, old);
+  sum = _ip_csum_add_even (sum, new);
+  return sum;
+}
+
+#define ip_csum_update(sum,old,new,type,field)			\
+  ip_csum_update_inline ((sum), (old), (new),			\
+			 STRUCT_OFFSET_OF (type, field),	\
+			 STRUCT_SIZE_OF (type, field))
 
 always_inline u16 ip_csum_fold (ip_csum_t c)
 {

@@ -213,6 +213,7 @@ ip4_icmp_echo_request (vlib_main_t * vm,
   u32 n_left_from, n_left_to_next, next;
   ip4_main_t * i4m = &ip4_main;
   u16 * fragment_ids, * fid;
+  u8 host_config_ttl = i4m->host_config.ttl;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
@@ -258,8 +259,21 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 	  p1->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 
+	  /* Update ICMP checksum. */
+	  sum0 = icmp0->checksum;
+	  sum1 = icmp1->checksum;
+
+	  ASSERT (icmp0->type == ICMP4_echo_request);
+	  ASSERT (icmp1->type == ICMP4_echo_request);
+	  sum0 = ip_csum_update (sum0, ICMP4_echo_request, ICMP4_echo_reply,
+				 icmp46_header_t, type);
+	  sum1 = ip_csum_update (sum1, ICMP4_echo_request, ICMP4_echo_reply,
+				 icmp46_header_t, type);
 	  icmp0->type = ICMP4_echo_reply;
 	  icmp1->type = ICMP4_echo_reply;
+
+	  icmp0->checksum = ip_csum_fold (sum0);
+	  icmp1->checksum = ip_csum_fold (sum1);
 
 	  src0 = ip0->src_address.data_u32;
 	  src1 = ip1->src_address.data_u32;
@@ -273,26 +287,24 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  ip0->dst_address.data_u32 = src0;
 	  ip1->dst_address.data_u32 = src1;
 
+	  /* Update IP checksum. */
 	  sum0 = ip0->checksum;
 	  sum1 = ip1->checksum;
 
-	  /* Remove old ttl & fragment id from checksum. */
-	  sum0 = ip_csum_sub_even (sum0, ip0->ttl);
-	  sum1 = ip_csum_sub_even (sum1, ip1->ttl);
-	  sum0 = ip_csum_sub_even (sum0, ip0->fragment_id);
-	  sum1 = ip_csum_sub_even (sum1, ip1->fragment_id);
-
-	  /* New ttl. */
-	  ip0->ttl = i4m->host_config.ttl;
-	  ip1->ttl = i4m->host_config.ttl;
-	  sum0 = ip_csum_add_even (sum0, ip0->ttl);
-	  sum1 = ip_csum_add_even (sum1, ip1->ttl);
+	  sum0 = ip_csum_update (sum0, ip0->ttl, host_config_ttl,
+				 ip4_header_t, ttl);
+	  sum1 = ip_csum_update (sum1, ip1->ttl, host_config_ttl,
+				 ip4_header_t, ttl);
+	  ip0->ttl = host_config_ttl;
+	  ip1->ttl = host_config_ttl;
 
 	  /* New fragment id. */
+	  sum0 = ip_csum_update (sum0, ip0->fragment_id, fid[0],
+				 ip4_header_t, fragment_id);
+	  sum1 = ip_csum_update (sum1, ip1->fragment_id, fid[1],
+				 ip4_header_t, fragment_id);
 	  ip0->fragment_id = fid[0];
 	  ip1->fragment_id = fid[1];
-	  sum0 = ip_csum_add_even (sum0, ip0->fragment_id);
-	  sum1 = ip_csum_add_even (sum1, ip1->fragment_id);
 	  fid += 2;
 
 	  ip0->checksum = ip_csum_fold (sum0);
@@ -320,25 +332,33 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 
 	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 
+	  /* Update ICMP checksum. */
+	  sum0 = icmp0->checksum;
+
+	  ASSERT (icmp0->type == ICMP4_echo_request);
+	  sum0 = ip_csum_update (sum0, ICMP4_echo_request, ICMP4_echo_reply,
+				 icmp46_header_t, type);
 	  icmp0->type = ICMP4_echo_reply;
+	  icmp0->checksum = ip_csum_fold (sum0);
+
 	  src0 = ip0->src_address.data_u32;
 	  dst0 = ip0->dst_address.data_u32;
+	  ip0->src_address.data_u32 = dst0;
+	  ip0->dst_address.data_u32 = src0;
 
+	  /* Update IP checksum. */
 	  sum0 = ip0->checksum;
-	  sum0 = ip_csum_sub_even (sum0, ip0->ttl);
-	  sum0 = ip_csum_sub_even (sum0, ip0->fragment_id);
 
-	  ip0->ttl = i4m->host_config.ttl;
-	  sum0 = ip_csum_add_even (sum0, ip0->ttl);
+	  sum0 = ip_csum_update (sum0, ip0->ttl, host_config_ttl,
+				 ip4_header_t, ttl);
+	  ip0->ttl = host_config_ttl;
 
+	  sum0 = ip_csum_update (sum0, ip0->fragment_id, fid[0],
+				 ip4_header_t, fragment_id);
 	  ip0->fragment_id = fid[0];
-	  sum0 = ip_csum_add_even (sum0, ip0->fragment_id);
 	  fid += 1;
 
 	  ip0->checksum = ip_csum_fold (sum0);
-
-	  ip0->src_address.data_u32 = dst0;
-	  ip0->dst_address.data_u32 = src0;
 	}
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);

@@ -266,11 +266,12 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  sum0 = icmp0->checksum;
 	  sum1 = icmp1->checksum;
 
-	  sum0 = ip_csum_sub_even (sum0, icmp0->type << 8);
-	  sum1 = ip_csum_sub_even (sum1, icmp1->type << 8);
-
-	  sum0 = ip_csum_add_even (sum0, ICMP6_echo_reply << 8);
-	  sum1 = ip_csum_add_even (sum1, ICMP6_echo_reply << 8);
+	  ASSERT (icmp0->type == ICMP6_echo_request);
+	  ASSERT (icmp1->type == ICMP6_echo_request);
+	  sum0 = ip_csum_update (sum0, ICMP6_echo_request, ICMP6_echo_reply,
+				 icmp46_header_t, type);
+	  sum1 = ip_csum_update (sum1, ICMP6_echo_request, ICMP6_echo_reply,
+				 icmp46_header_t, type);
 
 	  icmp0->checksum = ip_csum_fold (sum0);
 	  icmp1->checksum = ip_csum_fold (sum1);
@@ -318,8 +319,11 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 
 	  /* Check icmp type to echo reply and update icmp checksum. */
 	  sum0 = icmp0->checksum;
-	  sum0 = ip_csum_sub_even (sum0, icmp0->type << 8);
-	  sum0 = ip_csum_add_even (sum0, ICMP6_echo_reply << 8);
+
+	  ASSERT (icmp0->type == ICMP6_echo_request);
+	  sum0 = ip_csum_update (sum0, ICMP6_echo_request, ICMP6_echo_reply,
+				 icmp46_header_t, type);
+
 	  icmp0->checksum = ip_csum_fold (sum0);
 
 	  icmp0->type = ICMP6_echo_reply;
