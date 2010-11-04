@@ -187,7 +187,7 @@ ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
 
     i = 0;
     last = 0;
-    while (1)
+    while (0)
       {
 	v = xd->regs->xge_mac.link_status;
 	while (v != last)
@@ -267,6 +267,7 @@ static void ixge_phy_init (ixge_device_t * xd)
 	  xd->sfp_eeprom.id = SFP_ID_unknown;
 	else
 	  {
+	    /* FIXME 5 => SR/LR eeprom ID. */
 	    clib_error_t * e = ixge_phy_init_from_eeprom (xd, 5 + xd->pci_function);
 	    if (e)
 	      clib_error_report (e);
@@ -1409,11 +1410,14 @@ ixge_device_input (ixge_main_t * xm,
 		   ixge_rx_state_t * rx_state)
 {
   ixge_regs_t * r = xd->regs;
-  u32 i, s;
+  u32 i, s, t;
   uword n_rx_packets = 0;
 
   s = r->interrupt.status_write_1_to_clear;
-  r->interrupt.status_write_1_to_clear = s;
+  t = s & xd->interrupt_status_no_auto_clear_mask;
+  if (PREDICT_FALSE (t))
+    r->interrupt.status_write_1_to_clear = t;
+
   foreach_set_bit (i, s, ({
     if (i < 16)
       n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
@@ -1840,7 +1844,8 @@ static void ixge_device_init (ixge_main_t * xm)
 	ixge_throttle_queue_interrupt (r, 0, .75 * xm->n_descriptors[VLIB_RX] / line_rate_max_pps);
       }
 
-      /* Accept all broadcast packets.  Multicasts must be explicitly added to dst_ethernet_address*/
+      /* Accept all broadcast packets.  Multicasts must be explicitly
+	 added to dst_ethernet_address register array. */
       r->filter_control |= (1 << 10);
 
       /* Enable frames up to size in mac frame size register. */
@@ -1865,9 +1870,16 @@ static void ixge_device_init (ixge_main_t * xm)
 	}
 
       /* Enable all interrupts. */
-#define IXGE_INTERRUPT_DISABLE 1
+#define IXGE_INTERRUPT_DISABLE 0
       if (! IXGE_INTERRUPT_DISABLE)
 	r->interrupt.enable_write_1_to_set = ~0;
+
+      /* Enable auto-clear for all RX/TX queues. */
+      {
+	u32 m = 0xffff;
+	xd->interrupt_status_no_auto_clear_mask = ~m;
+	r->interrupt.status_auto_clear_enable = m;
+      }
     }
 }
 

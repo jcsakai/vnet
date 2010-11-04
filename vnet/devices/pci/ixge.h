@@ -183,7 +183,7 @@ typedef volatile struct {
     CLIB_PAD_FROM_TO (0x804, 0x808);
     u32 status_write_1_to_set;
     CLIB_PAD_FROM_TO (0x80c, 0x810);
-    u32 auto_clear_enable;
+    u32 status_auto_clear_enable;
     CLIB_PAD_FROM_TO (0x814, 0x820);
 
     /* [11:3] minimum inter-interrupt interval
@@ -1063,6 +1063,10 @@ typedef struct {
 
   /* 0 or 1. */
   u16 pci_function;
+
+  /* Mask of bits that are not set to autoclear in interrupt.status_write_1_to_clear
+     register. */
+  u32 interrupt_status_no_auto_clear_mask;
 
   /* VLIB interface for this instance. */
   u32 vlib_hw_if_index, vlib_sw_if_index;
