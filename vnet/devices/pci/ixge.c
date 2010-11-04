@@ -134,7 +134,7 @@ static u16 ixge_read_eeprom (ixge_device_t * xd, u32 address)
 }
 
 static clib_error_t *
-ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
+ixge_sfp_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
 {
   u16 a, id, reg_values_addr;
 
@@ -162,70 +162,120 @@ ixge_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
       xd->regs->core_analog_config = v;
     }
 
-  {
-    u32 v, last, i;
+  return 0;
+}
 
-  again:
-    xd->regs->xge_mac.auto_negotiation_control2 &= ~(3 << 16);
-    xd->regs->xge_mac.auto_negotiation_control2 |= 2 << 16;
+static void ixge_sfp_phy_setup (ixge_device_t * xd, int wait)
+{
+  u32 v, last, i, n_resets;
 
-    v = xd->regs->xge_mac.auto_negotiation_control;
-    v &= ~(3 << 7);
-    v |= (1 << 7);
-    v &= ~(7 << 13);
-    v |= (3 << 13);
-    v |= (1 << 12);
-    xd->regs->xge_mac.auto_negotiation_control = v;
+  n_resets = 0;
+ again:
+  /* pma/pmd 10g serial SFI. */
+  xd->regs->xge_mac.auto_negotiation_control2 &= ~(3 << 16);
+  xd->regs->xge_mac.auto_negotiation_control2 |= 2 << 16;
 
-    /* spd 5 => is_10g speed.
-       spd 3 => disable laser.  both outputs. */
-    /* Configure pins 3 & 5 as output. */
-    v = ((1 << 3) | (1 << 5)) << 8;
-    /* Select 10g and enable laser. */
-    v |= ((1 << 5) | (0 << 3));
-    xd->regs->sdp_control = v;
+  v = xd->regs->xge_mac.auto_negotiation_control;
+  /* 10g pma/pmd type => kx4 */
+  v &= ~(3 << 7);
+  v |= (1 << 7);
+  /* link mode 10g sfi serdes */
+  v &= ~(7 << 13);
+  v |= (3 << 13);
+  /* restart autoneg. */
+  v |= (1 << 12);
+  xd->regs->xge_mac.auto_negotiation_control = v;
 
-    i = 0;
-    last = 0;
-    while (0)
-      {
-	v = xd->regs->xge_mac.link_status;
-	while (v != last)
-	  {
-	    ELOG_TYPE_DECLARE (e) = {
-	      .function = (char *) __FUNCTION__,
-	      .format = "ixge %d, link 0x%x",
-	      .format_args = "i4i4",
-	    };
-	    struct { u32 instance, link; } * ed;
-	    ed = ELOG_DATA (&vlib_global_main.elog_main, e);
-	    ed->instance = xd->device_index;
-	    ed->link = v;
-	    last = v;
-	  }
-	if (v & (1 << 30))
-	  break;
-	i++;
-	if (i > (1 << 20))
-	  {
-	    ELOG_TYPE_DECLARE (e) = {
-	      .function = (char *) __FUNCTION__,
-	      .format = "ixge %d, reset mac and try again",
-	      .format_args = "i4",
-	    };
-	    struct { u32 instance; } * ed;
-	    ed = ELOG_DATA (&vlib_global_main.elog_main, e);
-	    ed->instance = xd->device_index;
+  /* spd 5 => is_10g speed.
+     spd 3 => disable laser.  both outputs. */
+  /* Configure pins 3 & 5 as output. */
+  v = ((1 << 3) | (1 << 5)) << 8;
+  /* Select 10g and enable laser. */
+  v |= ((1 << 5) | (0 << 3));
+  xd->regs->sdp_control = v;
 
-	    xd->regs->control |= 1 << 3;
-	    while (xd->regs->control & (1 << 3))
-	      ;
-	    goto again;
-	  }
-      }
-  }
+  if (! wait)
+    return;
 
-  return /* no error */ 0;
+  i = 0;
+  last = 0;
+  while (1)
+    {
+      v = xd->regs->xge_mac.link_status;
+      if (v != last)
+	{
+	  ELOG_TYPE_DECLARE (e) = {
+	    .function = (char *) __FUNCTION__,
+	    .format = "ixge %d, link 0x%x mode %s speed %s",
+	    .format_args = "i4i4t1t1",
+	    .n_enum_strings = 8,
+	    .enum_strings = {
+	      "1g", "10g parallel", "10g serial", "autoneg",
+	      "unknown", "100m", "1g", "10g",
+	    },
+	  };
+	  struct { u32 instance, link; u8 mode, speed; } * ed;
+	  ed = ELOG_DATA (&vlib_global_main.elog_main, e);
+	  ed->instance = xd->device_index;
+	  ed->link = v;
+	  ed->mode = 0 + ((v >> 26) & 3);
+	  ed->speed = 4 + ((v >> 28) & 3);
+	  last = v;
+	}
+      if (v & (1 << 30))
+	break;
+      i++;
+      if (i > (1 << 20))
+	{
+	  ELOG_TYPE_DECLARE (e) = {
+	    .function = (char *) __FUNCTION__,
+	    .format = "ixge %d, reset mac and try again",
+	    .format_args = "i4",
+	  };
+	  struct { u32 instance; } * ed;
+
+	  if (++n_resets >= 3)
+	    break;
+
+	  ed = ELOG_DATA (&vlib_global_main.elog_main, e);
+	  ed->instance = xd->device_index;
+
+	  xd->regs->control |= 1 << 3;
+	  while (xd->regs->control & (1 << 3))
+	    ;
+	  goto again;
+	}
+    }
+}
+
+static void ixge_sfp_phy_init (ixge_device_t * xd)
+{
+  ixge_phy_t * phy = xd->phys + xd->phy_index;
+  i2c_bus_t * ib = &xd->i2c_bus;
+  u8 start_address[1];
+  u32 timed_out;
+
+  ib->private = xd->device_index;
+  ib->put_bits = ixge_i2c_put_bits;
+  ib->get_bits = ixge_i2c_get_bits;
+  i2c_init (ib);
+
+  start_address[0] = 0;
+  timed_out = i2c_write_read (ib, 0xa0,
+			      &start_address, 1,
+			      &xd->sfp_eeprom, 128);
+  if (timed_out || ! sfp_eeprom_is_valid (&xd->sfp_eeprom))
+    xd->sfp_eeprom.id = SFP_ID_unknown;
+  else
+    {
+      /* FIXME 5 => SR/LR eeprom ID. */
+      clib_error_t * e = ixge_sfp_phy_init_from_eeprom (xd, 5 + xd->pci_function);
+      if (e)
+	clib_error_report (e);
+      ixge_sfp_phy_setup (xd, /* wait */ 0);
+    }
+
+  phy->mdio_address = ~0;
 }
 
 static void ixge_phy_init (ixge_device_t * xd)
@@ -233,6 +283,18 @@ static void ixge_phy_init (ixge_device_t * xd)
   ixge_main_t * xm = &ixge_main;
   vlib_main_t * vm = xm->vlib_main;
   ixge_phy_t * phy = xd->phys + xd->phy_index;
+
+  switch (xd->device_id)
+    {
+    case IXGE_82599_sfp:
+    case IXGE_82599_sfp_em:
+    case IXGE_82599_sfp_fcoe:
+      /* others? */
+      return ixge_sfp_phy_init (xd);
+
+    default:
+      break;
+    }
 
   /* Probe address of phy. */
   {
@@ -249,33 +311,7 @@ static void ixge_phy_init (ixge_device_t * xd)
 
     /* No PHY found? */
     if (i >= 32)
-      {
-	i2c_bus_t * ib = &xd->i2c_bus;
-	u8 start_address[1];
-	u32 timed_out;
-
-	ib->private = xd->device_index;
-	ib->put_bits = ixge_i2c_put_bits;
-	ib->get_bits = ixge_i2c_get_bits;
-	i2c_init (ib);
-
-	start_address[0] = 0;
-	timed_out = i2c_write_read (ib, 0xa0,
-				    &start_address, 1,
-				    &xd->sfp_eeprom, 128);
-	if (timed_out || ! sfp_eeprom_is_valid (&xd->sfp_eeprom))
-	  xd->sfp_eeprom.id = SFP_ID_unknown;
-	else
-	  {
-	    /* FIXME 5 => SR/LR eeprom ID. */
-	    clib_error_t * e = ixge_phy_init_from_eeprom (xd, 5 + xd->pci_function);
-	    if (e)
-	      clib_error_report (e);
-	  }
-
-	phy->mdio_address = ~0;
-	return;
-      }
+      return;
   }
 
   phy->id = ((ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1) << 16)
@@ -1390,7 +1426,7 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
       uword is_up = (v & (1 << 30)) != 0;
       if (was_up != is_up)
 	{
-	  clib_warning ("mode %d speed %d", (v >> 26) & 3, (v >> 28) & 3);
+	  xd->link_status_at_last_link_change = v;
 	  vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
 				       is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
 	}
@@ -1415,7 +1451,7 @@ ixge_device_input (ixge_main_t * xm,
 
   s = r->interrupt.status_write_1_to_clear;
   t = s & xd->interrupt_status_no_auto_clear_mask;
-  if (PREDICT_FALSE (t))
+  if (PREDICT_FALSE (t != 0))
     r->interrupt.status_write_1_to_clear = t;
 
   foreach_set_bit (i, s, ({
@@ -1536,32 +1572,6 @@ static void ixge_update_counters (ixge_device_t * xd)
     }
 }
 
-#define foreach_ixge_pci_device_id		\
-  _ (82598, 0x10b6)				\
-  _ (82598_bx, 0x1508)				\
-  _ (82598af_dual_port, 0x10c6)			\
-  _ (82598af_single_port, 0x10c7)		\
-  _ (82598at, 0x10c8)				\
-  _ (82598at2, 0x150b)				\
-  _ (82598eb_sfp_lom, 0x10db)			\
-  _ (82598eb_cx4, 0x10dd)			\
-  _ (82598_cx4_dual_port, 0x10ec)		\
-  _ (82598_da_dual_port, 0x10f1)		\
-  _ (82598_sr_dual_port_em, 0x10e1)		\
-  _ (82598eb_xf_lr, 0x10f4)			\
-  _ (82599_kx4, 0x10f7)				\
-  _ (82599_kx4_mezz, 0x1514)			\
-  _ (82599_kr, 0x1517)				\
-  _ (82599_combo_backplane, 0x10f8)		\
-  _ (82599_cx4, 0x10f9)				\
-  _ (82599_sfp, 0x10fb)				\
-  _ (82599_backplane_fcoe, 0x152a)		\
-  _ (82599_sfp_fcoe, 0x1529)			\
-  _ (82599_sfp_em, 0x1507)			\
-  _ (82599_xaui_lom, 0x10fc)			\
-  _ (82599_t3_lom, 0x151c)			\
-  _ (x540t, 0x1528)
-
 static u8 * format_ixge_device_id (u8 * s, va_list * args)
 {
   u32 device_id = va_arg (*args, u32);
@@ -1582,6 +1592,28 @@ static u8 * format_ixge_device_id (u8 * s, va_list * args)
   return s;
 }
 
+static u8 * format_ixge_link_status (u8 * s, va_list * args)
+{
+  ixge_device_t * xd = va_arg (*args, ixge_device_t *);
+  u32 v = xd->link_status_at_last_link_change;
+
+  s = format (s, "%s", (v & (1 << 30)) ? "up" : "down");
+
+  {
+    char * modes[] = {
+      "1g", "10g parallel", "10g serial", "autoneg",
+    };
+    char * speeds[] = {
+      "unknown", "100m", "1g", "10g",
+    };
+    s = format (s, ", mode %s, speed %s",
+		modes[(v >> 26) & 3],
+		speeds[(v >> 28) & 3]);
+  }
+
+  return s;
+}
+
 static u8 * format_ixge_device (u8 * s, va_list * args)
 {
   u32 dev_instance = va_arg (*args, u32);
@@ -1592,7 +1624,10 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
 
   ixge_update_counters (xd);
 
-  s = format (s, "Intel 10G: %U", format_ixge_device_id, xd->device_id);
+  s = format (s, "Intel 8259X: id %U\n%Ulink %U",
+	      format_ixge_device_id, xd->device_id,
+	      format_white_space, indent + 2,
+	      format_ixge_link_status, xd);
 
   {
     pcie_config_regs_t * r = pci_config_find_capability (&xd->pci_device.config0, PCI_CAP_ID_PCIE);

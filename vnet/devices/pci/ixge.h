@@ -1050,6 +1050,38 @@ typedef struct {
   };
 } ixge_dma_queue_t;
 
+#define foreach_ixge_pci_device_id		\
+  _ (82598, 0x10b6)				\
+  _ (82598_bx, 0x1508)				\
+  _ (82598af_dual_port, 0x10c6)			\
+  _ (82598af_single_port, 0x10c7)		\
+  _ (82598at, 0x10c8)				\
+  _ (82598at2, 0x150b)				\
+  _ (82598eb_sfp_lom, 0x10db)			\
+  _ (82598eb_cx4, 0x10dd)			\
+  _ (82598_cx4_dual_port, 0x10ec)		\
+  _ (82598_da_dual_port, 0x10f1)		\
+  _ (82598_sr_dual_port_em, 0x10e1)		\
+  _ (82598eb_xf_lr, 0x10f4)			\
+  _ (82599_kx4, 0x10f7)				\
+  _ (82599_kx4_mezz, 0x1514)			\
+  _ (82599_kr, 0x1517)				\
+  _ (82599_combo_backplane, 0x10f8)		\
+  _ (82599_cx4, 0x10f9)				\
+  _ (82599_sfp, 0x10fb)				\
+  _ (82599_backplane_fcoe, 0x152a)		\
+  _ (82599_sfp_fcoe, 0x1529)			\
+  _ (82599_sfp_em, 0x1507)			\
+  _ (82599_xaui_lom, 0x10fc)			\
+  _ (82599_t3_lom, 0x151c)			\
+  _ (x540t, 0x1528)
+
+typedef enum {
+#define _(f,n) IXGE_##f = n,
+  foreach_ixge_pci_device_id
+#undef _
+} ixge_pci_device_id_t;
+
 typedef struct {
   ixge_regs_t * regs;
 
@@ -1057,7 +1089,7 @@ typedef struct {
   pci_device_t pci_device;
 
   /* From PCI config space header. */
-  u32 device_id;
+  ixge_pci_device_id_t device_id;
 
   u16 device_index;
 
@@ -1076,6 +1108,9 @@ typedef struct {
   /* Phy index (0 or 1) and address on MDI bus. */
   u32 phy_index;
   ixge_phy_t phys[2];
+
+  /* Value of link_status register at last link change. */
+  u32 link_status_at_last_link_change;
 
   i2c_bus_t i2c_bus;
   sfp_eeprom_t sfp_eeprom;
