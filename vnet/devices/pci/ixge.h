@@ -1096,10 +1096,6 @@ typedef struct {
   /* 0 or 1. */
   u16 pci_function;
 
-  /* Mask of bits that are not set to autoclear in interrupt.status_write_1_to_clear
-     register. */
-  u32 interrupt_status_no_auto_clear_mask;
-
   /* VLIB interface for this instance. */
   u32 vlib_hw_if_index, vlib_sw_if_index;
 

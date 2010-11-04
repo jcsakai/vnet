@@ -1446,13 +1446,11 @@ ixge_device_input (ixge_main_t * xm,
 		   ixge_rx_state_t * rx_state)
 {
   ixge_regs_t * r = xd->regs;
-  u32 i, s, t;
+  u32 i, s;
   uword n_rx_packets = 0;
 
   s = r->interrupt.status_write_1_to_clear;
-  t = s & xd->interrupt_status_no_auto_clear_mask;
-  if (PREDICT_FALSE (t != 0))
-    r->interrupt.status_write_1_to_clear = t;
+  r->interrupt.status_write_1_to_clear = s;
 
   foreach_set_bit (i, s, ({
     if (i < 16)
@@ -1908,13 +1906,6 @@ static void ixge_device_init (ixge_main_t * xm)
 #define IXGE_INTERRUPT_DISABLE 0
       if (! IXGE_INTERRUPT_DISABLE)
 	r->interrupt.enable_write_1_to_set = ~0;
-
-      /* Enable auto-clear for all RX/TX queues. */
-      {
-	u32 m = 0xffff;
-	xd->interrupt_status_no_auto_clear_mask = ~m;
-	r->interrupt.status_auto_clear_enable = m;
-      }
     }
 }
 
