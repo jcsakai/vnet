@@ -1488,11 +1488,13 @@ ixge_input (vlib_main_t * vm,
     {
       /* Poll all devices for input/interrupts. */
       vec_foreach (xd, xm->devices)
-	n_rx_packets += ixge_device_input (xm, xd, rx_state);
+	{
+	  n_rx_packets += ixge_device_input (xm, xd, rx_state);
 
-      /* Re-enable interrupts when switching out of polling mode. */
-      if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE))
-	xd->regs->interrupt.enable_write_1_to_set = ~0;
+	  /* Re-enable interrupts when switching out of polling mode. */
+	  if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE))
+	    xd->regs->interrupt.enable_write_1_to_set = ~0;
+	}
     }
 
   return n_rx_packets;
