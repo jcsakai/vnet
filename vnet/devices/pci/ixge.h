@@ -37,9 +37,9 @@ typedef volatile struct {
   u32 tail_index;
   CLIB_PAD_FROM_TO (0x1c, 0x28);
 
-  /* [7:0] tx prefetch threshold
-     [15:8] tx host threshold
-     [24:16] tx write back threshold
+  /* [7:0] rx/tx prefetch threshold
+     [15:8] rx/tx host threshold
+     [24:16] rx/tx write back threshold
      [25] rx/tx enable
      [26] tx descriptor writeback flush
      [30] rx strip vlan enable */
