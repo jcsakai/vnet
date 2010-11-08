@@ -980,6 +980,7 @@ ixge_throttle_queue_interrupt (ixge_regs_t * r,
   _ (0x40b0, rx_jabbers)				\
   _ (0x40b4, rx_management_packets)			\
   _ (0x40b8, rx_management_drops)			\
+  _ (0x3fa0, rx_missed_packets_pool_0)			\
   _ (0x40d4, tx_total_packets)				\
   _ (0x4080, tx_good_packets)				\
   _64 (0x4090, tx_good_bytes)				\

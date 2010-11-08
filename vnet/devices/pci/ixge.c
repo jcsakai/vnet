@@ -1414,7 +1414,6 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
     }
   else
     {
-      uword was_up = vlib_hw_interface_is_link_up (vm, xd->vlib_hw_if_index);
       u32 v = r->xge_mac.link_status;
       uword is_up = (v & (1 << 30)) != 0;
 
@@ -1443,28 +1442,14 @@ ixge_device_input (ixge_main_t * xm,
   uword n_rx_packets = 0;
 
   s = r->interrupt.status_write_1_to_set;
-  if (s)
-    {    
-      ELOG_TYPE_DECLARE (e) = {
-	.function = (char *) __FUNCTION__,
-	.format = "ixge %d, interrupt 0x%x",
-	.format_args = "i4i4",
-      };
-      struct { u32 instance, status; } * ed;
+  r->interrupt.status_write_1_to_clear = s;
 
-      r->interrupt.status_write_1_to_clear = s;
-
-      ed = ELOG_DATA (&xm->vlib_main->elog_main, e);
-      ed->instance = xd->device_index;
-      ed->status = s;
-
-      foreach_set_bit (i, s, ({
-	if (i < 16)
-	  n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
-	else
-	  ixge_interrupt (xm, xd, i);
-      }));
-    }
+  foreach_set_bit (i, s, ({
+    if (i < 16)
+      n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
+    else
+      ixge_interrupt (xm, xd, i);
+  }));
 
   return n_rx_packets;
 }
@@ -1482,17 +1467,21 @@ ixge_input (vlib_main_t * vm,
   rx_state->node = node;
   rx_state->next_index = node->cached_next_index;
 
-  /* Fetch interrupting device. */
   if (node->state == VLIB_NODE_STATE_INTERRUPT)
     {    
       uword i;
+
+      /* Loop over devices with interrupts. */
       foreach_set_bit (i, node->runtime_data[0], ({
 	xd = vec_elt_at_index (xm->devices, i);
 	n_rx_packets += ixge_device_input (xm, xd, rx_state);
 
-	/* Re-enable interrupts since we're in interrupt mode. */
-	xd->regs->interrupt.enable_write_1_to_set = ~0;
+	/* Re-enable interrupts since we're going to stay in interrupt mode. */
+	if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_INTERRUPT_TO_POLLING_MODE))
+	  xd->regs->interrupt.enable_write_1_to_set = ~0;
       }));
+
+      /* Clear mask of devices with pending interrupts. */
       node->runtime_data[0] = 0;
     }
   else
@@ -1500,6 +1489,10 @@ ixge_input (vlib_main_t * vm,
       /* Poll all devices for input/interrupts. */
       vec_foreach (xd, xm->devices)
 	n_rx_packets += ixge_device_input (xm, xd, rx_state);
+
+      /* Re-enable interrupts when switching out of polling mode. */
+      if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE))
+	xd->regs->interrupt.enable_write_1_to_set = ~0;
     }
 
   return n_rx_packets;
