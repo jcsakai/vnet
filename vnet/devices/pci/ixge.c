@@ -133,6 +133,26 @@ static u16 ixge_read_eeprom (ixge_device_t * xd, u32 address)
   return v >> 16;
 }
 
+static void
+ixge_sfp_enable_disable_laser (ixge_device_t * xd, uword enable)
+{
+  u32 tx_disable_bit = 1 << 3;
+  if (enable)
+    xd->regs->sdp_control &= ~tx_disable_bit;
+  else
+    xd->regs->sdp_control |= tx_disable_bit;
+}
+
+static void
+ixge_sfp_enable_disable_10g (ixge_device_t * xd, uword enable)
+{
+  u32 is_10g_bit = 1 << 5;
+  if (enable)
+    xd->regs->sdp_control |= is_10g_bit;
+  else
+    xd->regs->sdp_control &= ~is_10g_bit;
+}
+
 static clib_error_t *
 ixge_sfp_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
 {
@@ -154,6 +174,7 @@ ixge_sfp_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
   if (id != sfp_type)
     return clib_error_create ("failed to find id 0x%x", sfp_type);
 
+  ixge_software_firmware_sync (xd, 1 << 3);
   while (1)
     {
       u16 v = ixge_read_eeprom (xd, ++reg_values_addr);
@@ -161,91 +182,64 @@ ixge_sfp_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
 	break;
       xd->regs->core_analog_config = v;
     }
+  ixge_software_firmware_sync_release (xd, 1 << 3);
+
+  /* Make sure laser is off.  We'll turn on the laser when
+     the interface is brought up. */
+  ixge_sfp_enable_disable_laser (xd, /* enable */ 0);
+  ixge_sfp_enable_disable_10g (xd, /* is_10g */ 1);
 
   return 0;
 }
 
-static void ixge_sfp_phy_setup (ixge_device_t * xd, int wait)
+static void
+ixge_sfp_device_up_down (ixge_device_t * xd, uword is_up)
 {
-  u32 v, last, i, n_resets;
+  u32 v;
 
-  n_resets = 0;
- again:
-  /* pma/pmd 10g serial SFI. */
-  xd->regs->xge_mac.auto_negotiation_control2 &= ~(3 << 16);
-  xd->regs->xge_mac.auto_negotiation_control2 |= 2 << 16;
-
-  v = xd->regs->xge_mac.auto_negotiation_control;
-  /* 10g pma/pmd type => kx4 */
-  v &= ~(3 << 7);
-  v |= (1 << 7);
-  /* link mode 10g sfi serdes */
-  v &= ~(7 << 13);
-  v |= (3 << 13);
-  /* restart autoneg. */
-  v |= (1 << 12);
-  xd->regs->xge_mac.auto_negotiation_control = v;
-
-  /* spd 5 => is_10g speed.
-     spd 3 => disable laser.  both outputs. */
-  /* Configure pins 3 & 5 as output. */
-  v = ((1 << 3) | (1 << 5)) << 8;
-  /* Select 10g and enable laser. */
-  v |= ((1 << 5) | (0 << 3));
-  xd->regs->sdp_control = v;
-
-  if (! wait)
-    return;
-
-  i = 0;
-  last = 0;
-  while (1)
+  if (is_up)
     {
-      v = xd->regs->xge_mac.link_status;
-      if (v != last)
-	{
-	  ELOG_TYPE_DECLARE (e) = {
-	    .function = (char *) __FUNCTION__,
-	    .format = "ixge %d, link 0x%x mode %s speed %s",
-	    .format_args = "i4i4t1t1",
-	    .n_enum_strings = 8,
-	    .enum_strings = {
-	      "1g", "10g parallel", "10g serial", "autoneg",
-	      "unknown", "100m", "1g", "10g",
-	    },
-	  };
-	  struct { u32 instance, link; u8 mode, speed; } * ed;
-	  ed = ELOG_DATA (&vlib_global_main.elog_main, e);
-	  ed->instance = xd->device_index;
-	  ed->link = v;
-	  ed->mode = 0 + ((v >> 26) & 3);
-	  ed->speed = 4 + ((v >> 28) & 3);
-	  last = v;
-	}
-      if (v & (1 << 30))
-	break;
-      i++;
-      if (i > (1 << 20))
-	{
-	  ELOG_TYPE_DECLARE (e) = {
-	    .function = (char *) __FUNCTION__,
-	    .format = "ixge %d, reset mac and try again",
-	    .format_args = "i4",
-	  };
-	  struct { u32 instance; } * ed;
+      /* pma/pmd 10g serial SFI. */
+      xd->regs->xge_mac.auto_negotiation_control2 &= ~(3 << 16);
+      xd->regs->xge_mac.auto_negotiation_control2 |= 2 << 16;
 
-	  if (++n_resets >= 3)
-	    break;
+      v = xd->regs->xge_mac.auto_negotiation_control;
+      v &= ~(7 << 13);
+      v |= (0 << 13);
+      /* Restart autoneg. */
+      v |= (1 << 12);
+      xd->regs->xge_mac.auto_negotiation_control = v;
 
-	  ed = ELOG_DATA (&vlib_global_main.elog_main, e);
-	  ed->instance = xd->device_index;
+      while (! (xd->regs->xge_mac.link_partner_ability[0] & 0xf0000))
+	;
 
-	  xd->regs->control |= 1 << 3;
-	  while (xd->regs->control & (1 << 3))
-	    ;
-	  goto again;
-	}
+      v = xd->regs->xge_mac.auto_negotiation_control;
+
+      /* link mode 10g sfi serdes */
+      v &= ~(7 << 13);
+      v |= (3 << 13);
+
+      /* Restart autoneg. */
+      v |= (1 << 12);
+      xd->regs->xge_mac.auto_negotiation_control = v;
+
+      xd->regs->xge_mac.link_status;
     }
+
+  ixge_sfp_enable_disable_laser (xd, /* enable */ is_up);
+}
+
+static clib_error_t *
+ixge_interface_admin_up_down (vlib_main_t * vm, u32 hw_if_index, u32 flags)
+{
+  vlib_hw_interface_t * hif = vlib_get_hw_interface (vm, hw_if_index);
+  uword is_up = (flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
+  ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd = vec_elt_at_index (xm->devices, hif->dev_instance);
+
+  ixge_sfp_device_up_down (xd, is_up);
+
+  return /* no error */ 0;
 }
 
 static void ixge_sfp_phy_init (ixge_device_t * xd)
@@ -272,7 +266,6 @@ static void ixge_sfp_phy_init (ixge_device_t * xd)
       clib_error_t * e = ixge_sfp_phy_init_from_eeprom (xd, 5 + xd->pci_function);
       if (e)
 	clib_error_report (e);
-      ixge_sfp_phy_setup (xd, /* wait */ 0);
     }
 
   phy->mdio_address = ~0;
@@ -1388,56 +1381,56 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
   vlib_main_t * vm = xm->vlib_main;
   ixge_regs_t * r = xd->regs;
 
-  {
-    ELOG_TYPE_DECLARE (e) = {
-      .function = (char *) __FUNCTION__,
-      .format = "ixge %d, %s",
-      .format_args = "i1t1",
-      .n_enum_strings = 16,
-      .enum_strings = {
-	"flow director",
-	"rx miss",
-	"pci exception",
-	"mailbox",
-	"link status change",
-	"linksec key exchange",
-	"manageability event",
-	"reserved23",
-	"sdp0",
-	"sdp1",
-	"sdp2",
-	"sdp3",
-	"ecc",
-	"descriptor handler error",
-	"tcp timer",
-	"other",
-      },
-    };
-    struct { u8 instance; u8 index; } * ed;
-    ed = ELOG_DATA (&vm->elog_main, e);
-    ed->instance = xd->device_index;
-    ed->index = i - 16;
-  }
-
-  if (i == 20)
+  if (i != 20)
+    {
+      ELOG_TYPE_DECLARE (e) = {
+	.function = (char *) __FUNCTION__,
+	.format = "ixge %d, %s",
+	.format_args = "i1t1",
+	.n_enum_strings = 16,
+	.enum_strings = {
+	  "flow director",
+	  "rx miss",
+	  "pci exception",
+	  "mailbox",
+	  "link status change",
+	  "linksec key exchange",
+	  "manageability event",
+	  "reserved23",
+	  "sdp0",
+	  "sdp1",
+	  "sdp2",
+	  "sdp3",
+	  "ecc",
+	  "descriptor handler error",
+	  "tcp timer",
+	  "other",
+	},
+      };
+      struct { u8 instance; u8 index; } * ed;
+      ed = ELOG_DATA (&vm->elog_main, e);
+      ed->instance = xd->device_index;
+      ed->index = i - 16;
+    }
+  else
     {
       uword was_up = vlib_hw_interface_is_link_up (vm, xd->vlib_hw_if_index);
       u32 v = r->xge_mac.link_status;
       uword is_up = (v & (1 << 30)) != 0;
-      if (was_up != is_up)
-	{
-	  xd->link_status_at_last_link_change = v;
-	  vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
-				       is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
-	}
-    }
 
-  {
-    u32 s = r->pcie.pcie_interrupt_status;
-    r->pcie.pcie_interrupt_status = s;
-    if (s != 0)
-      clib_warning ("0x%x", s);
-  }
+      ELOG_TYPE_DECLARE (e) = {
+	.function = (char *) __FUNCTION__,
+	.format = "ixge %d, link status change 0x%x",
+	.format_args = "i4i4",
+      };
+      struct { u32 instance, link_status; } * ed;
+      ed = ELOG_DATA (&vm->elog_main, e);
+      ed->instance = xd->device_index;
+      ed->link_status = v;
+      xd->link_status_at_last_link_change = v;
+      vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
+				   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+    }
 }
 
 static uword
@@ -1449,15 +1442,29 @@ ixge_device_input (ixge_main_t * xm,
   u32 i, s;
   uword n_rx_packets = 0;
 
-  s = r->interrupt.status_write_1_to_clear;
-  r->interrupt.status_write_1_to_clear = s;
+  s = r->interrupt.status_write_1_to_set;
+  if (s)
+    {    
+      ELOG_TYPE_DECLARE (e) = {
+	.function = (char *) __FUNCTION__,
+	.format = "ixge %d, interrupt 0x%x",
+	.format_args = "i4i4",
+      };
+      struct { u32 instance, status; } * ed;
 
-  foreach_set_bit (i, s, ({
-    if (i < 16)
-      n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
-    else
-      ixge_interrupt (xm, xd, i);
-  }));
+      r->interrupt.status_write_1_to_clear = s;
+
+      ed = ELOG_DATA (&xm->vlib_main->elog_main, e);
+      ed->instance = xd->device_index;
+      ed->status = s;
+
+      foreach_set_bit (i, s, ({
+	if (i < 16)
+	  n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
+	else
+	  ixge_interrupt (xm, xd, i);
+      }));
+    }
 
   return n_rx_packets;
 }
@@ -1486,6 +1493,7 @@ ixge_input (vlib_main_t * vm,
 	/* Re-enable interrupts since we're in interrupt mode. */
 	xd->regs->interrupt.enable_write_1_to_set = ~0;
       }));
+      node->runtime_data[0] = 0;
     }
   else
     {
@@ -1621,6 +1629,7 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
   uword indent = format_get_indent (s);
 
   ixge_update_counters (xd);
+  xd->link_status_at_last_link_change = xd->regs->xge_mac.link_status;
 
   s = format (s, "Intel 8259X: id %U\n%Ulink %U",
 	      format_ixge_device_id, xd->device_id,
@@ -1686,6 +1695,7 @@ static VLIB_DEVICE_CLASS (ixge_device_class) = {
     .format_device_name = format_ixge_device_name,
     .format_device = format_ixge_device,
     .clear_counters = ixge_clear_hw_interface_counters,
+    .admin_up_down_function = ixge_interface_admin_up_down,
 };
 
 static clib_error_t *
@@ -1822,7 +1832,7 @@ static void ixge_device_init (ixge_main_t * xm)
   vec_foreach (xd, xm->devices)
     {
       ixge_regs_t * r = xd->regs;
-      const u32 reset_bit = 1 << 26;
+      const u32 reset_bit = (1 << 26) | (1 << 3);
 
       r->control |= reset_bit;
 
@@ -1883,24 +1893,7 @@ static void ixge_device_init (ixge_main_t * xm)
 
       /* Enable frames up to size in mac frame size register. */
       r->xge_mac.control |= 1 << 2;
-
-      if (0)
-	/* sets mac loopback */
-	xd->regs->xge_mac.control |= 1<< 15;
-
-      /* Kernel should have already set pci master for us.
-	 If its not set you don't get much DMA done. */
-      if (0)
-	{
-	  u16 tmp[1];
-	  clib_error_t * e;
-	  e = os_read_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
-	  if (e) clib_error_report (e);
-	  ASSERT (tmp[0] & (1 << 2));
-	  tmp[0] |= 1 << 2;
-	  e = os_write_pci_config_u16 (xd->pci_device.os_handle, 0x4, &tmp[0]);
-	  if (e) clib_error_report (e);
-	}
+      r->xge_mac.rx_max_frame_size = (9000 + 18) << 16;
 
       /* Enable all interrupts. */
 #define IXGE_INTERRUPT_DISABLE 0
@@ -1923,33 +1916,33 @@ ixge_process (vlib_main_t * vm,
     {
       /* 36 bit stat counters could overflow in ~50 secs.
 	 We poll every 30 secs to be conservative. */
-	vlib_process_wait_for_event_or_clock (vm, 30. /* seconds */);
+      vlib_process_wait_for_event_or_clock (vm, 30. /* seconds */);
 
-	event_type = vlib_process_get_events (vm, &event_data);
+      event_type = vlib_process_get_events (vm, &event_data);
 
-	switch (event_type) {
-	case ~0:
-	    /* No events found: timer expired. */
-	    break;
+      switch (event_type) {
+      case ~0:
+	/* No events found: timer expired. */
+	break;
 
-	default:
-	    ASSERT (0);
-	}
+      default:
+	ASSERT (0);
+      }
 
-	if (event_data)
-	    _vec_len (event_data) = 0;
+      if (event_data)
+	_vec_len (event_data) = 0;
 
-	/* Query stats every 30 secs. */
-	{
-	  f64 now = vlib_time_now (vm);
-	  if (now - xm->time_last_stats_update > 30)
-	    {
-	      ixge_device_t * xd;
-	      xm->time_last_stats_update = now;
-	      vec_foreach (xd, xm->devices)
-		ixge_update_counters (xd);
-	    }
-	}
+      /* Query stats every 30 secs. */
+      {
+	f64 now = vlib_time_now (vm);
+	if (now - xm->time_last_stats_update > 30)
+	  {
+	    ixge_device_t * xd;
+	    xm->time_last_stats_update = now;
+	    vec_foreach (xd, xm->devices)
+	      ixge_update_counters (xd);
+	  }
+      }
     }
 	    
   return 0;
