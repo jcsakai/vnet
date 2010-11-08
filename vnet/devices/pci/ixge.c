@@ -996,6 +996,7 @@ ixge_interface_tx (vlib_main_t * vm,
     {
       /* Back up to last start of packet and free from there. */
       ASSERT (0);
+      abort ();
     }
 
   return f->n_vectors;
@@ -1082,7 +1083,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 
 	  vlib_prefetch_buffer_with_index (vm, to_rx[2], STORE);
 	  vlib_prefetch_buffer_with_index (vm, to_rx[3], STORE);
-	  CLIB_PREFETCH (d + 2, 32, LOAD);
+	  CLIB_PREFETCH (d + 4, CLIB_CACHE_LINE_BYTES, LOAD);
 
 	  s00 = d[0].rx_from_hw.status[0];
 	  s01 = d[1].rx_from_hw.status[0];
@@ -1112,6 +1113,9 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 
 	  b0 = vlib_get_buffer (vm, bi0);
 	  b1 = vlib_get_buffer (vm, bi1);
+
+	  CLIB_PREFETCH (b0->data, CLIB_CACHE_LINE_BYTES, LOAD);
+	  CLIB_PREFETCH (b1->data, CLIB_CACHE_LINE_BYTES, LOAD);
 
 	  is_eop0 = (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
 	  is_eop1 = (s21 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
@@ -1442,7 +1446,8 @@ ixge_device_input (ixge_main_t * xm,
   uword n_rx_packets = 0;
 
   s = r->interrupt.status_write_1_to_set;
-  r->interrupt.status_write_1_to_clear = s;
+  if (s)
+    r->interrupt.status_write_1_to_clear = s;
 
   foreach_set_bit (i, s, ({
     if (i < 16)
@@ -1492,7 +1497,7 @@ ixge_input (vlib_main_t * vm,
 	  n_rx_packets += ixge_device_input (xm, xd, rx_state);
 
 	  /* Re-enable interrupts when switching out of polling mode. */
-	  if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE))
+	  if (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE)
 	    xd->regs->interrupt.enable_write_1_to_set = ~0;
 	}
     }
@@ -1717,7 +1722,7 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     }
 
   if (! xm->n_descriptors[rt])
-    xm->n_descriptors[rt] = 3 * VLIB_FRAME_SIZE / 2;
+    xm->n_descriptors[rt] = (rt == VLIB_RX ? 8 : 8) * VLIB_FRAME_SIZE / 2;
 
   dq->queue_index = queue_index;
   dq->n_descriptors = round_pow2 (xm->n_descriptors[rt], xm->n_descriptors_per_cache_line);
@@ -1805,6 +1810,9 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     else
       xd->regs->tx_dma_control |= (1 << 0);
 
+    dr->control |= ((/* prefetch threshold */ 32 << 0)
+		    | (/* writeback threshold */ 16 << 16));
+
     /* Enable this queue and wait for hardware to initialize before adding to tail. */
     dr->control |= 1 << 25;
     while (! (dr->control & (1 << 25)))
@@ -1876,11 +1884,14 @@ static void ixge_device_init (ixge_main_t * xm)
 
       /* No use in getting too many interrupts.
 	 Limit them to one every 3/4 ring size at line rate
-	 min sized packets. */
-      {
-	f64 line_rate_max_pps = 10e9 / (8 * (64 + /* interframe padding */ 20));
-	ixge_throttle_queue_interrupt (r, 0, .75 * xm->n_descriptors[VLIB_RX] / line_rate_max_pps);
-      }
+	 min sized packets.
+	 No need for this since kernel/vlib main loop provides adequate interrupt
+	 limiting scheme. */
+      if (0)
+	{
+	  f64 line_rate_max_pps = 10e9 / (8 * (64 + /* interframe padding */ 20));
+	  ixge_throttle_queue_interrupt (r, 0, .75 * xm->n_descriptors[VLIB_RX] / line_rate_max_pps);
+	}
 
       /* Accept all broadcast packets.  Multicasts must be explicitly
 	 added to dst_ethernet_address register array. */
