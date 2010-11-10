@@ -75,8 +75,9 @@ static u8 * format_ip4_icmp_header (u8 * s, va_list * args)
   if (max_header_bytes < sizeof (icmp[0]))
     return format (s, "ICMP header truncated");
 
-  s = format (s, "ICMP %U",
-	      format_ip4_icmp_type_and_code, icmp->type, icmp->code);
+  s = format (s, "ICMP %U checksum 0x%x",
+	      format_ip4_icmp_type_and_code, icmp->type, icmp->code,
+	      clib_net_to_host_u16 (icmp->checksum));
 
   return s;
 }
@@ -409,6 +410,38 @@ static uword unformat_icmp_type_and_code (unformat_input_t * input, va_list * ar
   return 1;
 }
 
+static void
+icmp4_pg_edit_function (pg_main_t * pg,
+			pg_stream_t * s,
+			pg_edit_group_t * g,
+			u32 * packets,
+			u32 n_packets)
+{
+  vlib_main_t * vm = pg->vlib_main;
+  u32 ip_offset, icmp_offset;
+
+  icmp_offset = g->start_byte_offset;
+  ip_offset = (g-1)->start_byte_offset;
+
+  while (n_packets >= 1)
+    {
+      vlib_buffer_t * p0;
+      ip4_header_t * ip0;
+      icmp46_header_t * icmp0;
+      u32 len0;
+
+      p0 = vlib_get_buffer (vm, packets[0]);
+      n_packets -= 1;
+      packets += 1;
+
+      ASSERT (p0->current_data == 0);
+      ip0 = (void *) (p0->data + ip_offset);
+      icmp0 = (void *) (p0->data + icmp_offset);
+      len0 = clib_net_to_host_u16 (ip0->length) - ip4_header_bytes (ip0);
+      icmp0->checksum = ~ ip_csum_fold (ip_incremental_checksum (0, icmp0, len0));
+    }
+}
+
 typedef struct {
   pg_edit_t type, code;
   pg_edit_t checksum;
@@ -436,8 +469,7 @@ unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
 			    &group_index);
   pg_icmp_header_init (p);
 
-  /* Defaults. */
-  pg_edit_set_fixed (&p->checksum, 0);
+  p->checksum.type = PG_EDIT_UNSPECIFIED;
 
   {
     icmp46_header_t tmp;
@@ -449,8 +481,28 @@ unformat_pg_icmp_header (unformat_input_t * input, va_list * args)
     pg_edit_set_fixed (&p->code, tmp.code);
   }
 
+  /* Parse options. */
+  while (1)
+    {
+      if (unformat (input, "checksum %U",
+		    unformat_pg_edit,
+		    unformat_pg_number, &p->checksum))
+	;
+
+      /* Can't parse input: try next protocol level. */
+      else
+	break;
+    }
+
   if (! unformat_user (input, unformat_pg_payload, s))
     goto error;
+
+  if (p->checksum.type == PG_EDIT_UNSPECIFIED)
+    {
+      pg_edit_group_t * g = pg_stream_get_group (s, group_index);
+      g->edit_function = icmp4_pg_edit_function;
+      g->edit_function_opaque = 0;
+    }
 
   return 1;
 
