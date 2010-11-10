@@ -200,7 +200,7 @@ static VLIB_REGISTER_NODE (ip4_icmp_input_node) = {
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [ICMP_INPUT_NEXT_ERROR] = "error-drop",
+    [ICMP_INPUT_NEXT_ERROR] = "error-punt",
   },
 };
 

@@ -390,7 +390,7 @@ static VLIB_REGISTER_NODE (tcp4_lookup_node) = {
 
   .n_next_nodes = TCP_UDP_LOOKUP_N_NEXT,
   .next_nodes = {
-    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-drop",
+    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-punt",
   },
 };
 
@@ -404,7 +404,7 @@ static VLIB_REGISTER_NODE (udp4_lookup_node) = {
 
   .n_next_nodes = TCP_UDP_LOOKUP_N_NEXT,
   .next_nodes = {
-    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-drop",
+    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-punt",
   },
 };
 
