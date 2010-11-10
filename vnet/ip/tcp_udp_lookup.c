@@ -324,9 +324,9 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	  l0 = pool_elt_at_index (lm->listener_pool, li0);
 
 	  /* FIXME make it a clib bitmap. */
-	  ASSERT (adj0->if_address_index < BITS (l0->valid_local_adjacency_bitmap));
 	  listener_is_valid0 =
-	    (l0->valid_local_adjacency_bitmap >> adj0->if_address_index) & 1;
+	    (adj0->if_address_index < BITS (l0->valid_local_adjacency_bitmap)
+	     && ((l0->valid_local_adjacency_bitmap >> adj0->if_address_index) & 1));
 
 	  i0 = ci0 ? ci0 : li0;
 	  i0 = listener_is_valid0 ? i0 : unknown_port_error;
