@@ -576,8 +576,40 @@ ixge_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
 				       u8 * next0, u8 * error0,
 				       u8 * next1, u8 * error1)
 {
-  ixge_rx_next_and_error_from_status_x1 (s00, s02, next0, error0);
-  ixge_rx_next_and_error_from_status_x1 (s10, s12, next1, error1);
+  u8 is0_ip4, is0_ip6, n0, e0;
+  u8 is1_ip4, is1_ip6, n1, e1;
+
+  e0 = e1 = IXGE_RX_ERROR_none;
+  n0 = n1 = IXGE_RX_NEXT_ETHERNET_INPUT;
+
+  is0_ip4 = s02 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
+  is1_ip4 = s12 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
+
+  n0 = is0_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n0;
+  n1 = is1_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n1;
+
+  e0 = (is0_ip4 && (s02 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
+	? IXGE_RX_ERROR_ip4_checksum_error
+	: e0);
+  e1 = (is1_ip4 && (s12 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
+	? IXGE_RX_ERROR_ip4_checksum_error
+	: e1);
+
+  is0_ip6 = s00 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
+  is1_ip6 = s10 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
+
+  n0 = is0_ip6 ? IXGE_RX_NEXT_IP6_INPUT : n0;
+  n1 = is1_ip6 ? IXGE_RX_NEXT_IP6_INPUT : n1;
+
+  /* Check for error. */
+  n0 = e0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
+  n1 = e1 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n1;
+
+  *error0 = e0;
+  *error1 = e1;
+
+  *next0 = n0;
+  *next1 = n1;
 }
 
 static void
