@@ -57,7 +57,13 @@ tcp_pg_edit_function (pg_main_t * pg,
       tcp_len0 = clib_net_to_host_u16 (ip0->length) - sizeof (ip0[0]);
 
       /* Initialize checksum with header. */
-      sum0 = clib_mem_unaligned (&ip0->src_address, u64);
+      if (BITS (sum0) == 32)
+	{
+	  sum0 = clib_mem_unaligned (&ip0->src_address, u32);
+	  sum0 = ip_csum_with_carry (sum0, clib_mem_unaligned (&ip0->dst_address, u32));
+	}
+      else
+	sum0 = clib_mem_unaligned (&ip0->src_address, u64);
 
       sum0 = ip_csum_with_carry
 	(sum0, clib_host_to_net_u32 (tcp_len0 + (ip0->protocol << 16)));
