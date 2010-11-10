@@ -1570,6 +1570,7 @@ static VLIB_REGISTER_NODE (ip6_multicast_node) = {
   },
 };
 
+/* Compute TCP/UDP/ICMP6 checksum in software. */
 u16 ip6_tcp_udp_icmp_compute_checksum (ip6_header_t * ip0)
 {
   ip_csum_t sum0;
@@ -1577,9 +1578,9 @@ u16 ip6_tcp_udp_icmp_compute_checksum (ip6_header_t * ip0)
   u16 sum16, payload_length_host_byte_order;
 
   /* Initialize checksum with ip6 header. */
-  sum0 = ip0->payload_length;
+  sum0 = ip0->payload_length + clib_host_to_net_u16 (ip0->protocol);
   payload_length_host_byte_order = clib_net_to_host_u16 (ip0->payload_length);
-  sum0 = ip_csum_with_carry (sum0, clib_host_to_net_u16 (ip0->protocol));
+
   for (i = 0; i < ARRAY_LEN (ip0->src_address.as_uword); i++)
     {
       sum0 = ip_csum_with_carry (sum0,
@@ -1594,7 +1595,6 @@ u16 ip6_tcp_udp_icmp_compute_checksum (ip6_header_t * ip0)
   return sum16;
 }
 
-/* Compute TCP/UDP/ICMP6 checksum in software. */
 static u32 ip6_tcp_udp_icmp_validate_checksum (vlib_buffer_t * p0)
 {
   ip6_header_t * ip0 = vlib_buffer_get_current (p0);
