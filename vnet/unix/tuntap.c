@@ -135,7 +135,10 @@ static VLIB_REGISTER_NODE (tuntap_tx_node) = {
 };
 
 enum {
-  TUNTAP_PUNT_NEXT_ETHERNET_INPUT, 
+  TUNTAP_RX_NEXT_IP4_INPUT, 
+  TUNTAP_RX_NEXT_IP6_INPUT, 
+  TUNTAP_RX_NEXT_DROP,
+  TUNTAP_RX_N_NEXT,
 };
 
 /* Gets called when file descriptor is ready from epoll. */
@@ -234,38 +237,55 @@ tuntap_rx (vlib_main_t * vm,
 
   b = vlib_get_buffer (vm, bi);
 
-  /* 
-   * If it's a TUN device, add (space for) dst + src MAC address, 
-   * to the left of the protocol number. Linux shim hdr: 
-   * (u16 flags, u16 protocol-id). Overwrite flags; use 10 octets of
-   * the pre-data area.
-   */
-  b->current_data -= 10;
-  b->current_length += 10;
-
   {
+    u32 next_index;
     uword n_trace = vlib_get_trace_count (vm, node);
-    if (n_trace > 0) {
-      vlib_trace_buffer (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT,
-			 b, /* follow_chain */ 1);
-      vlib_set_trace_count (vm, node, n_trace - 1);
-    }
-  }
 
-  /* Enqueue to ethernet-input. */
-  vlib_set_next_frame_buffer (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT, bi);
+    b->error = node->errors[0];
+
+    switch (b->data[0] & 0xf0)
+      {
+      case 0x40:
+        next_index =  TUNTAP_RX_NEXT_IP4_INPUT;
+        break;
+      case 0x60:
+        next_index =  TUNTAP_RX_NEXT_IP6_INPUT;
+        break;
+      default:
+        next_index = TUNTAP_RX_NEXT_DROP;
+        break;
+      }
+
+    vlib_set_next_frame_buffer (vm, node, next_index, bi);
+
+    if (n_trace > 0)
+      {
+        vlib_trace_buffer (vm, node, next_index,
+                           b, /* follow_chain */ 1);
+        vlib_set_trace_count (vm, node, n_trace - 1);
+      }
+  }
 
   return 1;
 }
+
+static char * tuntap_rx_error_strings[] = {
+  "unknown packet type",
+};
 
 static VLIB_REGISTER_NODE (tuntap_rx_node) = {
   .function = tuntap_rx,
   .name = "tuntap-rx",
   .type = VLIB_NODE_TYPE_INPUT,
   .vector_size = 4,
-  .n_next_nodes = 1,
+  .n_errors = 1,
+  .error_strings = tuntap_rx_error_strings,
+
+  .n_next_nodes = TUNTAP_RX_N_NEXT,
   .next_nodes = {
-    [TUNTAP_PUNT_NEXT_ETHERNET_INPUT] = "ethernet-input",
+    [TUNTAP_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
+    [TUNTAP_RX_NEXT_IP6_INPUT] = "ip6-input",
+    [TUNTAP_RX_NEXT_DROP] = "error-drop",
   },
 };
 
@@ -320,7 +340,7 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
   clib_error_t * error = 0;
   struct ifreq ifr;
   struct sockaddr_in *sin;
-  int flags = IFF_TUN;
+  int flags = IFF_TUN | IFF_NO_PI;
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
@@ -504,6 +524,13 @@ tuntap_ip4_add_del_interface_address (ip4_main_t * im,
     clib_unix_warning ("ioctl SIOCSIFFLAGS");
 }
 
+static void
+tuntap_punt_frame (vlib_main_t * vm,
+                   vlib_frame_t * frame)
+{
+  tuntap_tx (vm, /* node */ 0, frame);
+}
+
 static clib_error_t *
 tuntap_init (vlib_main_t * vm)
 {
@@ -518,6 +545,8 @@ tuntap_init (vlib_main_t * vm)
   cb.function = tuntap_ip4_add_del_interface_address;
   cb.function_opaque = 0;
   vec_add1 (im->add_del_interface_address_callbacks, cb);
+
+  vm->os_punt_frame = tuntap_punt_frame;
 
   return 0;
 }
