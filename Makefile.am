@@ -160,9 +160,11 @@ libvnet_la_SOURCES +=				\
 ########################################
 
 libvnet_la_SOURCES +=				\
+  vnet/unix/pcap.c				\
   vnet/unix/tuntap.c
 
 nobase_include_HEADERS +=			\
+  vnet/unix/pcap.h				\
   vnet/unix/tuntap.h
 
 lib_LTLIBRARIES = libvnet.la

@@ -97,7 +97,7 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/pg/output.lo vnet/pg/stream.lo \
 	vnet/devices/ethernet_phy_bcm.lo vnet/devices/optics/sfp.lo \
 	vnet/devices/pci/ixge.lo vnet/devices/xge/xge.lo \
-	vnet/devices/i2c/i2c.lo vnet/unix/tuntap.lo
+	vnet/devices/i2c/i2c.lo vnet/unix/pcap.lo vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -185,7 +185,6 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
-PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -308,7 +307,7 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/devices/optics/sfp.h vnet/devices/optics/sfp.c \
 	vnet/devices/pci/ixge.c vnet/devices/pci/ixge.h \
 	vnet/devices/xge/xge.c vnet/devices/xge/xge.h \
-	vnet/devices/i2c/i2c.c vnet/devices/i2c/i2c.h \
+	vnet/devices/i2c/i2c.c vnet/devices/i2c/i2c.h vnet/unix/pcap.c \
 	vnet/unix/tuntap.c
 nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
@@ -323,7 +322,7 @@ nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
 	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
 	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h \
-	vnet/unix/tuntap.h
+	vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDFLAGS = -static
@@ -571,6 +570,8 @@ vnet/unix/$(am__dirstamp):
 vnet/unix/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/unix/$(DEPDIR)
 	@: > vnet/unix/$(DEPDIR)/$(am__dirstamp)
+vnet/unix/pcap.lo: vnet/unix/$(am__dirstamp) \
+	vnet/unix/$(DEPDIR)/$(am__dirstamp)
 vnet/unix/tuntap.lo: vnet/unix/$(am__dirstamp) \
 	vnet/unix/$(DEPDIR)/$(am__dirstamp)
 libvnet.la: $(libvnet_la_OBJECTS) $(libvnet_la_DEPENDENCIES) 
@@ -697,6 +698,8 @@ mostlyclean-compile:
 	-rm -f vnet/ppp/pg.lo
 	-rm -f vnet/ppp/ppp.$(OBJEXT)
 	-rm -f vnet/ppp/ppp.lo
+	-rm -f vnet/unix/pcap.$(OBJEXT)
+	-rm -f vnet/unix/pcap.lo
 	-rm -f vnet/unix/tuntap.$(OBJEXT)
 	-rm -f vnet/unix/tuntap.lo
 	-rm -f vnet/vnet/config.$(OBJEXT)
@@ -757,6 +760,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/ppp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/pcap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/tuntap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/config.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/rewrite.Plo@am__quote@
