@@ -1148,6 +1148,7 @@ typedef struct {
   f64 time_last_stats_update;
 } ixge_main_t;
 
-extern ixge_main_t ixge_main;
+ixge_main_t ixge_main;
+vlib_device_class_t ixge_device_class;
 
 #endif /* included_ixge_h */

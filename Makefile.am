@@ -144,16 +144,16 @@ nobase_include_HEADERS +=			\
 
 libvnet_la_SOURCES +=				\
   vnet/devices/ethernet_phy_bcm.c		\
-  vnet/devices/optics/sfp.h			\
-  vnet/devices/optics/sfp.c			\
-  vnet/devices/pci/ixge.c			\
-  vnet/devices/pci/ixge.h			\
-  vnet/devices/xge/xge.c			\
-  vnet/devices/xge/xge.h
-
-libvnet_la_SOURCES +=				\
   vnet/devices/i2c/i2c.c			\
-  vnet/devices/i2c/i2c.h
+  vnet/devices/pci/ixge.c			\
+  vnet/devices/optics/sfp.c			\
+  vnet/devices/xge/xge.c
+
+nobase_include_HEADERS +=			\
+  vnet/devices/i2c/i2c.h			\
+  vnet/devices/optics/sfp.h			\
+  vnet/devices/pci/ixge.h			\
+  vnet/devices/xge/xge.h
 
 ########################################
 # Unix kernel related

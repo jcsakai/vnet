@@ -95,9 +95,9 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
 	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
 	vnet/pg/output.lo vnet/pg/stream.lo \
-	vnet/devices/ethernet_phy_bcm.lo vnet/devices/optics/sfp.lo \
-	vnet/devices/pci/ixge.lo vnet/devices/xge/xge.lo \
-	vnet/devices/i2c/i2c.lo vnet/unix/pcap.lo vnet/unix/tuntap.lo
+	vnet/devices/ethernet_phy_bcm.lo vnet/devices/i2c/i2c.lo \
+	vnet/devices/pci/ixge.lo vnet/devices/optics/sfp.lo \
+	vnet/devices/xge/xge.lo vnet/unix/pcap.lo vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -185,6 +185,7 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
+PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -304,11 +305,9 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/ip/udp_init.c vnet/ip/udp_pg.c vnet/pg/cli.c \
 	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
-	vnet/devices/optics/sfp.h vnet/devices/optics/sfp.c \
-	vnet/devices/pci/ixge.c vnet/devices/pci/ixge.h \
-	vnet/devices/xge/xge.c vnet/devices/xge/xge.h \
-	vnet/devices/i2c/i2c.c vnet/devices/i2c/i2c.h vnet/unix/pcap.c \
-	vnet/unix/tuntap.c
+	vnet/devices/i2c/i2c.c vnet/devices/pci/ixge.c \
+	vnet/devices/optics/sfp.c vnet/devices/xge/xge.c \
+	vnet/unix/pcap.c vnet/unix/tuntap.c
 nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
 	vnet/ethernet/error.def vnet/ethernet/ethernet.h \
@@ -322,6 +321,8 @@ nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
 	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
 	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h \
+	vnet/devices/i2c/i2c.h vnet/devices/optics/sfp.h \
+	vnet/devices/pci/ixge.h vnet/devices/xge/xge.h \
 	vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
@@ -532,30 +533,6 @@ vnet/devices/$(DEPDIR)/$(am__dirstamp):
 	@: > vnet/devices/$(DEPDIR)/$(am__dirstamp)
 vnet/devices/ethernet_phy_bcm.lo: vnet/devices/$(am__dirstamp) \
 	vnet/devices/$(DEPDIR)/$(am__dirstamp)
-vnet/devices/optics/$(am__dirstamp):
-	@$(MKDIR_P) vnet/devices/optics
-	@: > vnet/devices/optics/$(am__dirstamp)
-vnet/devices/optics/$(DEPDIR)/$(am__dirstamp):
-	@$(MKDIR_P) vnet/devices/optics/$(DEPDIR)
-	@: > vnet/devices/optics/$(DEPDIR)/$(am__dirstamp)
-vnet/devices/optics/sfp.lo: vnet/devices/optics/$(am__dirstamp) \
-	vnet/devices/optics/$(DEPDIR)/$(am__dirstamp)
-vnet/devices/pci/$(am__dirstamp):
-	@$(MKDIR_P) vnet/devices/pci
-	@: > vnet/devices/pci/$(am__dirstamp)
-vnet/devices/pci/$(DEPDIR)/$(am__dirstamp):
-	@$(MKDIR_P) vnet/devices/pci/$(DEPDIR)
-	@: > vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
-vnet/devices/pci/ixge.lo: vnet/devices/pci/$(am__dirstamp) \
-	vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
-vnet/devices/xge/$(am__dirstamp):
-	@$(MKDIR_P) vnet/devices/xge
-	@: > vnet/devices/xge/$(am__dirstamp)
-vnet/devices/xge/$(DEPDIR)/$(am__dirstamp):
-	@$(MKDIR_P) vnet/devices/xge/$(DEPDIR)
-	@: > vnet/devices/xge/$(DEPDIR)/$(am__dirstamp)
-vnet/devices/xge/xge.lo: vnet/devices/xge/$(am__dirstamp) \
-	vnet/devices/xge/$(DEPDIR)/$(am__dirstamp)
 vnet/devices/i2c/$(am__dirstamp):
 	@$(MKDIR_P) vnet/devices/i2c
 	@: > vnet/devices/i2c/$(am__dirstamp)
@@ -564,6 +541,30 @@ vnet/devices/i2c/$(DEPDIR)/$(am__dirstamp):
 	@: > vnet/devices/i2c/$(DEPDIR)/$(am__dirstamp)
 vnet/devices/i2c/i2c.lo: vnet/devices/i2c/$(am__dirstamp) \
 	vnet/devices/i2c/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/pci/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/pci
+	@: > vnet/devices/pci/$(am__dirstamp)
+vnet/devices/pci/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/pci/$(DEPDIR)
+	@: > vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/pci/ixge.lo: vnet/devices/pci/$(am__dirstamp) \
+	vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/optics/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/optics
+	@: > vnet/devices/optics/$(am__dirstamp)
+vnet/devices/optics/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/optics/$(DEPDIR)
+	@: > vnet/devices/optics/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/optics/sfp.lo: vnet/devices/optics/$(am__dirstamp) \
+	vnet/devices/optics/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/xge/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/xge
+	@: > vnet/devices/xge/$(am__dirstamp)
+vnet/devices/xge/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/devices/xge/$(DEPDIR)
+	@: > vnet/devices/xge/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/xge/xge.lo: vnet/devices/xge/$(am__dirstamp) \
+	vnet/devices/xge/$(DEPDIR)/$(am__dirstamp)
 vnet/unix/$(am__dirstamp):
 	@$(MKDIR_P) vnet/unix
 	@: > vnet/unix/$(am__dirstamp)

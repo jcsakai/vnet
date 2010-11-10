@@ -1811,7 +1811,7 @@ static void ixge_clear_hw_interface_counters (u32 instance)
   memcpy (xd->counters_last_clear, xd->counters, sizeof (xd->counters));
 }
 
-static VLIB_DEVICE_CLASS (ixge_device_class) = {
+VLIB_DEVICE_CLASS (ixge_device_class) = {
     .name = "ixge",
     .tx_function = ixge_interface_tx,
     .format_device_name = format_ixge_device_name,
