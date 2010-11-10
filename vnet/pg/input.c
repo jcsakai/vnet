@@ -1579,8 +1579,8 @@ pg_input (vlib_main_t * vm,
   uword n_packets = 0;
 
   clib_bitmap_foreach (i, pg->enabled_streams, ({
-	n_packets += pg_input_stream (node, pg, vec_elt_at_index (pg->streams, i));
-      }));
+    n_packets += pg_input_stream (node, pg, vec_elt_at_index (pg->streams, i));
+  }));
 
   return n_packets;
 }
