@@ -27,7 +27,6 @@
 #define included_ip_packet_h
 
 #include <clib/error.h>
-#include <clib/byte_order.h>
 
 typedef enum ip_protocol {
 #define ip_protocol(n,s) IP_PROTOCOL_##s = n,
@@ -62,9 +61,9 @@ ip_csum_with_carry (ip_csum_t sum, ip_csum_t x)
   return t + (t < x);
 }
 
-/* Update checksum changing field at even byte offset from 0 -> x. */
+/* Update checksum changing field at even byte offset from x -> 0. */
 always_inline ip_csum_t
-_ip_csum_add_even (ip_csum_t c, ip_csum_t x)
+ip_csum_add_even (ip_csum_t c, ip_csum_t x)
 {
   ip_csum_t d;
 
@@ -73,27 +72,30 @@ _ip_csum_add_even (ip_csum_t c, ip_csum_t x)
   /* Fold in carry from high bit. */
   d -= d > c;
 
+  ASSERT (ip_csum_with_carry (d, x) == c);
+
   return d;
 }
 
-/* Update checksum changing field at even byte offset from x -> 0. */
+/* Update checksum changing field at even byte offset from 0 -> x. */
 always_inline ip_csum_t
-_ip_csum_sub_even (ip_csum_t c, ip_csum_t x)
+ip_csum_sub_even (ip_csum_t c, ip_csum_t x)
 { return ip_csum_with_carry (c, x); }
 
 always_inline ip_csum_t
 ip_csum_update_inline (ip_csum_t sum, ip_csum_t old, ip_csum_t new,
 		       u32 field_byte_offset, u32 field_n_bytes)
 {
-  /* Checksum is bigendian so single bytes go into high bits of
-     16 bit words. */
-  if ((field_byte_offset % 2) == 0 && field_n_bytes == 1)
+  /* For even 1-byte fields on big-endian and odd 1-byte fields on little endian
+     we need to shift byte into place for checksum. */
+  if ((field_n_bytes % 2)
+      && (field_byte_offset % 2) == CLIB_ARCH_IS_LITTLE_ENDIAN)
     {
-      old = clib_host_to_net_u16 (old << 8);
-      new = clib_host_to_net_u16 (new << 8);
+      old = old << 8;
+      new = new << 8;
     }
-  sum = _ip_csum_sub_even (sum, old);
-  sum = _ip_csum_add_even (sum, new);
+  sum = ip_csum_sub_even (sum, old);
+  sum = ip_csum_add_even (sum, new);
   return sum;
 }
 
