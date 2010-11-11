@@ -65,7 +65,7 @@ typedef struct {
 } tuntap_main_t;
 
 static tuntap_main_t tuntap_main = {
-  .tun_name = "fabric",
+  .tun_name = "vnet",
 
   /* Suitable defaults for an Ethernet-like tun/tap device */
   .mtu_bytes = 4096 + 256,

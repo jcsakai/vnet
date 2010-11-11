@@ -458,20 +458,18 @@ static u8 * format_ixge_rx_dma_trace (u8 * s, va_list * va)
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
   vlib_node_t * node = va_arg (*va, vlib_node_t *);
   ixge_rx_dma_trace_t * t = va_arg (*va, ixge_rx_dma_trace_t *);
-  vlib_rx_or_tx_t rx_or_tx = va_arg (*va, int);
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
   ixge_dma_queue_t * dq;
   format_function_t * f;
   uword indent = format_get_indent (s);
 
-  dq = vec_elt_at_index (xd->dma_queues[rx_or_tx], t->queue_index);
+  dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], t->queue_index);
 
   {
     vlib_sw_interface_t * sw = vlib_get_sw_interface (vm, xd->vlib_sw_if_index);
-    s = format (s, "%U %U queue %d",
+    s = format (s, "%U rx queue %d",
 		format_vlib_sw_interface_name, vm, sw,
-		format_vlib_rx_tx, rx_or_tx,
 		t->queue_index);
   }
 
@@ -733,20 +731,18 @@ static u8 * format_ixge_tx_dma_trace (u8 * s, va_list * va)
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
   vlib_node_t * node = va_arg (*va, vlib_node_t *);
   ixge_tx_dma_trace_t * t = va_arg (*va, ixge_tx_dma_trace_t *);
-  vlib_rx_or_tx_t rx_or_tx = va_arg (*va, int);
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
   ixge_dma_queue_t * dq;
   format_function_t * f;
   uword indent = format_get_indent (s);
 
-  dq = vec_elt_at_index (xd->dma_queues[rx_or_tx], t->queue_index);
+  dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], t->queue_index);
 
   {
     vlib_sw_interface_t * sw = vlib_get_sw_interface (vm, xd->vlib_sw_if_index);
-    s = format (s, "%U %U queue %d",
+    s = format (s, "%U tx queue %d",
 		format_vlib_sw_interface_name, vm, sw,
-		format_vlib_rx_tx, rx_or_tx,
 		t->queue_index);
   }
 
@@ -762,7 +758,7 @@ static u8 * format_ixge_tx_dma_trace (u8 * s, va_list * va)
   s = format (s, "\n%U",
 	      format_white_space, indent);
 
-  f = node->format_buffer;
+  f = format_ethernet_header_with_length;
   if (! f || ! t->is_start_of_packet)
     f = format_hex_bytes;
   s = format (s, "%U", f, t->buffer.pre_data, sizeof (t->buffer.pre_data));

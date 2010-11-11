@@ -25,6 +25,9 @@ vnet_main_init (vlib_main_t * vm)
       error = unix_physmem_init (vm, /* physical_memory_required */ 0);
     }
 
+  if ((error = vlib_call_init_function (vm, tuntap_init)))
+    return error;
+
   vlib_unix_cli_set_prompt ("VNET: ");
 
   return error;
