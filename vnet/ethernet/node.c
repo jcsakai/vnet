@@ -30,7 +30,8 @@
 
 #define foreach_ethernet_input_next		\
   _ (PUNT, "error-punt")			\
-  _ (DROP, "error-drop")
+  _ (DROP, "error-drop")			\
+  _ (LLC, "llc-input")
 
 typedef enum {
 #define _(s,n) ETHERNET_INPUT_NEXT_##s,
@@ -68,7 +69,7 @@ ethernet_input (vlib_main_t * vm,
 		vlib_frame_t * from_frame)
 {
   ethernet_input_runtime_t * rt = (void *) node->runtime_data;
-  u32 n_left_from, next_index, i_next, * from, * to_next;
+  u32 n_left_from, next_index, * from, * to_next;
 
   from = vlib_frame_vector_args (from_frame);
   n_left_from = from_frame->n_vectors;
@@ -81,7 +82,6 @@ ethernet_input (vlib_main_t * vm,
 				   sizeof (ethernet_input_trace_t));
 
   next_index = node->cached_next_index;
-  i_next = vec_elt (rt->sparse_index_by_next_index, next_index);
 
   while (n_left_from > 0)
     {
@@ -95,7 +95,8 @@ ethernet_input (vlib_main_t * vm,
 	  vlib_buffer_t * b0, * b1;
 	  ethernet_header_t * e0, * e1;
 	  ethernet_buffer_opaque_t * o0, * o1;
-	  u32 i0, i1, type0, type1, enqueue_code;
+	  u32 i0, i1, type0, type1, len0, len1;
+	  u8 next0, next1, is_llc0, is_llc1, enqueue_code;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -143,15 +144,25 @@ ethernet_input (vlib_main_t * vm,
 	  type0 = e0->type;
 	  type1 = e1->type;
 	  sparse_vec_index2 (rt->next_by_type, type0, type1, &i0, &i1);
+	  next0 = vec_elt (rt->next_by_type, i0);
+	  next1 = vec_elt (rt->next_by_type, i1);
 
 	  b0->error = node->errors[i0 == SPARSE_VEC_INVALID_INDEX ? ETHERNET_ERROR_UNKNOWN_TYPE : ETHERNET_ERROR_NONE];
 	  b1->error = node->errors[i1 == SPARSE_VEC_INVALID_INDEX ? ETHERNET_ERROR_UNKNOWN_TYPE : ETHERNET_ERROR_NONE];
 
-	  enqueue_code = (i0 != i_next) + 2*(i1 != i_next);
+	  len0 = clib_net_to_host_u16 (type0);
+	  len1 = clib_net_to_host_u16 (type1);
+
+	  is_llc0 = len0 < 0x600;
+	  is_llc1 = len1 < 0x600;
+
+	  next0 = is_llc0 ? ETHERNET_INPUT_NEXT_LLC : next0;
+	  next1 = is_llc1 ? ETHERNET_INPUT_NEXT_LLC : next1;
+
+	  enqueue_code = (next0 != next_index) + 2*(next1 != next_index);
 
 	  if (PREDICT_FALSE (enqueue_code != 0))
 	    {
-	      u32 next0, next1;
 	      switch (enqueue_code)
 		{
 		case 1:
@@ -159,7 +170,6 @@ ethernet_input (vlib_main_t * vm,
 		  to_next[-2] = bi1;
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  next0 = vec_elt (rt->next_by_type, i0);
 		  vlib_set_next_frame_buffer (vm, node, next0, bi0);
 		  break;
 
@@ -167,7 +177,6 @@ ethernet_input (vlib_main_t * vm,
 		  /* A A B */
 		  to_next -= 1;
 		  n_left_to_next += 1;
-		  next1 = vec_elt (rt->next_by_type, i1);
 		  vlib_set_next_frame_buffer (vm, node, next1, bi1);
 		  break;
 
@@ -175,16 +184,13 @@ ethernet_input (vlib_main_t * vm,
 		  /* A B B or A B C */
 		  to_next -= 2;
 		  n_left_to_next += 2;
-		  next0 = vec_elt (rt->next_by_type, i0);
 		  vlib_set_next_frame_buffer (vm, node, next0, bi0);
-		  next1 = vec_elt (rt->next_by_type, i1);
 		  vlib_set_next_frame_buffer (vm, node, next1, bi1);
 
 		  if (i0 == i1)
 		    {
 		      vlib_put_next_frame (vm, node, next_index,
 					   n_left_to_next);
-		      i_next = i1;
 		      next_index = next1;
 		      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 		    }
@@ -198,7 +204,7 @@ ethernet_input (vlib_main_t * vm,
 	  vlib_buffer_t * b0;
 	  ethernet_buffer_opaque_t * o0;
 	  ethernet_header_t * e0;
-	  u32 i0, type0;
+	  u32 i0, next0, type0, len0, is_llc0;
 
 	  bi0 = from[0];
 	  to_next[0] = bi0;
@@ -220,18 +226,22 @@ ethernet_input (vlib_main_t * vm,
 
 	  type0 = e0->type;
 	  i0 = sparse_vec_index (rt->next_by_type, type0);
+	  next0 = vec_elt (rt->next_by_type, i0);
 
 	  b0->error = node->errors[i0 == SPARSE_VEC_INVALID_INDEX ? ETHERNET_ERROR_UNKNOWN_TYPE : ETHERNET_ERROR_NONE];
 	  
+	  len0 = clib_net_to_host_u16 (type0);
+	  is_llc0 = len0 < 0x600;
+	  next0 = is_llc0 ? ETHERNET_INPUT_NEXT_LLC : next0;
+
 	  /* Sent packet to wrong next? */
-	  if (PREDICT_FALSE (i0 != i_next))
+	  if (PREDICT_FALSE (next0 != next_index))
 	    {
 	      /* Return old frame; remove incorrectly enqueued packet. */
 	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
 
 	      /* Send to correct next. */
-	      i_next = i0;
-	      next_index = vec_elt (rt->next_by_type, i_next);
+	      next_index = next0;
 	      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 	      to_next[0] = bi0;
 	      to_next += 1;

@@ -71,6 +71,17 @@ nobase_include_HEADERS +=			\
  vnet/hdlc/packet.h
 
 ########################################
+# Layer 2 protocol: LLC
+########################################
+libvnet_la_SOURCES +=				\
+  vnet/llc/llc.c				\
+  vnet/llc/node.c				\
+  vnet/llc/pg.c
+
+nobase_include_HEADERS +=			\
+ vnet/llc/llc.h
+
+########################################
 # Layer 3 protocols go here
 ########################################
 
