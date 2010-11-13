@@ -44,7 +44,6 @@ file will be written after n_packets_to_capture or call to pcap_write (&pcap).
 
 */
 
-
 clib_error_t *
 pcap_write (pcap_main_t * pm)
 {
@@ -124,4 +123,77 @@ pcap_write (pcap_main_t * pm)
 	close (pm->file_descriptor);
     }
   return error;
+}
+
+clib_error_t * pcap_read (pcap_main_t * pm)
+{
+  clib_error_t * error = 0;
+  int fd, need_swap, n;
+  pcap_file_header_t fh;
+  pcap_packet_header_t ph;
+
+  fd = open (pm->file_name, O_RDONLY);
+  if (fd < 0)
+    {
+      error = clib_error_return_unix (0, "open `%s'", pm->file_name);
+      goto done;
+    }
+
+  if (read (fd, &fh, sizeof (fh)) != sizeof (fh))
+    {
+      error = clib_error_return_unix (0, "read file header `%s'", pm->file_name);
+      goto done;
+    }
+
+  need_swap = 0;
+  if (fh.magic == 0xd4c3b2a1)
+    {
+      need_swap = 1;
+#define _(t,f) fh.f = clib_byte_swap_##t (fh.f);
+      foreach_pcap_file_header;
+#undef _
+    }    
+
+  if (fh.magic != 0xa1b2c3d4)
+    {
+      error = clib_error_return (0, "bad magic `%s'", pm->file_name);
+      goto done;
+    }
+
+  pm->min_packet_bytes = 0;
+  pm->max_packet_bytes = 0;
+  while ((n = read (fd, &ph, sizeof (ph))) != 0)
+    {
+      u8 * data;
+
+      if (need_swap)
+	{
+#define _(t,f) ph.f = clib_byte_swap_##t (ph.f);
+	  foreach_pcap_packet_header;
+#undef _
+	}
+
+      data = vec_new (u8, ph.n_bytes_in_packet);
+      if (read (fd, data, ph.n_packet_bytes_stored_in_file) != ph.n_packet_bytes_stored_in_file)
+	{
+	  error = clib_error_return (0, "short read `%s'", pm->file_name);
+	  goto done;
+	}
+	
+      if (vec_len (pm->packets_read) == 0)
+	pm->min_packet_bytes = pm->max_packet_bytes = ph.n_bytes_in_packet;
+      else
+	{
+	  pm->min_packet_bytes = clib_min (pm->min_packet_bytes, ph.n_bytes_in_packet);
+	  pm->max_packet_bytes = clib_max (pm->max_packet_bytes, ph.n_bytes_in_packet);
+	}
+	
+      vec_add1 (pm->packets_read, data);
+    }
+
+ done:
+  if (fd >= 0)
+    close (fd);
+  return error;
+  
 }

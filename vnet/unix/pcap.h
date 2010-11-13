@@ -41,38 +41,48 @@ typedef enum {
 #undef _
 } pcap_packet_type_t;
 
+#define foreach_pcap_file_header			\
+  /* 0xa1b2c3d4 host byte order.			\
+     0xd4c3b2a1 => need to byte swap everything. */	\
+  _ (u32, magic)					\
+							\
+  /* Currently major 2 minor 4. */			\
+  _ (u16, major_version)				\
+  _ (u16, minor_version)				\
+							\
+  /* 0 for GMT. */					\
+  _ (u32, time_zone)					\
+							\
+  /* Accuracy of timestamps.  Typically set to 0. */	\
+  _ (u32, sigfigs)					\
+							\
+  /* Size of largest packet in file. */			\
+  _ (u32, max_packet_size_in_bytes)			\
+							\
+  /* One of vnet_pcap_packet_type_t. */			\
+  _ (u32, packet_type)
+
 /* File header. */
 typedef struct {
-  /* 0xa1b2c3d4 host byte order.
-     0xd4c3b2a1 => need to byte swap everything. */
-  u32 magic;
-
-  /* Currently major 2 minor 4. */
-  u16 major_version;
-  u16 minor_version;
-
-  /* 0 for GMT. */
-  u32 time_zone;
-
-  /* Accuracy of timestamps.  Typically set to 0. */
-  u32 sigfigs;
-
-  /* Size of largest packet in file. */
-  u32 max_packet_size_in_bytes;
-
-  /* One of vnet_pcap_packet_type_t. */
-  u32 packet_type;
+#define _(t, f) t f;
+  foreach_pcap_file_header
+#undef _
 } pcap_file_header_t;
+
+#define foreach_pcap_packet_header					\
+  /* Time stamp in seconds and microseconds. */				\
+  _ (u32, time_in_sec)							\
+  _ (u32, time_in_usec)							\
+									\
+  /* Number of bytes stored in file and size of actual packet. */	\
+  _ (u32, n_packet_bytes_stored_in_file)				\
+  _ (u32, n_bytes_in_packet)
 
 /* Packet header. */
 typedef struct {
-  /* Time stamp in seconds and microseconds. */
-  u32 time_in_sec;
-  u32 time_in_usec;
-
-  /* Number of bytes stored in file and size of actual packet. */
-  u32 n_packet_bytes_stored_in_file;
-  u32 n_bytes_in_packet;
+#define _(t, f) t f;
+  foreach_pcap_packet_header
+#undef _
 
   /* Packet data follows. */
   u8 data[0];
@@ -93,17 +103,24 @@ typedef struct {
   u32 flags;
 #define PCAP_MAIN_INIT_DONE (1 << 0)
 
-  /* File descriptor for writing. */
+  /* File descriptor for reading/writing. */
   int file_descriptor;
 
   u32 n_pcap_data_written;
 
   /* Vector of pcap data. */
   u8 * pcap_data;
+
+  /* Packets read from file. */
+  u8 ** packets_read;
+
+  u32 min_packet_bytes, max_packet_bytes;
 } pcap_main_t;
 
 /* Write out data to output file. */
 clib_error_t * pcap_write (pcap_main_t * pm);
+
+clib_error_t * pcap_read (pcap_main_t * pm);
 
 always_inline void *
 pcap_add_packet (pcap_main_t * pm,
