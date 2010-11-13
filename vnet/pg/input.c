@@ -1097,6 +1097,52 @@ pg_set_next_buffer_pointers (pg_main_t * pg,
 }
 
 static_always_inline void
+init_replay_buffers_inline (vlib_main_t * vm,
+			    pg_stream_t * s,
+			    u32 * buffers,
+			    u32 n_buffers,
+			    u32 data_offset,
+			    u32 n_data)
+{
+  u32 n_left, * b, i, l;
+
+  n_left = n_buffers;
+  b = buffers;
+  i = s->current_replay_packet_index;
+  l = vec_len (s->replay_packet_templates);
+
+  while (n_left >= 1)
+    {
+      u32 bi0, n0;
+      vlib_buffer_t * b0;
+      u8 * d0;
+
+      bi0 = b[0];
+      b += 1;
+      n_left -= 1;
+
+      b0 = vlib_get_buffer (vm, bi0);
+
+      b0->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
+      b0->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
+
+      if (data_offset == 0)
+	ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
+
+      d0 = vec_elt (s->replay_packet_templates, i);
+
+      n0 = n_data;
+      if (data_offset + n_data >= vec_len (d0))
+	n0 = vec_len (d0) > data_offset ? vec_len (d0) - data_offset : 0;
+
+      b0->current_length = n0;
+
+      memcpy (b0->data, d0 + data_offset, n0);
+      i = i + 1 == l ? 0 : i + 1;
+    }
+}
+
+static_always_inline void
 init_buffers_inline (vlib_main_t * vm,
 		     pg_stream_t * s,
 		     u32 * buffers,
@@ -1107,6 +1153,9 @@ init_buffers_inline (vlib_main_t * vm,
 {
   u32 n_left, * b;
   u8 * data, * mask;
+
+  if (vec_len (s->replay_packet_templates) > 0)
+    return init_replay_buffers_inline (vm, s, buffers, n_buffers, data_offset, n_data);
 
   data = s->fixed_packet_data + data_offset;
   mask = s->fixed_packet_data_mask + data_offset;
@@ -1145,8 +1194,11 @@ init_buffers_inline (vlib_main_t * vm,
       b0->sw_if_index[VLIB_TX] =
 	b1->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
-      ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
-      ASSERT (b1->flags & VNET_BUFFER_LOCALLY_GENERATED);
+      if (data_offset == 0)
+	{
+	  ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
+	  ASSERT (b1->flags & VNET_BUFFER_LOCALLY_GENERATED);
+	}
 
       if (set_data)
 	{
@@ -1174,7 +1226,8 @@ init_buffers_inline (vlib_main_t * vm,
       b0->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
       b0->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
-      ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
+      if (data_offset == 0)
+	ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
 
       if (set_data)
 	memcpy (b0->data, data, n_data);
@@ -1216,7 +1269,8 @@ pg_stream_fill_helper (pg_main_t * pg,
   uword is_start_of_packet = bi == s->buffer_indices;
 
   f = vlib_buffer_get_free_list (vm, bi->free_list_index);
-  f->buffer_init_function = pg_buffer_init;
+  if (! (s->flags & PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE))
+    f->buffer_init_function = pg_buffer_init;
   f->buffer_init_function_opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
   if (is_start_of_packet)
     f->buffer_init_template.flags |= VNET_BUFFER_LOCALLY_GENERATED;
@@ -1242,11 +1296,30 @@ pg_stream_fill_helper (pg_main_t * pg,
 
   if (is_start_of_packet)
     {
-      pg_generate_set_lengths (pg, s, buffers, n_alloc);
-      if (vec_len (s->buffer_indices) > 1)
-	pg_generate_fix_multi_buffer_lengths (pg, s, buffers, n_alloc);
+      if (vec_len (s->replay_packet_templates) > 0)
+	{
+	  vlib_interface_main_t * im = &vm->interface_main;
+	  vlib_sw_interface_t * si = vlib_get_sw_interface (vm, s->sw_if_index[VLIB_RX]);
+	  u32 l = 0;
+	  u32 i;
+	  for (i = 0; i < n_alloc; i++)
+	    l += vlib_buffer_index_length_in_chain (vm, buffers[i]);
+	  vlib_increment_combined_counter (im->combined_sw_if_counters
+					   + VLIB_INTERFACE_COUNTER_RX,
+					   si->sw_if_index,
+					   n_alloc,
+					   l);
+	  s->current_replay_packet_index += n_alloc;
+	  s->current_replay_packet_index %= vec_len (s->replay_packet_templates);
+	}
+      else
+	{
+	  pg_generate_set_lengths (pg, s, buffers, n_alloc);
+	  if (vec_len (s->buffer_indices) > 1)
+	    pg_generate_fix_multi_buffer_lengths (pg, s, buffers, n_alloc);
 
-      pg_generate_edit (pg, s, buffers, n_alloc);
+	  pg_generate_edit (pg, s, buffers, n_alloc);
+	}
     }
 
   return n_alloc;

@@ -142,6 +142,9 @@ typedef struct pg_stream_t {
   f64 packet_accumulator;
 
   pg_buffer_index_t * buffer_indices;
+
+  u8 ** replay_packet_templates;
+  u32 current_replay_packet_index;
 } pg_stream_t;
 
 always_inline void

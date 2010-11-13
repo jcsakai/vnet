@@ -325,7 +325,8 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
     default:
       /* Get packet size from fixed edits. */
       s->packet_size_edit_type = PG_EDIT_FIXED;
-      s->min_packet_bytes = s->max_packet_bytes = vec_len (s->fixed_packet_data);
+      if (! s->replay_packet_templates)
+	s->min_packet_bytes = s->max_packet_bytes = vec_len (s->fixed_packet_data);
       break;
     }
 
