@@ -95,7 +95,7 @@ hdlc_input (vlib_main_t * vm,
 	  u32 bi0, bi1;
 	  vlib_buffer_t * b0, * b1;
 	  hdlc_header_t * h0, * h1;
-	  u32 i0, i1, protocol0, protocol1, enqueue_code;
+	  u32 i0, i1, len0, len1, protocol0, protocol1, enqueue_code;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -126,11 +126,18 @@ hdlc_input (vlib_main_t * vm,
 	  h0 = (void *) (b0->data + b0->current_data);
 	  h1 = (void *) (b1->data + b1->current_data);
 
-	  b0->current_data += sizeof (h0[0]);
-	  b1->current_data += sizeof (h1[0]);
+	  /* Add padding bytes for OSI protocols. */
+	  len0 = sizeof (h0[0]);
+	  len1 = sizeof (h1[0]);
+	  
+	  len0 += protocol0 == clib_host_to_net_u16 (HDLC_PROTOCOL_osi);
+	  len1 += protocol1 == clib_host_to_net_u16 (HDLC_PROTOCOL_osi);
 
-	  b0->current_length -= sizeof (h0[0]);
-	  b1->current_length -= sizeof (h1[0]);
+	  b0->current_data += len0;
+	  b1->current_data += len1;
+
+	  b0->current_length -= len0;
+	  b1->current_length -= len1;
 
 	  /* Index sparse array with network byte order. */
 	  protocol0 = h0->protocol;
@@ -184,7 +191,7 @@ hdlc_input (vlib_main_t * vm,
 	  u32 bi0;
 	  vlib_buffer_t * b0;
 	  hdlc_header_t * h0;
-	  u32 i0, protocol0;
+	  u32 i0, len0, protocol0;
 
 	  bi0 = from[0];
 	  to_next[0] = bi0;
@@ -197,10 +204,15 @@ hdlc_input (vlib_main_t * vm,
 
 	  h0 = (void *) (b0->data + b0->current_data);
 
-	  b0->current_data += sizeof (h0[0]);
-	  b0->current_length -= sizeof (h0[0]);
-
 	  protocol0 = h0->protocol;
+
+	  /* Add padding bytes for OSI protocols. */
+	  len0 = sizeof (h0[0]);
+	  len0 += protocol0 == clib_host_to_net_u16 (HDLC_PROTOCOL_osi);
+
+	  b0->current_data += len0;
+	  b0->current_length -= len0;
+
 	  i0 = sparse_vec_index (rt->next_by_protocol, protocol0);
 
 	  b0->error = node->errors[i0 == SPARSE_VEC_INVALID_INDEX ? HDLC_ERROR_UNKNOWN_PROTOCOL : HDLC_ERROR_NONE];

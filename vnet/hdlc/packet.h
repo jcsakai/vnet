@@ -31,7 +31,8 @@
   _ (0x8035, slarp)				\
   _ (0x8847, mpls_unicast)			\
   _ (0x8848, mpls_multicast)			\
-  _ (0x86DD, ip6)
+  _ (0x86dd, ip6)				\
+  _ (0xfefe, osi)
 
 typedef enum {
 #define _(n,f) HDLC_PROTOCOL_##f = n,
@@ -48,6 +49,9 @@ typedef struct {
 
   /* Layer 3 protocol for this packet. */
   u16 protocol;
+
+  /* Layer 3 payload. */
+  u8 payload[0];
 } hdlc_header_t;
 
 #endif /* included_vnet_hdlc_packet_h */

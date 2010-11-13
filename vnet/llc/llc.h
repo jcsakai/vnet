@@ -136,9 +136,9 @@ extern llc_main_t llc_main;
 
 /* Register given node index to take input for given llc type. */
 void
-llc_register_input_type (vlib_main_t * vm,
-			 llc_protocol_t protocol,
-			 u32 node_index);
+llc_register_input_protocol (vlib_main_t * vm,
+			     llc_protocol_t protocol,
+			     u32 node_index);
 
 void llc_set_adjacency (vnet_rewrite_header_t * rw,
 			uword max_data_bytes,
@@ -165,11 +165,5 @@ llc_setup_node (vlib_main_t * vm, u32 node_index)
   n->unformat_buffer = unformat_llc_header;
   pn->unformat_edit = unformat_pg_llc_header;
 }
-
-void
-llc_register_input_protocol (llc_protocol_t protocol,
-			     u32 node_index);
-
-format_function_t format_llc_header;
 
 #endif /* included_llc_h */

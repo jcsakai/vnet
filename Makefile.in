@@ -93,12 +93,13 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/ip/ip_checksum.lo vnet/ip/ip_init.lo vnet/ip/lookup.lo \
 	vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
 	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
-	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/pg/cli.lo \
-	vnet/pg/edit.lo vnet/pg/init.lo vnet/pg/input.lo \
-	vnet/pg/output.lo vnet/pg/stream.lo \
-	vnet/devices/ethernet_phy_bcm.lo vnet/devices/i2c/i2c.lo \
-	vnet/devices/pci/ixge.lo vnet/devices/optics/sfp.lo \
-	vnet/devices/xge/xge.lo vnet/unix/pcap.lo vnet/unix/tuntap.lo
+	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/osi/node.lo \
+	vnet/osi/osi.lo vnet/osi/pg.lo vnet/pg/cli.lo vnet/pg/edit.lo \
+	vnet/pg/init.lo vnet/pg/input.lo vnet/pg/output.lo \
+	vnet/pg/stream.lo vnet/devices/ethernet_phy_bcm.lo \
+	vnet/devices/i2c/i2c.lo vnet/devices/pci/ixge.lo \
+	vnet/devices/optics/sfp.lo vnet/devices/xge/xge.lo \
+	vnet/unix/pcap.lo vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -278,7 +279,11 @@ AM_CFLAGS = -Wall
 ########################################
 
 ########################################
-# Layer 3 protocol: IP v4 (& v6)
+# Layer 3 protocol: IP v4/v6
+########################################
+
+########################################
+# Layer 3 protocol: osi
 ########################################
 
 ########################################
@@ -307,8 +312,9 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c \
 	vnet/ip/tcp_format.c vnet/ip/tcp_init.c vnet/ip/tcp_pg.c \
 	vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
-	vnet/ip/udp_init.c vnet/ip/udp_pg.c vnet/pg/cli.c \
-	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
+	vnet/ip/udp_init.c vnet/ip/udp_pg.c vnet/osi/node.c \
+	vnet/osi/osi.c vnet/osi/pg.c vnet/pg/cli.c vnet/pg/edit.c \
+	vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
 	vnet/devices/i2c/i2c.c vnet/devices/pci/ixge.c \
 	vnet/devices/optics/sfp.c vnet/devices/xge/xge.c \
@@ -325,10 +331,10 @@ nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/ip/ip4_packet.h vnet/ip/ip6.h vnet/ip/ip6_error.h \
 	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
 	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
-	vnet/ip/udp_packet.h vnet/pg/pg.h vnet/pg/edit.h \
-	vnet/devices/i2c/i2c.h vnet/devices/optics/sfp.h \
-	vnet/devices/pci/ixge.h vnet/devices/xge/xge.h \
-	vnet/unix/pcap.h vnet/unix/tuntap.h
+	vnet/ip/udp_packet.h vnet/osi/osi.h vnet/pg/pg.h \
+	vnet/pg/edit.h vnet/devices/i2c/i2c.h \
+	vnet/devices/optics/sfp.h vnet/devices/pci/ixge.h \
+	vnet/devices/xge/xge.h vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDFLAGS = -static
@@ -524,6 +530,18 @@ vnet/ip/udp_init.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/udp_pg.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/osi/$(am__dirstamp):
+	@$(MKDIR_P) vnet/osi
+	@: > vnet/osi/$(am__dirstamp)
+vnet/osi/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/osi/$(DEPDIR)
+	@: > vnet/osi/$(DEPDIR)/$(am__dirstamp)
+vnet/osi/node.lo: vnet/osi/$(am__dirstamp) \
+	vnet/osi/$(DEPDIR)/$(am__dirstamp)
+vnet/osi/osi.lo: vnet/osi/$(am__dirstamp) \
+	vnet/osi/$(DEPDIR)/$(am__dirstamp)
+vnet/osi/pg.lo: vnet/osi/$(am__dirstamp) \
+	vnet/osi/$(DEPDIR)/$(am__dirstamp)
 vnet/pg/$(am__dirstamp):
 	@$(MKDIR_P) vnet/pg
 	@: > vnet/pg/$(am__dirstamp)
@@ -704,6 +722,12 @@ mostlyclean-compile:
 	-rm -f vnet/llc/node.lo
 	-rm -f vnet/llc/pg.$(OBJEXT)
 	-rm -f vnet/llc/pg.lo
+	-rm -f vnet/osi/node.$(OBJEXT)
+	-rm -f vnet/osi/node.lo
+	-rm -f vnet/osi/osi.$(OBJEXT)
+	-rm -f vnet/osi/osi.lo
+	-rm -f vnet/osi/pg.$(OBJEXT)
+	-rm -f vnet/osi/pg.lo
 	-rm -f vnet/pg/cli.$(OBJEXT)
 	-rm -f vnet/pg/cli.lo
 	-rm -f vnet/pg/edit.$(OBJEXT)
@@ -778,6 +802,9 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/llc/$(DEPDIR)/llc.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/llc/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/llc/$(DEPDIR)/pg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/osi/$(DEPDIR)/node.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/osi/$(DEPDIR)/osi.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/osi/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/cli.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/edit.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/pg/$(DEPDIR)/init.Plo@am__quote@
@@ -830,6 +857,7 @@ clean-libtool:
 	-rm -rf vnet/hdlc/.libs vnet/hdlc/_libs
 	-rm -rf vnet/ip/.libs vnet/ip/_libs
 	-rm -rf vnet/llc/.libs vnet/llc/_libs
+	-rm -rf vnet/osi/.libs vnet/osi/_libs
 	-rm -rf vnet/pg/.libs vnet/pg/_libs
 	-rm -rf vnet/ppp/.libs vnet/ppp/_libs
 	-rm -rf vnet/unix/.libs vnet/unix/_libs
@@ -1108,6 +1136,8 @@ distclean-generic:
 	-rm -f vnet/ip/$(am__dirstamp)
 	-rm -f vnet/llc/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/llc/$(am__dirstamp)
+	-rm -f vnet/osi/$(DEPDIR)/$(am__dirstamp)
+	-rm -f vnet/osi/$(am__dirstamp)
 	-rm -f vnet/pg/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/pg/$(am__dirstamp)
 	-rm -f vnet/ppp/$(DEPDIR)/$(am__dirstamp)
@@ -1127,7 +1157,7 @@ clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/osi/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-libtool distclean-tags
@@ -1175,7 +1205,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/osi/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 

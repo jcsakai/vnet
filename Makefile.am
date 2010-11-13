@@ -86,7 +86,7 @@ nobase_include_HEADERS +=			\
 ########################################
 
 ########################################
-# Layer 3 protocol: IP v4 (& v6)
+# Layer 3 protocol: IP v4/v6
 ########################################
 libvnet_la_SOURCES +=				\
  vnet/ip/format.c				\
@@ -132,6 +132,17 @@ nobase_include_HEADERS +=			\
  vnet/ip/protocols.def				\
  vnet/ip/tcp_packet.h				\
  vnet/ip/udp_packet.h
+
+########################################
+# Layer 3 protocol: osi
+########################################
+libvnet_la_SOURCES +=				\
+ vnet/osi/node.c				\
+ vnet/osi/osi.c					\
+ vnet/osi/pg.c
+
+nobase_include_HEADERS +=			\
+ vnet/osi/osi.h
 
 ########################################
 # Packet generator
