@@ -1,5 +1,5 @@
 /*
- * ppp_init.c: ppp initialization
+ * ppp.c: ppp support
  *
  * Copyright (c) 2010 Eliot Dresselhaus
  *
