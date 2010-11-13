@@ -1,5 +1,5 @@
 /*
- * hdlc_init.c: hdlc initialization
+ * hdlc.c: hdlc
  *
  * Copyright (c) 2010 Eliot Dresselhaus
  *
