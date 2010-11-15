@@ -97,6 +97,12 @@ typedef struct {
 typedef struct {
   vlib_main_t * vlib_main;
 
+  /* Sparse vector mapping ethernet type in network byte order
+     to next index. */
+  u16 * input_next_by_type;
+
+  u32 * sparse_index_by_input_next_index;
+
   /* Pool of ethernet interface instances. */
   ethernet_interface_t * interfaces;
 

@@ -82,6 +82,17 @@ nobase_include_HEADERS +=			\
  vnet/llc/llc.h
 
 ########################################
+# Layer 2 protocol: SNAP
+########################################
+libvnet_la_SOURCES +=				\
+  vnet/snap/snap.c				\
+  vnet/snap/node.c				\
+  vnet/snap/pg.c
+
+nobase_include_HEADERS +=			\
+ vnet/snap/snap.h
+
+########################################
 # Layer 3 protocols go here
 ########################################
 

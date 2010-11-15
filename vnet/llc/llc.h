@@ -125,7 +125,7 @@ typedef struct {
   u8 input_next_by_protocol[256];
 } llc_main_t;
 
-static inline llc_protocol_info_t *
+always_inline llc_protocol_info_t *
 llc_get_protocol_info (llc_main_t * m, llc_protocol_t protocol)
 {
   uword * p = hash_get (m->protocol_info_by_protocol, protocol);

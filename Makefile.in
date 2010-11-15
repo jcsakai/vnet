@@ -83,7 +83,8 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/ethernet/pg.lo vnet/ethernet/phy.lo vnet/ppp/node.lo \
 	vnet/ppp/pg.lo vnet/ppp/ppp.lo vnet/hdlc/node.lo \
 	vnet/hdlc/pg.lo vnet/hdlc/hdlc.lo vnet/llc/llc.lo \
-	vnet/llc/node.lo vnet/llc/pg.lo vnet/ip/format.lo \
+	vnet/llc/node.lo vnet/llc/pg.lo vnet/snap/snap.lo \
+	vnet/snap/node.lo vnet/snap/pg.lo vnet/ip/format.lo \
 	vnet/ip/icmp4.lo vnet/ip/icmp6.lo vnet/ip/ip46_cli.lo \
 	vnet/ip/ip4_format.lo vnet/ip/ip4_forward.lo \
 	vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
@@ -275,6 +276,10 @@ AM_CFLAGS = -Wall
 ########################################
 
 ########################################
+# Layer 2 protocol: SNAP
+########################################
+
+########################################
 # Layer 3 protocols go here
 ########################################
 
@@ -303,7 +308,8 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
 	vnet/ppp/node.c vnet/ppp/pg.c vnet/ppp/ppp.c vnet/hdlc/node.c \
 	vnet/hdlc/pg.c vnet/hdlc/hdlc.c vnet/llc/llc.c vnet/llc/node.c \
-	vnet/llc/pg.c vnet/ip/format.c vnet/ip/icmp4.c vnet/ip/icmp6.c \
+	vnet/llc/pg.c vnet/snap/snap.c vnet/snap/node.c vnet/snap/pg.c \
+	vnet/ip/format.c vnet/ip/icmp4.c vnet/ip/icmp6.c \
 	vnet/ip/ip46_cli.c vnet/ip/ip4_format.c vnet/ip/ip4_forward.c \
 	vnet/ip/ip4_input.c vnet/ip/ip4_pg.c \
 	vnet/ip/ip4_source_check.c vnet/ip/ip6_format.c \
@@ -326,11 +332,12 @@ nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
 	vnet/ppp/error.def vnet/ppp/ppp.h vnet/ppp/packet.h \
 	vnet/hdlc/error.def vnet/hdlc/hdlc.h vnet/hdlc/packet.h \
-	vnet/llc/llc.h vnet/ip/format.h vnet/ip/icmp46_packet.h \
-	vnet/ip/icmp6.h vnet/ip/ip.h vnet/ip/ip4.h vnet/ip/ip4_error.h \
-	vnet/ip/ip4_packet.h vnet/ip/ip6.h vnet/ip/ip6_error.h \
-	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
-	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp_packet.h \
+	vnet/llc/llc.h vnet/snap/snap.h vnet/ip/format.h \
+	vnet/ip/icmp46_packet.h vnet/ip/icmp6.h vnet/ip/ip.h \
+	vnet/ip/ip4.h vnet/ip/ip4_error.h vnet/ip/ip4_packet.h \
+	vnet/ip/ip6.h vnet/ip/ip6_error.h vnet/ip/ip6_packet.h \
+	vnet/ip/lookup.h vnet/ip/ip_packet.h vnet/ip/ports.def \
+	vnet/ip/protocols.def vnet/ip/tcp_packet.h \
 	vnet/ip/udp_packet.h vnet/osi/osi.h vnet/pg/pg.h \
 	vnet/pg/edit.h vnet/devices/i2c/i2c.h \
 	vnet/devices/optics/sfp.h vnet/devices/pci/ixge.h \
@@ -476,6 +483,18 @@ vnet/llc/node.lo: vnet/llc/$(am__dirstamp) \
 	vnet/llc/$(DEPDIR)/$(am__dirstamp)
 vnet/llc/pg.lo: vnet/llc/$(am__dirstamp) \
 	vnet/llc/$(DEPDIR)/$(am__dirstamp)
+vnet/snap/$(am__dirstamp):
+	@$(MKDIR_P) vnet/snap
+	@: > vnet/snap/$(am__dirstamp)
+vnet/snap/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) vnet/snap/$(DEPDIR)
+	@: > vnet/snap/$(DEPDIR)/$(am__dirstamp)
+vnet/snap/snap.lo: vnet/snap/$(am__dirstamp) \
+	vnet/snap/$(DEPDIR)/$(am__dirstamp)
+vnet/snap/node.lo: vnet/snap/$(am__dirstamp) \
+	vnet/snap/$(DEPDIR)/$(am__dirstamp)
+vnet/snap/pg.lo: vnet/snap/$(am__dirstamp) \
+	vnet/snap/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/$(am__dirstamp):
 	@$(MKDIR_P) vnet/ip
 	@: > vnet/ip/$(am__dirstamp)
@@ -746,6 +765,12 @@ mostlyclean-compile:
 	-rm -f vnet/ppp/pg.lo
 	-rm -f vnet/ppp/ppp.$(OBJEXT)
 	-rm -f vnet/ppp/ppp.lo
+	-rm -f vnet/snap/node.$(OBJEXT)
+	-rm -f vnet/snap/node.lo
+	-rm -f vnet/snap/pg.$(OBJEXT)
+	-rm -f vnet/snap/pg.lo
+	-rm -f vnet/snap/snap.$(OBJEXT)
+	-rm -f vnet/snap/snap.lo
 	-rm -f vnet/unix/pcap.$(OBJEXT)
 	-rm -f vnet/unix/pcap.lo
 	-rm -f vnet/unix/tuntap.$(OBJEXT)
@@ -814,6 +839,9 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ppp/$(DEPDIR)/ppp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/snap/$(DEPDIR)/node.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/snap/$(DEPDIR)/pg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/snap/$(DEPDIR)/snap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/pcap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/tuntap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/config.Plo@am__quote@
@@ -860,6 +888,7 @@ clean-libtool:
 	-rm -rf vnet/osi/.libs vnet/osi/_libs
 	-rm -rf vnet/pg/.libs vnet/pg/_libs
 	-rm -rf vnet/ppp/.libs vnet/ppp/_libs
+	-rm -rf vnet/snap/.libs vnet/snap/_libs
 	-rm -rf vnet/unix/.libs vnet/unix/_libs
 	-rm -rf vnet/vnet/.libs vnet/vnet/_libs
 
@@ -1142,6 +1171,8 @@ distclean-generic:
 	-rm -f vnet/pg/$(am__dirstamp)
 	-rm -f vnet/ppp/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/ppp/$(am__dirstamp)
+	-rm -f vnet/snap/$(DEPDIR)/$(am__dirstamp)
+	-rm -f vnet/snap/$(am__dirstamp)
 	-rm -f vnet/unix/$(DEPDIR)/$(am__dirstamp)
 	-rm -f vnet/unix/$(am__dirstamp)
 	-rm -f vnet/vnet/$(DEPDIR)/$(am__dirstamp)
@@ -1157,7 +1188,7 @@ clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/osi/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/osi/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/snap/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-libtool distclean-tags
@@ -1205,7 +1236,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/osi/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
+	-rm -rf example/$(DEPDIR) vnet/devices/$(DEPDIR) vnet/devices/i2c/$(DEPDIR) vnet/devices/optics/$(DEPDIR) vnet/devices/pci/$(DEPDIR) vnet/devices/xge/$(DEPDIR) vnet/ethernet/$(DEPDIR) vnet/hdlc/$(DEPDIR) vnet/ip/$(DEPDIR) vnet/llc/$(DEPDIR) vnet/osi/$(DEPDIR) vnet/pg/$(DEPDIR) vnet/ppp/$(DEPDIR) vnet/snap/$(DEPDIR) vnet/unix/$(DEPDIR) vnet/vnet/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
