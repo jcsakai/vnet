@@ -62,7 +62,7 @@ typedef struct {
   uword * protocol_info_by_name, * protocol_info_by_protocol;
 } hdlc_main_t;
 
-static inline hdlc_protocol_info_t *
+always_inline hdlc_protocol_info_t *
 hdlc_get_protocol_info (hdlc_main_t * em, hdlc_protocol_t protocol)
 {
   uword * p = hash_get (em->protocol_info_by_protocol, protocol);
