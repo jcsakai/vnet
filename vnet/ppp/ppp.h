@@ -62,7 +62,7 @@ typedef struct {
   uword * protocol_info_by_name, * protocol_info_by_protocol;
 } ppp_main_t;
 
-static inline ppp_protocol_info_t *
+always_inline ppp_protocol_info_t *
 ppp_get_protocol_info (ppp_main_t * em, ppp_protocol_t protocol)
 {
   uword * p = hash_get (em->protocol_info_by_protocol, protocol);
