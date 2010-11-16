@@ -55,9 +55,6 @@ typedef struct {
   /* Interface MTU in bytes and # of default sized buffers. */
   u32 mtu_bytes, mtu_buffers;
 
-  /* epoll call says we are ready to readv from socket. */
-  u32 read_ready;
-
   /* Linux interface name for tun device. */
   char * tun_name;
 
@@ -141,14 +138,6 @@ enum {
   TUNTAP_RX_N_NEXT,
 };
 
-/* Gets called when file descriptor is ready from epoll. */
-static clib_error_t * tuntap_read_ready (unix_file_t * uf)
-{
-  tuntap_main_t * tm = &tuntap_main;
-  tm->read_ready = 1;
-  return 0;
-}
-
 static uword
 tuntap_rx (vlib_main_t * vm,
 	   vlib_node_runtime_t * node,
@@ -158,12 +147,6 @@ tuntap_rx (vlib_main_t * vm,
   vlib_buffer_t * b;
   u32 bi;
   const uword buffer_size = VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
-
-  /* Work to do? */
-  if (! tm->read_ready)
-    return 0;
-
-  tm->read_ready = 0;
 
   /* Make sure we have some RX buffers. */
   {
@@ -202,7 +185,8 @@ tuntap_rx (vlib_main_t * vm,
     n_bytes_left = readv (tm->dev_net_tun_fd, tm->iovecs, tm->mtu_buffers);
     if (n_bytes_left <= 0)
       {
-	clib_unix_warning ("readv %d", n_bytes_left);
+        if (errno != EAGAIN)
+          clib_unix_warning ("readv %d", n_bytes_left);
 	return 0;
       }
 
@@ -232,7 +216,7 @@ tuntap_rx (vlib_main_t * vm,
     {
       u8 * msg = vlib_validate_buffer (vm, bi, /* follow_buffer_next */ 1);
       if (msg)
-	clib_warning ("%v", msg);
+        ASSERT (0);
     }
 
   b = vlib_get_buffer (vm, bi);
@@ -246,10 +230,10 @@ tuntap_rx (vlib_main_t * vm,
     switch (b->data[0] & 0xf0)
       {
       case 0x40:
-        next_index =  TUNTAP_RX_NEXT_IP4_INPUT;
+        next_index = TUNTAP_RX_NEXT_IP4_INPUT;
         break;
       case 0x60:
-        next_index =  TUNTAP_RX_NEXT_IP6_INPUT;
+        next_index = TUNTAP_RX_NEXT_IP6_INPUT;
         break;
       default:
         next_index = TUNTAP_RX_NEXT_DROP;
@@ -277,6 +261,7 @@ static VLIB_REGISTER_NODE (tuntap_rx_node) = {
   .function = tuntap_rx,
   .name = "tuntap-rx",
   .type = VLIB_NODE_TYPE_INPUT,
+  .state = VLIB_NODE_STATE_INTERRUPT,
   .vector_size = 4,
   .n_errors = 1,
   .error_strings = tuntap_rx_error_strings,
@@ -288,6 +273,14 @@ static VLIB_REGISTER_NODE (tuntap_rx_node) = {
     [TUNTAP_RX_NEXT_DROP] = "error-drop",
   },
 };
+
+/* Gets called when file descriptor is ready from epoll. */
+static clib_error_t * tuntap_read_ready (unix_file_t * uf)
+{
+  vlib_main_t * vm = &vlib_global_main;
+  vlib_node_set_interrupt_pending (vm, tuntap_rx_node.index);
+  return 0;
+}
 
 /*
  * tuntap_exit
@@ -421,7 +414,7 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
   /* non-blocking I/O on /dev/tapX */
   {
     int one = 1;
-    if (ioctl (tm->dev_tap_fd, FIONBIO, &one) < 0)
+    if (ioctl (tm->dev_net_tun_fd, FIONBIO, &one) < 0)
       {
 	error = clib_error_return_unix (0, "ioctl FIONBIO");
 	goto done;
