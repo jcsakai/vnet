@@ -59,6 +59,9 @@ typedef struct {
   char * tun_name;
 
   u32 unix_file_index;
+
+  /* VLIB hardware/software interfaces for tuntap interface. */
+  u32 hw_if_index, sw_if_index;
 } tuntap_main_t;
 
 static tuntap_main_t tuntap_main = {
@@ -225,6 +228,7 @@ tuntap_rx (vlib_main_t * vm,
     u32 next_index;
     uword n_trace = vlib_get_trace_count (vm, node);
 
+    b->sw_if_index[VLIB_RX] = tm->sw_if_index;
     b->error = node->errors[0];
 
     switch (b->data[0] & 0xf0)
@@ -524,12 +528,41 @@ tuntap_punt_frame (vlib_main_t * vm,
   tuntap_tx (vm, /* node */ 0, frame);
 }
 
+static VLIB_HW_INTERFACE_CLASS (tuntap_interface_class) = {
+  .name = "Linux punt/inject (tuntap)",
+};
+
+static u8 * format_tuntap_interface_name (u8 * s, va_list * args)
+{
+  s = format (s, "tuntap");
+  return s;
+}
+
+static uword
+tuntap_dummy_tx (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame)
+{
+  u32 * buffers = vlib_frame_args (frame);
+  uword n_buffers = frame->n_vectors;
+  vlib_buffer_free (vm, buffers, /* next buffer stride */ 1, n_buffers,
+		    /* follow_buffer_next */ 1);
+  return n_buffers;
+}
+
+static VLIB_DEVICE_CLASS (tuntap_dev_class) = {
+  .name = "tuntap",
+  .tx_function = tuntap_dummy_tx,
+  .format_device_name = format_tuntap_interface_name,
+};
+
 static clib_error_t *
 tuntap_init (vlib_main_t * vm)
 {
   clib_error_t * error;
   ip4_main_t * im = &ip4_main;
   ip4_add_del_interface_address_callback_t cb;
+  tuntap_main_t * tm = &tuntap_main;
 
   error = vlib_call_init_function (vm, ip4_init);
   if (error)
@@ -540,6 +573,21 @@ tuntap_init (vlib_main_t * vm)
   vec_add1 (im->add_del_interface_address_callbacks, cb);
 
   vm->os_punt_frame = tuntap_punt_frame;
+
+  {
+    vlib_hw_interface_t * hi;
+
+    tm->hw_if_index = vlib_register_interface
+      (vm,
+       tuntap_dev_class.index, 0,
+       tuntap_interface_class.index, 0);
+    hi = vlib_get_hw_interface (vm, tm->hw_if_index);
+    tm->sw_if_index = hi->sw_if_index;
+
+    /* Interface is always up. */
+    vlib_hw_interface_set_flags (vm, tm->hw_if_index, VLIB_HW_INTERFACE_FLAG_LINK_UP);
+    vlib_sw_interface_set_flags (vm, tm->sw_if_index, VLIB_SW_INTERFACE_FLAG_ADMIN_UP);
+  }
 
   return 0;
 }
