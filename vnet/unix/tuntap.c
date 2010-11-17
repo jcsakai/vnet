@@ -172,7 +172,7 @@ tuntap_rx (vlib_main_t * vm,
   {
     uword i_rx = vec_len (tm->rx_buffers) - 1;
     vlib_buffer_t * b;
-    word i, n_bytes_left;
+    word i, n_bytes_left, n_bytes_in_packet;
 
     /* We should have enough buffers left for an MTU sized packet. */
     ASSERT (vec_len (tm->rx_buffers) >= tm->mtu_buffers);
@@ -186,6 +186,7 @@ tuntap_rx (vlib_main_t * vm,
       }
 
     n_bytes_left = readv (tm->dev_net_tun_fd, tm->iovecs, tm->mtu_buffers);
+    n_bytes_in_packet = n_bytes_left;
     if (n_bytes_left <= 0)
       {
         if (errno != EAGAIN)
@@ -211,6 +212,12 @@ tuntap_rx (vlib_main_t * vm,
 	b->flags |= VLIB_BUFFER_NEXT_PRESENT;
 	b->next_buffer = tm->rx_buffers[i_rx];
       }
+
+    /* Interface counters for tuntap interface. */
+    vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
+				     + VLIB_INTERFACE_COUNTER_RX,
+				     tm->sw_if_index,
+				     1, n_bytes_in_packet);
 
     _vec_len (tm->rx_buffers) = i_rx;
   }
@@ -534,7 +541,8 @@ static VLIB_HW_INTERFACE_CLASS (tuntap_interface_class) = {
 
 static u8 * format_tuntap_interface_name (u8 * s, va_list * args)
 {
-  s = format (s, "tuntap");
+  /* Calling it "tuntap" makes 2 nodes called tuntap-tx. */
+  s = format (s, "tuntap-0");
   return s;
 }
 
