@@ -111,9 +111,8 @@ extern osi_main_t osi_main;
 
 /* Register given node index to take input for given osi type. */
 void
-osi_register_input_type (vlib_main_t * vm,
-			 osi_protocol_t protocol,
-			 u32 node_index);
+osi_register_input_protocol (osi_protocol_t protocol,
+                             u32 node_index);
 
 void osi_set_adjacency (vnet_rewrite_header_t * rw,
 			uword max_data_bytes,
