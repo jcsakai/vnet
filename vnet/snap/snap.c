@@ -157,35 +157,6 @@ unformat_snap_header (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-static uword snap_set_rewrite (vlib_main_t * vm,
-			       u32 sw_if_index,
-			       u32 l3_type,
-			       void * rewrite,
-			       uword max_rewrite_bytes)
-{
-  snap_header_t * h = rewrite;
-  u16 p;
-
-  if (max_rewrite_bytes < sizeof (h[0]))
-    return 0;
-
-  /* OUI: ethernet. */
-  h->oui[0] = h->oui[1] = h->oui[2] = 0;
-
-  switch (l3_type) {
-#define _(a,b) case VNET_L3_PACKET_TYPE_##a: p = ETHERNET_TYPE_##b; break
-    _ (IP4, IP4);
-    _ (IP6, IP6);
-#undef _
-  default:
-    return 0;
-  }
-
-  h->protocol = clib_host_to_net_u16 (p);
-		     
-  return sizeof (h[0]);
-}
-
 static clib_error_t * snap_init (vlib_main_t * vm)
 {
   snap_main_t * sm = &snap_main;
