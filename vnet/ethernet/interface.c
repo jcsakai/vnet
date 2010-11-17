@@ -28,11 +28,6 @@
 #include <vnet/pg/pg.h>
 #include <vnet/ethernet/ethernet.h>
 
-static clib_error_t *
-ethernet_interface_link_up_down (vlib_main_t * vm,
-				 u32 hw_if_index,
-				 u32 flags);
-
 static uword ethernet_set_rewrite (vlib_main_t * vm,
 				   u32 sw_if_index,
 				   u32 l3_type,
@@ -103,7 +98,6 @@ VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
   .format_address = format_ethernet_address,
   .format_header = format_ethernet_header_with_length,
   .format_device = format_ethernet_interface,
-  .link_up_down_function = ethernet_interface_link_up_down,
   .hw_address_len = 6,
   .unformat_hw_address = unformat_ethernet_address,
   .unformat_header = unformat_ethernet_header,
@@ -224,39 +218,6 @@ ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index)
 
   vlib_delete_hw_interface (vm, hw_if_index);
   pool_put (em->interfaces, ei);
-}
-
-static clib_error_t *
-ethernet_interface_link_up_down (vlib_main_t * vm,
-				 u32 hw_if_index,
-				 u32 flags)
-{
-  ethernet_main_t * em = ethernet_get_main (vm);
-  vlib_hw_interface_t * hi;
-  ethernet_interface_t * ei;
-  u32 sw_if_index;
-
-  hi = vlib_get_hw_interface (vm, hw_if_index);
-  ei = ethernet_get_interface (em, hw_if_index);
-
-  if (flags & VLIB_HW_INTERFACE_FLAG_LINK_UP)
-    ethernet_interface_update_media (ei, hi);
-
-  sw_if_index = hi->sw_if_index;
-  vec_validate (em->vlan_mapping_by_sw_if_index, sw_if_index);
-
-  /* Initialize vlan mapping table to all vlans disabled. */
-  {
-    ethernet_vlan_mapping_t * m;
-
-    m = em->vlan_mapping_by_sw_if_index + sw_if_index;
-    vec_validate_init_empty (m->vlan_to_sw_if_index,
-			     ETHERNET_N_VLAN,
-			     sw_if_index);
-    m->vlan_to_sw_if_index[ETHERNET_N_VLAN] = sw_if_index;
-  }
-
-  return 0;
 }
 
 #if DEBUG > 0

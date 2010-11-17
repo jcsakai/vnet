@@ -262,7 +262,7 @@ VLIB_REGISTER_NODE (snap_input_node) = {
   .next_nodes = {
     [SNAP_INPUT_NEXT_DROP] = "error-drop",
     [SNAP_INPUT_NEXT_PUNT] = "error-punt",
-    [SNAP_INPUT_NEXT_ETHERNET_TYPE] = "ethernet-type-input",
+    [SNAP_INPUT_NEXT_ETHERNET_TYPE] = "ethernet-input-type",
   },
 
   .format_buffer = format_snap_header_with_length,

@@ -86,7 +86,7 @@ typedef enum {
 } ethernet_error_t;
 
 typedef struct {
-  i32 * vlan_to_sw_if_index;
+  u32 * vlan_to_sw_if_index;
 } ethernet_vlan_mapping_t;
 
 /* Per VLAN state. */

@@ -26,4 +26,5 @@
 ethernet_error (NONE, PUNT, "no error")
 ethernet_error (BAD_LLC_LENGTH, DROP, "llc length > packet length")
 ethernet_error (UNKNOWN_TYPE, PUNT, "unknown ethernet type")
+ethernet_error (UNKNOWN_VLAN, DROP, "unknown vlan")
 
