@@ -2099,9 +2099,17 @@ ixge_process (vlib_main_t * vm,
 	      vlib_frame_t * f)
 {
   ixge_main_t * xm = &ixge_main;
+  ixge_device_t * xd;
   uword event_type, * event_data = 0;
     
   ixge_device_init (xm);
+
+  /* Clear all counters. */
+  vec_foreach (xd, xm->devices)
+    {
+      ixge_update_counters (xd);
+      memset (xd->counters, 0, sizeof (xd->counters));
+    }
 
   while (1)
     {
@@ -2128,7 +2136,6 @@ ixge_process (vlib_main_t * vm,
 	f64 now = vlib_time_now (vm);
 	if (now - xm->time_last_stats_update > 30)
 	  {
-	    ixge_device_t * xd;
 	    xm->time_last_stats_update = now;
 	    vec_foreach (xd, xm->devices)
 	      ixge_update_counters (xd);
