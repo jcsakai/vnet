@@ -59,8 +59,11 @@ static void ige_software_firmware_sync_release (ige_device_t * xd, u32 sw_mask)
   ige_semaphore_release (xd);
 }
 
-u32 ige_read_write_phy_reg (ige_device_t * xd, u32 reg_index, u32 v, u32 is_read)
+static clib_error_t *
+ige_read_write_phy_reg (ethernet_phy_t * phy, u32 reg_index, u32 * data,
+                        vlib_read_or_write_t rw)
 {
+  ige_device_t * xd = vec_elt_at_index (ige_main.devices, phy->opaque);
   ige_regs_t * r = xd->regs;
   const u32 ready_bit = 1 << 28;
   u32 x;
@@ -73,27 +76,21 @@ u32 ige_read_write_phy_reg (ige_device_t * xd, u32 reg_index, u32 v, u32 is_read
     ;
 
   r->mdi_control =
-    ((/* write data */ (v & 0xffff) << 0)
+    ((/* write data */ (data[0] & 0xffff) << 0)
      | ((reg_index & 0x1f)  << 16)
      | /* phy address */ (1 << 21)
-     | /* opcode */ ((is_read ? 2 : 1) << 26));
+     | /* opcode */ (((rw == VLIB_READ) ? 2 : 1) << 26));
   
   while (! ((x = r->mdi_control) & ready_bit))
     ;
 
-  if (is_read)
-    v = x & 0xffff;
+  if (rw == VLIB_READ)
+    data[0] = x & 0xffff;
 
   ige_software_firmware_sync_release (xd, 1 << (1 + xd->phy_index));
 
-  return v;
+  return /* no error */ 0;
 }
-
-static u32 ige_read_phy_reg (ige_device_t * xd, u32 reg_index)
-{ return ige_read_write_phy_reg (xd, reg_index, 0, /* is_read */ 1); }
-
-static void ige_write_phy_reg (ige_device_t * xd, u32 reg_index, u32 v)
-{ (void) ige_read_write_phy_reg (xd, reg_index, v, /* is_read */ 0); }
 
 static clib_error_t *
 ige_interface_admin_up_down (vlib_main_t * vm, u32 hw_if_index, u32 flags)
@@ -108,39 +105,6 @@ ige_interface_admin_up_down (vlib_main_t * vm, u32 hw_if_index, u32 flags)
 #endif
 
   return /* no error */ 0;
-}
-
-static void ige_phy_init (ige_device_t * xd)
-{
-#if 0
-  ige_main_t * xm = &ige_main;
-  vlib_main_t * vm = xm->vlib_main;
-  ige_phy_t * phy = xd->phys + xd->phy_index;
-
-  phy->id = ((ige_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1) << 16)
-	     | ige_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID2));
-
-  {
-    ELOG_TYPE_DECLARE (e) = {
-      .function = (char *) __FUNCTION__,
-      .format = "ige %d, phy id 0x%d mdio address %d",
-      .format_args = "i4i4i4",
-    };
-    struct { u32 instance, id, address; } * ed;
-    ed = ELOG_DATA (&vm->elog_main, e);
-    ed->instance = xd->device_index;
-    ed->id = phy->id;
-    ed->address = phy->mdio_address;
-  }
-
-  /* Reset phy. */
-  ige_write_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL, XGE_PHY_CONTROL_RESET);
-
-  /* Wait for self-clearning reset bit to clear. */
-  do {
-    vlib_process_suspend (vm, 1e-3);
-  } while (ige_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL) & XGE_PHY_CONTROL_RESET);
-#endif
 }
 
 static u8 * format_ige_rx_from_hw_descriptor (u8 * s, va_list * va)
@@ -1279,7 +1243,7 @@ ige_rx_queue (ige_main_t * xm,
 static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
 {
   vlib_main_t * vm = xm->vlib_main;
-  ige_regs_t * r = xd->regs;
+  // ige_regs_t * r = xd->regs;
 
   if (i != 2)
     {
@@ -1324,32 +1288,26 @@ static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
     }
   else
     {
-#if 0
-      u32 v = r->xge_mac.link_status;
-      uword is_up = (v & (1 << 30)) != 0;
-
+      ethernet_phy_status (&xd->phy);
+      uword is_up = ethernet_phy_is_link_up (&xd->phy);
       ELOG_TYPE_DECLARE (e) = {
 	.function = (char *) __FUNCTION__,
-	.format = "ige %d, link status change 0x%x",
+	.format = "ige %d, link %d",
 	.format_args = "i4i4",
       };
-      struct { u32 instance, link_status; } * ed;
+      struct { u32 instance, is_up; } * ed;
       ed = ELOG_DATA (&vm->elog_main, e);
       ed->instance = xd->device_index;
-      ed->link_status = v;
-      xd->link_status_at_last_link_change = v;
+      ed->is_up = is_up;
       vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
 				   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
-#else
-      ASSERT (0);
-#endif
     }
 }
 
 static uword
 ige_device_input (ige_main_t * xm,
-		   ige_device_t * xd,
-		   ige_rx_state_t * rx_state)
+                  ige_device_t * xd,
+                  ige_rx_state_t * rx_state)
 {
   ige_regs_t * r = xd->regs;
   u32 i, s;
@@ -1509,7 +1467,7 @@ static u8 * format_ige_device (u8 * s, va_list * args)
   u32 dev_instance = va_arg (*args, u32);
   ige_main_t * xm = &ige_main;
   ige_device_t * xd = vec_elt_at_index (xm->devices, dev_instance);
-  // ige_phy_t * phy = xd->phys + xd->phy_index;
+  ethernet_phy_t * phy = &xd->phy;
   uword indent = format_get_indent (s);
 
   ige_update_counters (xd);
@@ -1517,17 +1475,7 @@ static u8 * format_ige_device (u8 * s, va_list * args)
   s = format (s, "Intel 8257X: id %U\n%U%U",
 	      format_ige_device_id, xd->device_id,
 	      format_white_space, indent + 2,
-	      format_ethernet_media, 0);
-
-#if 0
-  s = format (s, "\n%U", format_white_space, indent + 2);
-  if (phy->mdio_address != ~0)
-    s = format (s, "PHY address %d, id 0x%x", phy->mdio_address, phy->id);
-  else if (xd->sfp_eeprom.id == SFP_ID_sfp)
-    s = format (s, "SFP %U", format_sfp_eeprom, &xd->sfp_eeprom);
-  else
-    s = format (s, "PHY not found");
-#endif
+	      format_ethernet_media, phy->media);
 
   {
     u32 i;
@@ -1587,8 +1535,8 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     xm->n_descriptors_per_cache_line = CLIB_CACHE_LINE_BYTES / sizeof (dq->descriptors[0]);
 
   if (! xm->n_bytes_in_rx_buffer)
-    xm->n_bytes_in_rx_buffer = 1024;
-  xm->n_bytes_in_rx_buffer = round_pow2 (xm->n_bytes_in_rx_buffer, 1024);
+    xm->n_bytes_in_rx_buffer = 512;
+  xm->n_bytes_in_rx_buffer = round_pow2 (xm->n_bytes_in_rx_buffer, 512);
   if (! xm->vlib_buffer_free_list_index)
     {
       xm->vlib_buffer_free_list_index = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer);
@@ -1635,7 +1583,6 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
       vec_validate (xm->tx_buffers_pending_free, dq->n_descriptors - 1);
     }
 
-#if 0
   {
     ige_dma_regs_t * dr = get_dma_regs (xd, rt, queue_index);
     uword a;
@@ -1646,64 +1593,28 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     dr->n_descriptor_bytes = dq->n_descriptors * sizeof (dq->descriptors[0]);
     dq->head_index = dq->tail_index = 0;
 
+    /* Interrupt every 10*1.024e-6 secs. */
+    dr->interrupt_delay_timer = 10;
+
     if (rt == VLIB_RX)
-      {
-	ASSERT ((xm->n_bytes_in_rx_buffer / 1024) < 32);
-	dr->rx_split_control =
-	  (/* buffer size */ ((xm->n_bytes_in_rx_buffer / 1024) << 0)
-	   | (/* lo free descriptor threshold (units of 64 descriptors) */
-	      (1 << 22))
-	   | (/* descriptor type: advanced one buffer */
-	      (1 << 25))
-	   | (/* drop if no descriptors available */
-	      (1 << 28)));
-
-	/* Give hardware all but last cache line of descriptors. */
-	dq->tail_index = dq->n_descriptors - xm->n_descriptors_per_cache_line;
-      }
-    else
-      {
-	/* Make sure its initialized before hardware can get to it. */
-	dq->tx.head_index_write_back[0] = dq->head_index;
-
-	a = vlib_physmem_virtual_to_physical (vm, dq->tx.head_index_write_back);
-	dr->tx.head_index_write_back_address[0] = /* enable bit */ 1 | a;
-	dr->tx.head_index_write_back_address[1] = (u64) a >> (u64) 32;
-      }
-
-    /* DMA on 82599 does not work with [13] rx data write relaxed ordering
-       and [12] undocumented set. */
-    if (rt == VLIB_RX)
-      dr->dca_control &= ~((1 << 13) | (1 << 12));
+      /* Give hardware all but last cache line of descriptors. */
+      dq->tail_index = dq->n_descriptors - xm->n_descriptors_per_cache_line;
 
     CLIB_MEMORY_BARRIER ();
 
-    if (rt == VLIB_RX)
-      xd->regs->rx_enable |= 1;
-    else
-      xd->regs->tx_dma_control |= (1 << 0);
-
     dr->control |= ((/* prefetch threshold */ 32 << 0)
 		    | (/* writeback threshold */ 16 << 16));
-
-    /* Enable this queue and wait for hardware to initialize before adding to tail. */
-    dr->control |= 1 << 25;
-    while (! (dr->control & (1 << 25)))
-      ;
 
     /* Set head/tail indices and enable DMA. */
     dr->head_index = dq->head_index;
     dr->tail_index = dq->tail_index;
   }
-#endif
 
   return error;
 }
 
 static void ige_device_init (ige_main_t * xm)
 {
-  /* $$$$ jadfix $$$$ */
-#if 0
   vlib_main_t * vm = xm->vlib_main;
   ige_device_t * xd;
     
@@ -1711,7 +1622,7 @@ static void ige_device_init (ige_main_t * xm)
   vec_foreach (xd, xm->devices)
     {
       ige_regs_t * r = xd->regs;
-      const u32 reset_bit = (1 << 26) | (1 << 3);
+      const u32 reset_bit = (1 << 26);
 
       r->control |= reset_bit;
 
@@ -1722,7 +1633,11 @@ static void ige_device_init (ige_main_t * xm)
       /* Software loaded. */
       r->extended_control |= (1 << 28);
 
-      ige_phy_init (xd);
+      xd->phy.opaque = xd->device_index;
+      xd->phy.read_write = ige_read_write_phy_reg;
+      ethernet_phy_reset (&xd->phy);
+      ethernet_phy_init (&xd->phy);
+      ethernet_phy_negotiate_media (&xd->phy);
 
       /* Register ethernet interface. */
       {
@@ -1730,8 +1645,8 @@ static void ige_device_init (ige_main_t * xm)
 	u32 i, addr32[2];
 	clib_error_t * error;
 
-	addr32[0] = r->rx_ethernet_address0[0][0];
-	addr32[1] = r->rx_ethernet_address0[0][1];
+	addr32[0] = r->rx_ethernet_address[0][0];
+	addr32[1] = r->rx_ethernet_address[0][1];
 	for (i = 0; i < 6; i++)
 	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
 
@@ -1740,7 +1655,7 @@ static void ige_device_init (ige_main_t * xm)
 	   ige_device_class.index,
 	   xd->device_index,
 	   /* ethernet address */ addr8,
-	   /* phy */ 0,
+	   /* phy */ &xd->phy,
 	   &xd->vlib_hw_if_index);
 	if (error)
 	  clib_error_report (error);
@@ -1754,32 +1669,31 @@ static void ige_device_init (ige_main_t * xm)
       ige_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ige_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
-      /* RX queue gets mapped to interrupt bit 0.
-	 We don't use TX interrupts. */
-      r->interrupt.queue_mapping[0] = ((1 << 7) | 0) << 0;
+      /* RX buffers are 512 bytes. */
+      r->rx_control |= (2 << 16);
 
-      /* No use in getting too many interrupts.
-	 Limit them to one every 3/4 ring size at line rate
-	 min sized packets.
-	 No need for this since kernel/vlib main loop provides adequate interrupt
-	 limiting scheme. */
-      if (0)
-	{
-	  f64 line_rate_max_pps = 10e9 / (8 * (64 + /* interframe padding */ 20));
-	  ige_throttle_queue_interrupt (r, 0, .75 * xm->n_descriptors[VLIB_RX] / line_rate_max_pps);
-	}
+      /* Strip ethernet crc and don't include in descriptor length. */
+      r->rx_control |= (1 << 26);
+
+      /* Accept packets > 1522 bytes. */
+      r->rx_control |= (1 << 5);
 
       /* Accept all broadcast packets.  Multicasts must be explicitly
 	 added to dst_ethernet_address register array. */
-      r->filter_control |= (1 << 10);
+      r->rx_control |= (1 << 15);
 
-      /* Enable frames up to size in mac frame size register. */
-      r->xge_mac.control |= 1 << 2;
-      r->xge_mac.rx_max_frame_size = (9216 + 14) << 16;
+      /* Pad short packets. */
+      r->tx_control |= 1 << 3;
+
+      /* Multiple descriptor read. */
+      r->tx_control |= 1 << 28;
+
+      /* RX/TX enable. */
+      r->rx_control |= 1 << 1;
+      r->tx_control |= 1 << 1;
 
       r->interrupt.enable_write_1_to_set = ~0;
     }
-#endif
 }
 
 static uword

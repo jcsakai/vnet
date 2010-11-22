@@ -5,8 +5,8 @@
 #include <vlib/pci/pci.h>
 #include <vnet/devices/optics/sfp.h>
 #include <vnet/devices/pci/ixge.h> /* for shared definitions between ige/ixge */
+#include <vnet/ethernet/phy.h>
 #include <vnet/ip/ip4_packet.h>
-#include <vnet/ip/ip6_packet.h>
 
 typedef volatile struct {
   /* [31:7] 128 byte aligned. */
@@ -170,7 +170,7 @@ typedef volatile struct {
    * [31:16] read data. 
    */
   u32 eeprom_read;
-  u32 control_ext;
+  u32 extended_control;
   u32 flash_access;
   /* 
    * [15:0] data
@@ -215,7 +215,24 @@ typedef volatile struct {
     CLIB_PAD_FROM_TO (0xe4, 0x100);
   } interrupt;
 
-  /* jad document */
+  /* default all 0s
+     [1] rx enable
+     [2] store bad packets
+     [3] accept all unicast
+     [4] accept all multicast
+     [5] accept packets > 1522 bytes
+     [7:6] loopback mode
+     [9:8] rx minimum buffer interrupt threshold
+     [11:10] descriptor type
+     [13:12] multicast filter 12 bit offset
+     [15] accept all broadcast
+     [17:16] rx buffer size
+     [25] rx buffer size ext
+     [18] vlan filter enable
+     [22] discard pause frames
+     [23] accept mac control frames (not pause)
+     [26] strip ethernet crc
+     [30:27] flexible buffer size */
   u32 rx_control;
 
   /* 
@@ -231,6 +248,9 @@ typedef volatile struct {
   u32 rx_autoneg_config_word;
 
   CLIB_PAD_FROM_TO (0x0184, 0x0400);
+  /* [1] tx enable
+     [3] pad short packets
+     [28] tx multiple descriptor request enable */
   u32 tx_control;
 
   CLIB_PAD_FROM_TO (0x0404, 0x0410);
@@ -447,6 +467,8 @@ typedef struct {
 
   /* Phy index (0 or 1) and address on MDI bus. */
   u32 phy_index;
+
+  ethernet_phy_t phy;
 
   /* Counters. */
   u64 counters[IGE_N_COUNTER], counters_last_clear[IGE_N_COUNTER];
