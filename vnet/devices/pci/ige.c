@@ -1295,20 +1295,23 @@ static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
     {
       ethernet_phy_status (&xd->phy);
       uword is_up = ethernet_phy_is_link_up (&xd->phy);
+
       ELOG_TYPE_DECLARE (e) = {
 	.function = (char *) __FUNCTION__,
-	.format = "ige %d, link %d",
+	.format = "ige %d, status 0x%x",
 	.format_args = "i4i4",
       };
-      struct { u32 instance, is_up; } * ed;
-      ed = ELOG_DATA (&vm->elog_main, e);
-      ed->instance = xd->device_index;
-      ed->is_up = is_up;
+      struct { u32 instance, status; } * ed;
+
       if (is_up)
 	r->control |= 1 << 6;
       else
 	r->control &= ~(1 << 6);
-      clib_warning ("status 0x%x", r->status);
+
+      ed = ELOG_DATA (&vm->elog_main, e);
+      ed->instance = xd->device_index;
+      ed->status = r->status;
+
       vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
 				   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
     }
@@ -1698,8 +1701,6 @@ static void ige_device_init (ige_main_t * xm)
       /* RX/TX enable. */
       r->rx_control |= 1 << 1;
       r->tx_control |= 1 << 1;
-
-      clib_warning ("rx %x tx %x", r->rx_control, r->tx_control);
 
       r->interrupt.enable_write_1_to_set = ~0;
     }
