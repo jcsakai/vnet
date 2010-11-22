@@ -683,7 +683,9 @@ ige_tx_no_wrap (ige_main_t * xm,
       d[1].n_bytes_this_buffer = len1;
 
       d[0].status0 = template_status | (is_eop0 << IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
+      d[0].status1 = 0;
       d[1].status0 = template_status | (is_eop1 << IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
+      d[1].status1 = 0;
 
       d += 2;
       is_sop = is_eop1;
@@ -718,6 +720,7 @@ ige_tx_no_wrap (ige_main_t * xm,
       d[0].n_bytes_this_buffer = len0;
 
       d[0].status0 = template_status | (is_eop0 << IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
+      d[0].status1 = 0;
 
       d += 1;
       is_sop = is_eop0;
@@ -807,6 +810,8 @@ ige_interface_tx (vlib_main_t * vm,
   CLIB_MEMORY_BARRIER ();
 
   dr->tail_index = dq->tail_index;
+
+  clib_warning ("%d %d", dr->head_index, dr->tail_index);
 
   /* Free any buffers that are done. */
   {
@@ -1243,7 +1248,7 @@ ige_rx_queue (ige_main_t * xm,
 static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
 {
   vlib_main_t * vm = xm->vlib_main;
-  // ige_regs_t * r = xd->regs;
+  ige_regs_t * r = xd->regs;
 
   if (i != 2)
     {
@@ -1299,6 +1304,11 @@ static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
       ed = ELOG_DATA (&vm->elog_main, e);
       ed->instance = xd->device_index;
       ed->is_up = is_up;
+      if (is_up)
+	r->control |= 1 << 6;
+      else
+	r->control &= ~(1 << 6);
+      clib_warning ("status 0x%x", r->status);
       vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
 				   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
     }
@@ -1316,7 +1326,7 @@ ige_device_input (ige_main_t * xm,
   s = r->interrupt.status_clear_to_read;
   foreach_set_bit (i, s, ({
     if (i == 7)
-      n_rx_packets += ige_rx_queue (xm, xd, rx_state, i);
+      n_rx_packets += ige_rx_queue (xm, xd, rx_state, 0);
     else
       ige_interrupt (xm, xd, i);
   }));
@@ -1403,7 +1413,7 @@ static u8 * format_ige_device_name (u8 * s, va_list * args)
   u32 i = va_arg (*args, u32);
   ige_main_t * xm = &ige_main;
   ige_device_t * xd = vec_elt_at_index (xm->devices, i);
-  return format (s, "TenGigabitEthernet%U",
+  return format (s, "GigabitEthernet%U",
 		 format_os_pci_handle, xd->pci_device.os_handle);
 }
 
@@ -1475,7 +1485,7 @@ static u8 * format_ige_device (u8 * s, va_list * args)
   s = format (s, "Intel 8257X: id %U\n%U%U",
 	      format_ige_device_id, xd->device_id,
 	      format_white_space, indent + 2,
-	      format_ethernet_media, phy->media);
+	      format_ethernet_media, &phy->media);
 
   {
     u32 i;
@@ -1537,11 +1547,7 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   if (! xm->n_bytes_in_rx_buffer)
     xm->n_bytes_in_rx_buffer = 512;
   xm->n_bytes_in_rx_buffer = round_pow2 (xm->n_bytes_in_rx_buffer, 512);
-  if (! xm->vlib_buffer_free_list_index)
-    {
-      xm->vlib_buffer_free_list_index = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer);
-      ASSERT (xm->vlib_buffer_free_list_index != 0);
-    }
+  xm->vlib_buffer_free_list_index = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer);
 
   if (! xm->n_descriptors[rt])
     xm->n_descriptors[rt] = 3 * VLIB_FRAME_SIZE / 2;
@@ -1635,6 +1641,7 @@ static void ige_device_init (ige_main_t * xm)
 
       xd->phy.opaque = xd->device_index;
       xd->phy.read_write = ige_read_write_phy_reg;
+      xd->phy.vlib_main = vm;
       ethernet_phy_reset (&xd->phy);
       ethernet_phy_init (&xd->phy);
       ethernet_phy_negotiate_media (&xd->phy);
@@ -1691,6 +1698,8 @@ static void ige_device_init (ige_main_t * xm)
       /* RX/TX enable. */
       r->rx_control |= 1 << 1;
       r->tx_control |= 1 << 1;
+
+      clib_warning ("rx %x tx %x", r->rx_control, r->tx_control);
 
       r->interrupt.enable_write_1_to_set = ~0;
     }
@@ -1764,7 +1773,7 @@ clib_error_t * ige_init (vlib_main_t * vm)
   memset (&xm->tx_descriptor_template, 0, sizeof (xm->tx_descriptor_template));
   memset (&xm->tx_descriptor_template_mask, 0, sizeof (xm->tx_descriptor_template_mask));
   xm->tx_descriptor_template.status0 =
-    (IGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED
+    (0*IGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED
      | IGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS);
   xm->tx_descriptor_template_mask.status0 = 0xffff;
   xm->tx_descriptor_template_mask.status1 = 0x00003fff;

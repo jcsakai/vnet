@@ -354,7 +354,7 @@ typedef volatile struct {
   u32 rss_random_keys[10];
   CLIB_PAD_FROM_TO (0x5ca8, 0x5f00);
   u32 wakeup_flexible_filter_lengths[6];
-  CLIB_PAD_FROM_TO (0x5f1c, 0x9000);
+  CLIB_PAD_FROM_TO (0x5f18, 0x9000);
 
   u32 wakeup_flexible_filter_masks[128][2];
   CLIB_PAD_FROM_TO (0x9400, 0x9800);
@@ -378,6 +378,7 @@ typedef volatile struct {
   _ (82544ei_a4_copper, 0x1107)			\
   _ (82544gc_a4_copper, 0x1112)			\
   _ (82541_copper, 0x1013)			\
+  _ (kludge, 0x105e)			\
   _ (82541ei_b0_mobile, 0x1018)
 
 typedef enum {
