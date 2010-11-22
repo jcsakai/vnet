@@ -98,9 +98,9 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/osi/osi.lo vnet/osi/pg.lo vnet/pg/cli.lo vnet/pg/edit.lo \
 	vnet/pg/init.lo vnet/pg/input.lo vnet/pg/output.lo \
 	vnet/pg/stream.lo vnet/devices/ethernet_phy_bcm.lo \
-	vnet/devices/i2c/i2c.lo vnet/devices/pci/ixge.lo \
-	vnet/devices/optics/sfp.lo vnet/devices/xge/xge.lo \
-	vnet/unix/pcap.lo vnet/unix/tuntap.lo
+	vnet/devices/i2c/i2c.lo vnet/devices/pci/ige.lo \
+	vnet/devices/pci/ixge.lo vnet/devices/optics/sfp.lo \
+	vnet/devices/xge/xge.lo vnet/unix/pcap.lo vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -188,6 +188,7 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
+PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -322,9 +323,9 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/osi/osi.c vnet/osi/pg.c vnet/pg/cli.c vnet/pg/edit.c \
 	vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
-	vnet/devices/i2c/i2c.c vnet/devices/pci/ixge.c \
-	vnet/devices/optics/sfp.c vnet/devices/xge/xge.c \
-	vnet/unix/pcap.c vnet/unix/tuntap.c
+	vnet/devices/i2c/i2c.c vnet/devices/pci/ige.c \
+	vnet/devices/pci/ixge.c vnet/devices/optics/sfp.c \
+	vnet/devices/xge/xge.c vnet/unix/pcap.c vnet/unix/tuntap.c
 nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
 	vnet/ethernet/error.def vnet/ethernet/ethernet.h \
@@ -340,8 +341,9 @@ nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/ip/protocols.def vnet/ip/tcp_packet.h \
 	vnet/ip/udp_packet.h vnet/osi/osi.h vnet/pg/pg.h \
 	vnet/pg/edit.h vnet/devices/i2c/i2c.h \
-	vnet/devices/optics/sfp.h vnet/devices/pci/ixge.h \
-	vnet/devices/xge/xge.h vnet/unix/pcap.h vnet/unix/tuntap.h
+	vnet/devices/optics/sfp.h vnet/devices/pci/ige.h \
+	vnet/devices/pci/ixge.h vnet/devices/xge/xge.h \
+	vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDFLAGS = -static
@@ -601,6 +603,8 @@ vnet/devices/pci/$(am__dirstamp):
 vnet/devices/pci/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/devices/pci/$(DEPDIR)
 	@: > vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
+vnet/devices/pci/ige.lo: vnet/devices/pci/$(am__dirstamp) \
+	vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
 vnet/devices/pci/ixge.lo: vnet/devices/pci/$(am__dirstamp) \
 	vnet/devices/pci/$(DEPDIR)/$(am__dirstamp)
 vnet/devices/optics/$(am__dirstamp):
@@ -661,6 +665,8 @@ mostlyclean-compile:
 	-rm -f vnet/devices/i2c/i2c.lo
 	-rm -f vnet/devices/optics/sfp.$(OBJEXT)
 	-rm -f vnet/devices/optics/sfp.lo
+	-rm -f vnet/devices/pci/ige.$(OBJEXT)
+	-rm -f vnet/devices/pci/ige.lo
 	-rm -f vnet/devices/pci/ixge.$(OBJEXT)
 	-rm -f vnet/devices/pci/ixge.lo
 	-rm -f vnet/devices/xge/xge.$(OBJEXT)
@@ -787,6 +793,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/$(DEPDIR)/ethernet_phy_bcm.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/i2c/$(DEPDIR)/i2c.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/optics/$(DEPDIR)/sfp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/pci/$(DEPDIR)/ige.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/pci/$(DEPDIR)/ixge.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/xge/$(DEPDIR)/xge.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/arp.Plo@am__quote@

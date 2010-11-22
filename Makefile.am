@@ -178,6 +178,7 @@ nobase_include_HEADERS +=			\
 libvnet_la_SOURCES +=				\
   vnet/devices/ethernet_phy_bcm.c		\
   vnet/devices/i2c/i2c.c			\
+  vnet/devices/pci/ige.c			\
   vnet/devices/pci/ixge.c			\
   vnet/devices/optics/sfp.c			\
   vnet/devices/xge/xge.c
@@ -185,6 +186,7 @@ libvnet_la_SOURCES +=				\
 nobase_include_HEADERS +=			\
   vnet/devices/i2c/i2c.h			\
   vnet/devices/optics/sfp.h			\
+  vnet/devices/pci/ige.h			\
   vnet/devices/pci/ixge.h			\
   vnet/devices/xge/xge.h
 

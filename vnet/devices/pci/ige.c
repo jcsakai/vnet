@@ -1,16 +1,15 @@
-#include <vnet/devices/pci/ixge.h>
-#include <vnet/devices/xge/xge.h>
+#include <vnet/devices/pci/ige.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vlib/unix/unix.h>
 #include <vlib/unix/pci.h>
 
-ixge_main_t ixge_main;
+ige_main_t ige_main;
 
-static void ixge_semaphore_get (ixge_device_t * xd)
+static void ige_semaphore_get (ige_device_t * xd)
 {
-  ixge_main_t * xm = &ixge_main;
+  ige_main_t * xm = &ige_main;
   vlib_main_t * vm = xm->vlib_main;
-  ixge_regs_t * r = xd->regs;
+  ige_regs_t * r = xd->regs;
   u32 i;
 
   i = 0;
@@ -25,295 +24,106 @@ static void ixge_semaphore_get (ixge_device_t * xd)
   } while (! (r->software_semaphore & (1 << 1)));
 }
 
-static void ixge_semaphore_release (ixge_device_t * xd)
+static void ige_semaphore_release (ige_device_t * xd)
 {
-  ixge_regs_t * r = xd->regs;
+  ige_regs_t * r = xd->regs;
   r->software_semaphore &= ~3;
 }
 
-static void ixge_software_firmware_sync (ixge_device_t * xd, u32 sw_mask)
+static void ige_software_firmware_sync (ige_device_t * xd, u32 sw_mask)
 {
-  ixge_main_t * xm = &ixge_main;
+  ige_main_t * xm = &ige_main;
   vlib_main_t * vm = xm->vlib_main;
-  ixge_regs_t * r = xd->regs;
+  ige_regs_t * r = xd->regs;
   u32 fw_mask = sw_mask << 5;
   u32 m, done = 0;
 
   while (! done)
     {
-      ixge_semaphore_get (xd);
+      ige_semaphore_get (xd);
       m = r->software_firmware_sync;
       done = (m & fw_mask) == 0;
       if (done)
 	r->software_firmware_sync = m | sw_mask;
-      ixge_semaphore_release (xd);
+      ige_semaphore_release (xd);
       if (! done)
 	vlib_process_suspend (vm, 10e-3);
     }
 }
 
-static void ixge_software_firmware_sync_release (ixge_device_t * xd, u32 sw_mask)
+static void ige_software_firmware_sync_release (ige_device_t * xd, u32 sw_mask)
 {
-  ixge_regs_t * r = xd->regs;
-  ixge_semaphore_get (xd);
+  ige_regs_t * r = xd->regs;
+  ige_semaphore_get (xd);
   r->software_firmware_sync &= ~sw_mask;
-  ixge_semaphore_release (xd);
+  ige_semaphore_release (xd);
 }
 
-u32 ixge_read_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u32 v, u32 is_read)
+u32 ige_read_write_phy_reg (ige_device_t * xd, u32 reg_index, u32 v, u32 is_read)
 {
-  ixge_regs_t * r = xd->regs;
-  const u32 busy_bit = 1 << 30;
+  ige_regs_t * r = xd->regs;
+  const u32 ready_bit = 1 << 28;
   u32 x;
   
   ASSERT (xd->phy_index < 2);
-  ixge_software_firmware_sync (xd, 1 << (1 + xd->phy_index));
+  ige_software_firmware_sync (xd, 1 << (1 + xd->phy_index));
 
-  ASSERT (reg_index < (1 << 16));
-  ASSERT (dev_type < (1 << 5));
-  if (! is_read)
-    r->xge_mac.phy_data = v;
-
-  /* Address cycle. */
-  x = reg_index | (dev_type << 16) | (xd->phys[xd->phy_index].mdio_address << 21);
-  r->xge_mac.phy_command = x | busy_bit;
   /* Busy wait timed to take 28e-6 secs.  No suspend. */
-  while (r->xge_mac.phy_command & busy_bit)
+  while (! (r->mdi_control & ready_bit))
     ;
 
-  r->xge_mac.phy_command = x | ((is_read ? 2 : 1) << 26) | busy_bit;
-  while (r->xge_mac.phy_command & busy_bit)
+  r->mdi_control =
+    ((/* write data */ (v & 0xffff) << 0)
+     | ((reg_index & 0x1f)  << 16)
+     | /* phy address */ (1 << 21)
+     | /* opcode */ ((is_read ? 2 : 1) << 26));
+  
+  while (! ((x = r->mdi_control) & ready_bit))
     ;
 
   if (is_read)
-    v = r->xge_mac.phy_data >> 16;
+    v = x & 0xffff;
 
-  ixge_software_firmware_sync_release (xd, 1 << (1 + xd->phy_index));
+  ige_software_firmware_sync_release (xd, 1 << (1 + xd->phy_index));
 
   return v;
 }
 
-static u32 ixge_read_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index)
-{ return ixge_read_write_phy_reg (xd, dev_type, reg_index, 0, /* is_read */ 1); }
+static u32 ige_read_phy_reg (ige_device_t * xd, u32 reg_index)
+{ return ige_read_write_phy_reg (xd, reg_index, 0, /* is_read */ 1); }
 
-static void ixge_write_phy_reg (ixge_device_t * xd, u32 dev_type, u32 reg_index, u32 v)
-{ (void) ixge_read_write_phy_reg (xd, dev_type, reg_index, v, /* is_read */ 0); }
-
-static void ixge_i2c_put_bits (i2c_bus_t * b, int scl, int sda)
-{
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, b->private);
-  u32 v;
-
-  v = 0;
-  v |= (sda != 0) << 3;
-  v |= (scl != 0) << 1;
-  xd->regs->i2c_control = v;
-}
-
-static void ixge_i2c_get_bits (i2c_bus_t * b, int * scl, int * sda)
-{
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, b->private);
-  u32 v;
-
-  v = xd->regs->i2c_control;
-  *sda = (v & (1 << 2)) != 0;
-  *scl = (v & (1 << 0)) != 0;
-}
-
-static u16 ixge_read_eeprom (ixge_device_t * xd, u32 address)
-{
-  ixge_regs_t * r = xd->regs;
-  u32 v;
-  r->eeprom_read = ((/* start bit */ (1 << 0)) | (address << 2));
-  /* Wait for done bit. */
-  while (! ((v = r->eeprom_read) & (1 << 1)))
-    ;
-  return v >> 16;
-}
-
-static void
-ixge_sfp_enable_disable_laser (ixge_device_t * xd, uword enable)
-{
-  u32 tx_disable_bit = 1 << 3;
-  if (enable)
-    xd->regs->sdp_control &= ~tx_disable_bit;
-  else
-    xd->regs->sdp_control |= tx_disable_bit;
-}
-
-static void
-ixge_sfp_enable_disable_10g (ixge_device_t * xd, uword enable)
-{
-  u32 is_10g_bit = 1 << 5;
-  if (enable)
-    xd->regs->sdp_control |= is_10g_bit;
-  else
-    xd->regs->sdp_control &= ~is_10g_bit;
-}
+static void ige_write_phy_reg (ige_device_t * xd, u32 reg_index, u32 v)
+{ (void) ige_read_write_phy_reg (xd, reg_index, v, /* is_read */ 0); }
 
 static clib_error_t *
-ixge_sfp_phy_init_from_eeprom (ixge_device_t * xd, u16 sfp_type)
+ige_interface_admin_up_down (vlib_main_t * vm, u32 hw_if_index, u32 flags)
 {
-  u16 a, id, reg_values_addr;
-
-  a = ixge_read_eeprom (xd, 0x2b);
-  if (a == 0 || a == 0xffff)
-    return clib_error_create ("no init sequence in eeprom");
-
-  while (1)
-    {
-      id = ixge_read_eeprom (xd, ++a);
-      if (id == 0xffff)
-	break;
-      reg_values_addr = ixge_read_eeprom (xd, ++a);
-      if (id == sfp_type)
-	break;
-    }
-  if (id != sfp_type)
-    return clib_error_create ("failed to find id 0x%x", sfp_type);
-
-  ixge_software_firmware_sync (xd, 1 << 3);
-  while (1)
-    {
-      u16 v = ixge_read_eeprom (xd, ++reg_values_addr);
-      if (v == 0xffff)
-	break;
-      xd->regs->core_analog_config = v;
-    }
-  ixge_software_firmware_sync_release (xd, 1 << 3);
-
-  /* Make sure laser is off.  We'll turn on the laser when
-     the interface is brought up. */
-  ixge_sfp_enable_disable_laser (xd, /* enable */ 0);
-  ixge_sfp_enable_disable_10g (xd, /* is_10g */ 1);
-
-  return 0;
-}
-
-static void
-ixge_sfp_device_up_down (ixge_device_t * xd, uword is_up)
-{
-  u32 v;
-
-  if (is_up)
-    {
-      /* pma/pmd 10g serial SFI. */
-      xd->regs->xge_mac.auto_negotiation_control2 &= ~(3 << 16);
-      xd->regs->xge_mac.auto_negotiation_control2 |= 2 << 16;
-
-      v = xd->regs->xge_mac.auto_negotiation_control;
-      v &= ~(7 << 13);
-      v |= (0 << 13);
-      /* Restart autoneg. */
-      v |= (1 << 12);
-      xd->regs->xge_mac.auto_negotiation_control = v;
-
-      while (! (xd->regs->xge_mac.link_partner_ability[0] & 0xf0000))
-	;
-
-      v = xd->regs->xge_mac.auto_negotiation_control;
-
-      /* link mode 10g sfi serdes */
-      v &= ~(7 << 13);
-      v |= (3 << 13);
-
-      /* Restart autoneg. */
-      v |= (1 << 12);
-      xd->regs->xge_mac.auto_negotiation_control = v;
-
-      xd->regs->xge_mac.link_status;
-    }
-
-  ixge_sfp_enable_disable_laser (xd, /* enable */ is_up);
-}
-
-static clib_error_t *
-ixge_interface_admin_up_down (vlib_main_t * vm, u32 hw_if_index, u32 flags)
-{
+#if 0
   vlib_hw_interface_t * hif = vlib_get_hw_interface (vm, hw_if_index);
   uword is_up = (flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, hif->dev_instance);
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd = vec_elt_at_index (xm->devices, hif->dev_instance);
 
-  ixge_sfp_device_up_down (xd, is_up);
+  /* fixme do something?  show link up to partner? */
+#endif
 
   return /* no error */ 0;
 }
 
-static void ixge_sfp_phy_init (ixge_device_t * xd)
+static void ige_phy_init (ige_device_t * xd)
 {
-  ixge_phy_t * phy = xd->phys + xd->phy_index;
-  i2c_bus_t * ib = &xd->i2c_bus;
-  u8 start_address[1];
-  u32 timed_out;
-
-  ib->private = xd->device_index;
-  ib->put_bits = ixge_i2c_put_bits;
-  ib->get_bits = ixge_i2c_get_bits;
-  i2c_init (ib);
-
-  start_address[0] = 0;
-  timed_out = i2c_write_read (ib, 0xa0,
-			      &start_address, 1,
-			      &xd->sfp_eeprom, 128);
-  if (timed_out || ! sfp_eeprom_is_valid (&xd->sfp_eeprom))
-    xd->sfp_eeprom.id = SFP_ID_unknown;
-  else
-    {
-      /* FIXME 5 => SR/LR eeprom ID. */
-      clib_error_t * e = ixge_sfp_phy_init_from_eeprom (xd, 5 + xd->pci_function);
-      if (e)
-	clib_error_report (e);
-    }
-
-  phy->mdio_address = ~0;
-}
-
-static void ixge_phy_init (ixge_device_t * xd)
-{
-  ixge_main_t * xm = &ixge_main;
+#if 0
+  ige_main_t * xm = &ige_main;
   vlib_main_t * vm = xm->vlib_main;
-  ixge_phy_t * phy = xd->phys + xd->phy_index;
+  ige_phy_t * phy = xd->phys + xd->phy_index;
 
-  switch (xd->device_id)
-    {
-    case IXGE_82599_sfp:
-    case IXGE_82599_sfp_em:
-    case IXGE_82599_sfp_fcoe:
-      /* others? */
-      return ixge_sfp_phy_init (xd);
-
-    default:
-      break;
-    }
-
-  /* Probe address of phy. */
-  {
-    u32 i, v;
-
-    phy->mdio_address = ~0;
-    for (i = 0; i < 32; i++)
-      {
-	phy->mdio_address = i;
-	v = ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1);
-	if (v != 0xffff && v != 0)
-	  break;
-      }
-
-    /* No PHY found? */
-    if (i >= 32)
-      return;
-  }
-
-  phy->id = ((ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1) << 16)
-	     | ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID2));
+  phy->id = ((ige_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID1) << 16)
+	     | ige_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PMA_PMD, XGE_PHY_ID2));
 
   {
     ELOG_TYPE_DECLARE (e) = {
       .function = (char *) __FUNCTION__,
-      .format = "ixge %d, phy id 0x%d mdio address %d",
+      .format = "ige %d, phy id 0x%d mdio address %d",
       .format_args = "i4i4i4",
     };
     struct { u32 instance, id, address; } * ed;
@@ -324,122 +134,89 @@ static void ixge_phy_init (ixge_device_t * xd)
   }
 
   /* Reset phy. */
-  ixge_write_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL, XGE_PHY_CONTROL_RESET);
+  ige_write_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL, XGE_PHY_CONTROL_RESET);
 
   /* Wait for self-clearning reset bit to clear. */
   do {
     vlib_process_suspend (vm, 1e-3);
-  } while (ixge_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL) & XGE_PHY_CONTROL_RESET);
+  } while (ige_read_phy_reg (xd, XGE_PHY_DEV_TYPE_PHY_XS, XGE_PHY_CONTROL) & XGE_PHY_CONTROL_RESET);
+#endif
 }
 
-static u8 * format_ixge_rx_from_hw_descriptor (u8 * s, va_list * va)
+static u8 * format_ige_rx_from_hw_descriptor (u8 * s, va_list * va)
 {
   ixge_rx_from_hw_descriptor_t * d = va_arg (*va, ixge_rx_from_hw_descriptor_t *);
-  u32 s0 = d->status[0], s2 = d->status[2];
-  u32 is_ip4, is_ip6, is_ip, is_tcp, is_udp;
+  u32 s2 = d->status[2];
+  u32 is_ip4, is_tcp, is_udp;
   uword indent = format_get_indent (s);
 
   s = format (s, "%s-owned",
 	      (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE) ? "sw" : "hw");
-  s = format (s, ", length this descriptor %d, l3 offset %d",
-	      d->n_packet_bytes_this_descriptor,
-	      IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s0));
-  if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET)
+  s = format (s, ", length this descriptor %d", d->n_packet_bytes_this_descriptor);
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET)
     s = format (s, ", end-of-packet");
+
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_PASSED_MULTICAST_FILTER)
+    s = format (s, ", passed multicast-filter");
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_UDP_MYSTERY)
+    s = format (s, ", udp-mystery");
 
   s = format (s, "\n%U", format_white_space, indent);
 
-  if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_ETHERNET_ERROR)
-    s = format (s, "layer2 error");
-
-  if (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_LAYER2)
-    {
-      s = format (s, "layer 2 type %d", (s0 & 0x1f));
-      return s;
-    }
-
-  if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_VLAN)
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN)
     s = format (s, "vlan header 0x%x\n%U", d->vlan_tag,
 		format_white_space, indent);
 
-  if ((is_ip4 = (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP4)))
-    {
-      s = format (s, "ip4%s",
-		  (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP4_EXT) ? " options" : "");
-      if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED)
-	s = format (s, " checksum %s",
-		    (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR) ? "bad" : "ok");
-    }
-  if ((is_ip6 = (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6)))
-    s = format (s, "ip6%s",
-		(s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6_EXT) ? " extended" : "");
-  is_tcp = is_udp = 0;
-  if ((is_ip = (is_ip4 | is_ip6)))
-    {
-      is_tcp = (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_TCP) != 0;
-      is_udp = (s0 & IXGE_RX_DESCRIPTOR_STATUS0_IS_UDP) != 0;
-      if (is_tcp)
-	s = format (s, ", tcp");
-      if (is_udp)
-	s = format (s, ", udp");
-    }
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_CRC_ERROR)
+    s = format (s, ", crc-error");
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_SYMBOL_ERROR)
+    s = format (s, ", symbol-error");
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_SEQUENCE_ERROR)
+    s = format (s, ", sequence-error");
+  if (s2 & IGE_RX_DESCRIPTOR_STATUS2_RX_DATA_ERROR)
+    s = format (s, ", rx-data-error");
 
-  if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_L4_CHECKSUMMED)
-    s = format (s, ", l4 checksum %s",
-		(s2 & IXGE_RX_DESCRIPTOR_STATUS2_L4_CHECKSUM_ERROR) ? "bad" : "ok");
-  if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_UDP_CHECKSUMMED)
-    s = format (s, ", udp checksum %s",
-		(s2 & IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_ERROR) ? "bad" : "ok");
+  if ((is_ip4 = !(s2 & IGE_RX_DESCRIPTOR_STATUS2_NOT_IP4)))
+    {
+      s = format (s, "ip4 checksum %s",
+                  (s2 & IGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR) ? "bad" : "ok");
+      is_tcp = (s2 & IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_TCP_CHECKSUMMED) != 0;
+      is_udp = (s2 & IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_UDP_CHECKSUMMED) != 0;
+      if (is_tcp || is_udp)
+	s = format (s, ", %s checksum %s",
+                    is_tcp ? "tcp" : "udp",
+                    (s2 & IGE_RX_DESCRIPTOR_STATUS2_IP4_TCP_UDP_CHECKSUM_ERROR) ? "bad" : "ok");
+    }
 
   return s;
 }
 
-static u8 * format_ixge_tx_descriptor (u8 * s, va_list * va)
+static u8 * format_ige_tx_descriptor (u8 * s, va_list * va)
 {
-  ixge_tx_descriptor_t * d = va_arg (*va, ixge_tx_descriptor_t *);
-  u32 s0 = d->status0, s1 = d->status1;
+  ige_tx_descriptor_t * d = va_arg (*va, ige_tx_descriptor_t *);
+  u32 s0 = d->status0;
   uword indent = format_get_indent (s);
-  u32 v;
 
-  s = format (s, "buffer 0x%Lx, %d packet bytes, %d bytes this buffer",
-	      d->buffer_address,
-	      s1 >> 14, d->n_bytes_this_buffer);
+  s = format (s, "buffer 0x%Lx, %d bytes this buffer",
+	      d->buffer_address, d->n_bytes_this_buffer);
 
   s = format (s, "\n%U", format_white_space, indent);
-
-  if ((v = (s0 >> 0) & 3))
-    s = format (s, "reserved 0x%x, ", v);
-
-  if ((v = (s0 >> 2) & 3))
-    s = format (s, "mac 0x%x, ", v);
-
-  if ((v = (s0 >> 4) & 0xf) != 3)
-    s = format (s, "type 0x%x, ", v);
 
   s = format (s, "%s%s%s%s%s%s%s%s",
 	      (s0 & (1 << 8)) ? "eop, " : "",
 	      (s0 & (1 << 9)) ? "insert-fcs, " : "",
-	      (s0 & (1 << 10)) ? "reserved26, " : "",
+	      (s0 & (1 << 10)) ? "insert-l4-checksum, " : "",
 	      (s0 & (1 << 11)) ? "report-status, " : "",
-	      (s0 & (1 << 12)) ? "reserved28, " : "",
+	      (s0 & (1 << 12)) ? "reserved12, " : "",
 	      (s0 & (1 << 13)) ? "is-advanced, " : "",
 	      (s0 & (1 << 14)) ? "vlan-enable, " : "",
-	      (s0 & (1 << 15)) ? "tx-segmentation, " : "");
+	      (s0 & (1 << 15)) ? "interrupt-delay-enable, " : "");
 	      
-  if ((v = s1 & 0xf) != 0)
-    s = format (s, "status 0x%x, ", v);
-
-  if ((v = (s1 >> 4) & 0xf))
-    s = format (s, "context 0x%x, ", v);
-
-  if ((v = (s1 >> 8) & 0x3f))
-    s = format (s, "options 0x%x, ", v);
-
   return s;
 }
 
 typedef struct {
-  ixge_descriptor_t before, after;
+  ige_descriptor_t before, after;
 
   u32 buffer_index;
 
@@ -451,16 +228,16 @@ typedef struct {
 
   /* Copy of VLIB buffer; packet data stored in pre_data. */
   vlib_buffer_t buffer;
-} ixge_rx_dma_trace_t;
+} ige_rx_dma_trace_t;
 
-static u8 * format_ixge_rx_dma_trace (u8 * s, va_list * va)
+static u8 * format_ige_rx_dma_trace (u8 * s, va_list * va)
 {
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
   vlib_node_t * node = va_arg (*va, vlib_node_t *);
-  ixge_rx_dma_trace_t * t = va_arg (*va, ixge_rx_dma_trace_t *);
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
-  ixge_dma_queue_t * dq;
+  ige_rx_dma_trace_t * t = va_arg (*va, ige_rx_dma_trace_t *);
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
+  ige_dma_queue_t * dq;
   format_function_t * f;
   uword indent = format_get_indent (s);
 
@@ -475,7 +252,7 @@ static u8 * format_ixge_rx_dma_trace (u8 * s, va_list * va)
 
   s = format (s, "\n%Ubefore: %U",
 	      format_white_space, indent,
-	      format_ixge_rx_from_hw_descriptor, &t->before);
+	      format_ige_rx_from_hw_descriptor, &t->before);
   s = format (s, "\n%Uafter : head/tail address 0x%Lx/0x%Lx",
 	      format_white_space, indent,
 	      t->after.rx_to_hw.head_address,
@@ -514,108 +291,81 @@ typedef struct {
   u32 n_descriptors_done_this_call;
 
   u32 n_bytes;
-} ixge_rx_state_t;
+} ige_rx_state_t;
 
-#define foreach_ixge_rx_error				\
-  _ (none, "no error")					\
+#define foreach_ige_rx_error                    \
+  _ (none, "no error")                          \
+  _ (rx_data_error, "rx data error")            \
   _ (ip4_checksum_error, "ip4 checksum errors")
 
 typedef enum {
-#define _(f,s) IXGE_RX_ERROR_##f,
-  foreach_ixge_rx_error
+#define _(f,s) IGE_RX_ERROR_##f,
+  foreach_ige_rx_error
 #undef _
-  IXGE_RX_N_ERROR,
-} ixge_rx_error_t;
+  IGE_RX_N_ERROR,
+} ige_rx_error_t;
 
 typedef enum {
-  IXGE_RX_NEXT_IP4_INPUT,
-  IXGE_RX_NEXT_IP6_INPUT,
-  IXGE_RX_NEXT_ETHERNET_INPUT,
-  IXGE_RX_NEXT_DROP,
-  IXGE_RX_N_NEXT,
-} ixge_rx_next_t;
+  IGE_RX_NEXT_IP4_INPUT,
+  IGE_RX_NEXT_ETHERNET_INPUT,
+  IGE_RX_NEXT_DROP,
+  IGE_RX_N_NEXT,
+} ige_rx_next_t;
 
 always_inline void
-ixge_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
-				       u8 * next0, u8 * error0)
+ige_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
+                                      u8 * next0, u8 * error0)
 {
-  u8 is0_ip4, is0_ip6, n0, e0;
+  u8 is0_ip4, n0, e0;
 
-  e0 = IXGE_RX_ERROR_none;
-  n0 = IXGE_RX_NEXT_ETHERNET_INPUT;
+  e0 = IGE_RX_ERROR_none;
+  n0 = IGE_RX_NEXT_ETHERNET_INPUT;
 
-  is0_ip4 = s02 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
-  n0 = is0_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n0;
-  e0 = (is0_ip4 && (s02 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
-	? IXGE_RX_ERROR_ip4_checksum_error
+  is0_ip4 = s02 & IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
+  n0 = is0_ip4 ? IGE_RX_NEXT_IP4_INPUT : n0;
+  e0 = (is0_ip4 && (s02 & IGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
+	? IGE_RX_ERROR_ip4_checksum_error
 	: e0);
 
-  is0_ip6 = s00 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
-  n0 = is0_ip6 ? IXGE_RX_NEXT_IP6_INPUT : n0;
+  e0 = ((s02 &
+         (IGE_RX_DESCRIPTOR_STATUS2_CRC_ERROR
+          | IGE_RX_DESCRIPTOR_STATUS2_SYMBOL_ERROR
+          | IGE_RX_DESCRIPTOR_STATUS2_SEQUENCE_ERROR
+          | IGE_RX_DESCRIPTOR_STATUS2_RX_DATA_ERROR))
+        ? IGE_RX_ERROR_rx_data_error
+        : e0);
 
   /* Check for error. */
-  n0 = e0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
+  n0 = e0 != IGE_RX_ERROR_none ? IGE_RX_NEXT_DROP : n0;
 
   *error0 = e0;
   *next0 = n0;
 }
 
 always_inline void
-ixge_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
-				       u32 s10, u32 s12,
-				       u8 * next0, u8 * error0,
-				       u8 * next1, u8 * error1)
+ige_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
+                                      u32 s10, u32 s12,
+                                      u8 * next0, u8 * error0,
+                                      u8 * next1, u8 * error1)
 {
-  u8 is0_ip4, is0_ip6, n0, e0;
-  u8 is1_ip4, is1_ip6, n1, e1;
-
-  e0 = e1 = IXGE_RX_ERROR_none;
-  n0 = n1 = IXGE_RX_NEXT_ETHERNET_INPUT;
-
-  is0_ip4 = s02 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
-  is1_ip4 = s12 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
-
-  n0 = is0_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n0;
-  n1 = is1_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n1;
-
-  e0 = (is0_ip4 && (s02 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
-	? IXGE_RX_ERROR_ip4_checksum_error
-	: e0);
-  e1 = (is1_ip4 && (s12 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
-	? IXGE_RX_ERROR_ip4_checksum_error
-	: e1);
-
-  is0_ip6 = s00 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
-  is1_ip6 = s10 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
-
-  n0 = is0_ip6 ? IXGE_RX_NEXT_IP6_INPUT : n0;
-  n1 = is1_ip6 ? IXGE_RX_NEXT_IP6_INPUT : n1;
-
-  /* Check for error. */
-  n0 = e0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
-  n1 = e1 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n1;
-
-  *error0 = e0;
-  *error1 = e1;
-
-  *next0 = n0;
-  *next1 = n1;
+  ige_rx_next_and_error_from_status_x1 (s00, s02, next0, error0);
+  ige_rx_next_and_error_from_status_x1 (s10, s12, next1, error1);
 }
 
 static void
-ixge_rx_trace (ixge_main_t * xm,
-	       ixge_device_t * xd,
-	       ixge_dma_queue_t * dq,
-	       ixge_rx_state_t * rx_state,
-	       ixge_descriptor_t * before_descriptors,
+ige_rx_trace (ige_main_t * xm,
+	       ige_device_t * xd,
+	       ige_dma_queue_t * dq,
+	       ige_rx_state_t * rx_state,
+	       ige_descriptor_t * before_descriptors,
 	       u32 * before_buffers,
-	       ixge_descriptor_t * after_descriptors,
+	       ige_descriptor_t * after_descriptors,
 	       uword n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
   vlib_node_runtime_t * node = rx_state->node;
-  ixge_rx_from_hw_descriptor_t * bd;
-  ixge_rx_to_hw_descriptor_t * ad;
+  ige_rx_from_hw_descriptor_t * bd;
+  ige_rx_to_hw_descriptor_t * ad;
   u32 * b, n_left, is_sop, next_index_sop;
 
   n_left = n_descriptors;
@@ -629,7 +379,7 @@ ixge_rx_trace (ixge_main_t * xm,
     {
       u32 bi0, bi1;
       vlib_buffer_t * b0, * b1;
-      ixge_rx_dma_trace_t * t0, * t1;
+      ige_rx_dma_trace_t * t0, * t1;
       u8 next0, error0, next1, error1;
 
       bi0 = b[0];
@@ -639,10 +389,10 @@ ixge_rx_trace (ixge_main_t * xm,
       b0 = vlib_get_buffer (vm, bi0);
       b1 = vlib_get_buffer (vm, bi1);
 
-      ixge_rx_next_and_error_from_status_x2 (bd[0].status[0], bd[0].status[2],
-					     bd[1].status[0], bd[1].status[2],
-					     &next0, &error0,
-					     &next1, &error1);
+      ige_rx_next_and_error_from_status_x2 (bd[0].status[0], bd[0].status[2],
+                                            bd[1].status[0], bd[1].status[2],
+                                            &next0, &error0,
+                                            &next1, &error1);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -680,7 +430,7 @@ ixge_rx_trace (ixge_main_t * xm,
     {
       u32 bi0;
       vlib_buffer_t * b0;
-      ixge_rx_dma_trace_t * t0;
+      ige_rx_dma_trace_t * t0;
       u8 next0, error0;
 
       bi0 = b[0];
@@ -688,7 +438,7 @@ ixge_rx_trace (ixge_main_t * xm,
 
       b0 = vlib_get_buffer (vm, bi0);
 
-      ixge_rx_next_and_error_from_status_x1 (bd[0].status[0], bd[0].status[2],
+      ige_rx_next_and_error_from_status_x1 (bd[0].status[0], bd[0].status[2],
 					     &next0, &error0);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
@@ -712,7 +462,7 @@ ixge_rx_trace (ixge_main_t * xm,
 }
 
 typedef struct {
-  ixge_tx_descriptor_t descriptor;
+  ige_tx_descriptor_t descriptor;
 
   u32 buffer_index;
 
@@ -724,16 +474,16 @@ typedef struct {
 
   /* Copy of VLIB buffer; packet data stored in pre_data. */
   vlib_buffer_t buffer;
-} ixge_tx_dma_trace_t;
+} ige_tx_dma_trace_t;
 
-static u8 * format_ixge_tx_dma_trace (u8 * s, va_list * va)
+static u8 * format_ige_tx_dma_trace (u8 * s, va_list * va)
 {
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
   UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
-  ixge_tx_dma_trace_t * t = va_arg (*va, ixge_tx_dma_trace_t *);
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
-  ixge_dma_queue_t * dq;
+  ige_tx_dma_trace_t * t = va_arg (*va, ige_tx_dma_trace_t *);
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
+  ige_dma_queue_t * dq;
   format_function_t * f;
   uword indent = format_get_indent (s);
 
@@ -748,7 +498,7 @@ static u8 * format_ixge_tx_dma_trace (u8 * s, va_list * va)
 
   s = format (s, "\n%Udescriptor: %U",
 	      format_white_space, indent,
-	      format_ixge_tx_descriptor, &t->descriptor);
+	      format_ige_tx_descriptor, &t->descriptor);
 
   s = format (s, "\n%Ubuffer 0x%x: %U",
 	      format_white_space, indent,
@@ -770,24 +520,20 @@ typedef struct {
   vlib_node_runtime_t * node;
 
   u32 is_start_of_packet;
-
-  u32 n_bytes_in_packet;
-
-  ixge_tx_descriptor_t * start_of_packet_descriptor;
-} ixge_tx_state_t;
+} ige_tx_state_t;
 
 static void
-ixge_tx_trace (ixge_main_t * xm,
-	       ixge_device_t * xd,
-	       ixge_dma_queue_t * dq,
-	       ixge_tx_state_t * tx_state,
-	       ixge_tx_descriptor_t * descriptors,
+ige_tx_trace (ige_main_t * xm,
+	       ige_device_t * xd,
+	       ige_dma_queue_t * dq,
+	       ige_tx_state_t * tx_state,
+	       ige_tx_descriptor_t * descriptors,
 	       u32 * buffers,
 	       uword n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
   vlib_node_runtime_t * node = tx_state->node;
-  ixge_tx_descriptor_t * d;
+  ige_tx_descriptor_t * d;
   u32 * b, n_left, is_sop;
 
   n_left = n_descriptors;
@@ -799,7 +545,7 @@ ixge_tx_trace (ixge_main_t * xm,
     {
       u32 bi0, bi1;
       vlib_buffer_t * b0, * b1;
-      ixge_tx_dma_trace_t * t0, * t1;
+      ige_tx_dma_trace_t * t0, * t1;
 
       bi0 = b[0];
       bi1 = b[1];
@@ -837,7 +583,7 @@ ixge_tx_trace (ixge_main_t * xm,
     {
       u32 bi0;
       vlib_buffer_t * b0;
-      ixge_tx_dma_trace_t * t0;
+      ige_tx_dma_trace_t * t0;
 
       bi0 = b[0];
       n_left -= 1;
@@ -861,7 +607,7 @@ ixge_tx_trace (ixge_main_t * xm,
 }
 
 always_inline uword
-ixge_ring_sub (ixge_dma_queue_t * q, u32 i0, u32 i1)
+ige_ring_sub (ige_dma_queue_t * q, u32 i0, u32 i1)
 {
   i32 d = i1 - i0;
   ASSERT (i0 < q->n_descriptors);
@@ -870,7 +616,7 @@ ixge_ring_sub (ixge_dma_queue_t * q, u32 i0, u32 i1)
 }
 
 always_inline uword
-ixge_ring_add (ixge_dma_queue_t * q, u32 i0, u32 i1)
+ige_ring_add (ige_dma_queue_t * q, u32 i0, u32 i1)
 {
   u32 d = i0 + i1;
   ASSERT (i0 < q->n_descriptors);
@@ -879,19 +625,19 @@ ixge_ring_add (ixge_dma_queue_t * q, u32 i0, u32 i1)
   return d;
 }
 
-always_inline ixge_dma_regs_t *
-get_dma_regs (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 qi)
+always_inline ige_dma_regs_t *
+get_dma_regs (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 qi)
 {
-  ixge_regs_t * r = xd->regs;
-  ASSERT (qi < 128);
+  ige_regs_t * r = xd->regs;
+  ASSERT (qi < 2);
   if (rt == VLIB_RX)
-    return qi < 64 ? &r->rx_dma0[qi] : &r->rx_dma1[qi - 64];
+    return &r->rx_dma[qi];
   else
     return &r->tx_dma[qi];
 }
 
 always_inline uword
-ixge_tx_descriptor_matches_template (ixge_main_t * xm, ixge_tx_descriptor_t * d)
+ige_tx_descriptor_matches_template (ige_main_t * xm, ige_tx_descriptor_t * d)
 {
   u32 cmp;
 
@@ -908,26 +654,24 @@ ixge_tx_descriptor_matches_template (ixge_main_t * xm, ixge_tx_descriptor_t * d)
 }
 
 static uword
-ixge_tx_no_wrap (ixge_main_t * xm,
-		 ixge_device_t * xd,
-		 ixge_dma_queue_t * dq,
+ige_tx_no_wrap (ige_main_t * xm,
+		 ige_device_t * xd,
+		 ige_dma_queue_t * dq,
 		 u32 * buffers,
 		 u32 start_descriptor_index,
 		 u32 n_descriptors,
-		 ixge_tx_state_t * tx_state)
+		 ige_tx_state_t * tx_state)
 {
   vlib_main_t * vm = xm->vlib_main;
-  ixge_tx_descriptor_t * d, * d_sop;
+  ige_tx_descriptor_t * d;
   u32 n_left = n_descriptors;
   u32 * to_free = vec_end (xm->tx_buffers_pending_free);
   u32 * to_tx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
   u32 is_sop = tx_state->is_start_of_packet;
-  u32 len_sop = tx_state->n_bytes_in_packet;
   u16 template_status = xm->tx_descriptor_template.status0;
 
   ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
   d = &dq->descriptors[start_descriptor_index].tx;
-  d_sop = is_sop ? d : tx_state->start_of_packet_descriptor;
 
   while (n_left >= 4)
     {
@@ -965,8 +709,8 @@ ixge_tx_no_wrap (ixge_main_t * xm,
       len0 = b0->current_length;
       len1 = b1->current_length;
 
-      ASSERT (ixge_tx_descriptor_matches_template (xm, d + 0));
-      ASSERT (ixge_tx_descriptor_matches_template (xm, d + 1));
+      ASSERT (ige_tx_descriptor_matches_template (xm, d + 0));
+      ASSERT (ige_tx_descriptor_matches_template (xm, d + 1));
 
       d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, bi0) + b0->current_data;
       d[1].buffer_address = vlib_get_buffer_data_physical_address (vm, bi1) + b1->current_data;
@@ -974,21 +718,10 @@ ixge_tx_no_wrap (ixge_main_t * xm,
       d[0].n_bytes_this_buffer = len0;
       d[1].n_bytes_this_buffer = len1;
 
-      d[0].status0 = template_status | (is_eop0 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
-      d[1].status0 = template_status | (is_eop1 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
+      d[0].status0 = template_status | (is_eop0 << IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
+      d[1].status0 = template_status | (is_eop1 << IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
 
-      len_sop = (is_sop ? 0 : len_sop) + len0;
-      d_sop[0].status1 = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
-      d += 1;
-      d_sop = is_eop0 ? d : d_sop;
-
-      is_sop = is_eop0;
-
-      len_sop = (is_sop ? 0 : len_sop) + len1;
-      d_sop[0].status1 = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
-      d += 1;
-      d_sop = is_eop1 ? d : d_sop;
-
+      d += 2;
       is_sop = is_eop1;
     }
 
@@ -1014,26 +747,22 @@ ixge_tx_no_wrap (ixge_main_t * xm,
 
       len0 = b0->current_length;
 
-      ASSERT (ixge_tx_descriptor_matches_template (xm, d + 0));
+      ASSERT (ige_tx_descriptor_matches_template (xm, d + 0));
 
       d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, bi0) + b0->current_data;
 
       d[0].n_bytes_this_buffer = len0;
 
-      d[0].status0 = template_status | (is_eop0 << IXGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
+      d[0].status0 = template_status | (is_eop0 << IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET);
 
-      len_sop = (is_sop ? 0 : len_sop) + len0;
-      d_sop[0].status1 = IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET (len_sop);
       d += 1;
-      d_sop = is_eop0 ? d : d_sop;
-
       is_sop = is_eop0;
     }
 
   if (tx_state->node->flags & VLIB_NODE_FLAG_TRACE)
     {
       to_tx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
-      ixge_tx_trace (xm, xd, dq, tx_state,
+      ige_tx_trace (xm, xd, dq, tx_state,
 		     &dq->descriptors[start_descriptor_index].tx,
 		     to_tx,
 		     n_descriptors);
@@ -1041,38 +770,27 @@ ixge_tx_no_wrap (ixge_main_t * xm,
 
   _vec_len (xm->tx_buffers_pending_free) = to_free - xm->tx_buffers_pending_free;
 
-  /* When we are done d_sop can point to end of ring.  Wrap it if so. */
-  {
-    ixge_tx_descriptor_t * d_start = &dq->descriptors[0].tx;
-    
-    ASSERT (d_sop - d_start <= dq->n_descriptors);
-    d_sop = d_sop - d_start == dq->n_descriptors ? d_start : d_sop;
-  }
-
   tx_state->is_start_of_packet = is_sop;
-  tx_state->start_of_packet_descriptor = d_sop;
-  tx_state->n_bytes_in_packet = len_sop;
 
   return n_descriptors;
 }
 
 static uword
-ixge_interface_tx (vlib_main_t * vm,
+ige_interface_tx (vlib_main_t * vm,
 		   vlib_node_runtime_t * node,
 		   vlib_frame_t * f)
 {
-  ixge_main_t * xm = &ixge_main;
+  ige_main_t * xm = &ige_main;
   vlib_interface_output_runtime_t * rd = (void *) node->runtime_data;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, rd->dev_instance);
-  ixge_dma_queue_t * dq;
+  ige_device_t * xd = vec_elt_at_index (xm->devices, rd->dev_instance);
+  ige_dma_queue_t * dq;
   u32 * from, n_left_from, n_left_tx, n_descriptors_to_tx;
   u32 queue_index = 0;		/* fixme parameter */
-  ixge_tx_state_t tx_state;
+  ige_tx_state_t tx_state;
+  ige_dma_regs_t * dr = get_dma_regs (xd, VLIB_TX, queue_index);
 
   tx_state.node = node;
   tx_state.is_start_of_packet = 1;
-  tx_state.start_of_packet_descriptor = 0;
-  tx_state.n_bytes_in_packet = 0;
   
   from = vlib_frame_vector_args (f);
   n_left_from = f->n_vectors;
@@ -1083,8 +801,8 @@ ixge_interface_tx (vlib_main_t * vm,
 
   /* There might be room on the ring due to packets already transmitted. */
   {
-    u32 hw_head_index = dq->tx.head_index_write_back[0];
-    n_left_tx += ixge_ring_sub (dq, hw_head_index, dq->head_index);
+    u32 hw_head_index = dr->head_index;
+    n_left_tx += ige_ring_sub (dq, hw_head_index, dq->head_index);
     dq->head_index = hw_head_index;
   }
 
@@ -1096,7 +814,7 @@ ixge_interface_tx (vlib_main_t * vm,
   if (n_descriptors_to_tx > 0 && dq->tail_index < dq->n_descriptors)
     {
       u32 n = clib_min (dq->n_descriptors - dq->tail_index, n_descriptors_to_tx);
-      n = ixge_tx_no_wrap (xm, xd, dq, from, dq->tail_index, n, &tx_state);
+      n = ige_tx_no_wrap (xm, xd, dq, from, dq->tail_index, n, &tx_state);
       from += n;
       n_left_from -= n;
       n_descriptors_to_tx -= n;
@@ -1108,7 +826,7 @@ ixge_interface_tx (vlib_main_t * vm,
 
   if (n_descriptors_to_tx > 0)
     {
-      u32 n = ixge_tx_no_wrap (xm, xd, dq, from, 0, n_descriptors_to_tx, &tx_state);
+      u32 n = ige_tx_no_wrap (xm, xd, dq, from, 0, n_descriptors_to_tx, &tx_state);
       from += n;
       n_left_from -= n;
       ASSERT (n == n_descriptors_to_tx);
@@ -1121,21 +839,10 @@ ixge_interface_tx (vlib_main_t * vm,
   /* We should only get full packets. */
   ASSERT (tx_state.is_start_of_packet);
 
-  /* Report status when last descriptor is done. */
-  {
-    u32 i = dq->tail_index == 0 ? dq->n_descriptors - 1 : dq->tail_index - 1;
-    ixge_tx_descriptor_t * d = &dq->descriptors[i].tx;
-    d->status0 |= IXGE_TX_DESCRIPTOR_STATUS0_REPORT_STATUS;
-  }
-
   /* Give new descriptors to hardware. */
-  {
-    ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_TX, queue_index);
+  CLIB_MEMORY_BARRIER ();
 
-    CLIB_MEMORY_BARRIER ();
-
-    dr->tail_index = dq->tail_index;
-  }
+  dr->tail_index = dq->tail_index;
 
   /* Free any buffers that are done. */
   {
@@ -1162,17 +869,17 @@ ixge_interface_tx (vlib_main_t * vm,
 }
 
 static uword
-ixge_rx_queue_no_wrap (ixge_main_t * xm,
-		       ixge_device_t * xd,
-		       ixge_dma_queue_t * dq,
-		       ixge_rx_state_t * rx_state,
+ige_rx_queue_no_wrap (ige_main_t * xm,
+		       ige_device_t * xd,
+		       ige_dma_queue_t * dq,
+		       ige_rx_state_t * rx_state,
 		       u32 start_descriptor_index,
 		       u32 n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
   vlib_node_runtime_t * node = rx_state->node;
-  ixge_descriptor_t * d;
-  static ixge_descriptor_t * d_trace_save;
+  ige_descriptor_t * d;
+  static ige_descriptor_t * d_trace_save;
   static u32 * d_trace_buffers;
   u32 n_descriptors_left = n_descriptors;
   u32 * to_rx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
@@ -1237,8 +944,8 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  vlib_buffer_t * b0, * b1;
 	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
 	  u32 bi1, fi1, len1, l3_offset1, s21, s01;
-	  u8 is_eop0, error0, next0;
-	  u8 is_eop1, error1, next1;
+	  u8 is_eop0, is_vlan0, error0, next0;
+	  u8 is_eop1, is_vlan1, error1, next1;
 
 	  vlib_prefetch_buffer_with_index (vm, to_rx[2], STORE);
 	  vlib_prefetch_buffer_with_index (vm, to_rx[3], STORE);
@@ -1250,7 +957,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  s20 = d[0].rx_from_hw.status[2];
 	  s21 = d[1].rx_from_hw.status[2];
 
-	  if (! ((s20 | s21) & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+	  if (! ((s20 | s21) & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
 	    goto found_hw_owned_descriptor_x2;
 
 	  bi0 = to_rx[0];
@@ -1276,12 +983,12 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  CLIB_PREFETCH (b0->data, CLIB_CACHE_LINE_BYTES, LOAD);
 	  CLIB_PREFETCH (b1->data, CLIB_CACHE_LINE_BYTES, LOAD);
 
-	  is_eop0 = (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-	  is_eop1 = (s21 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+	  is_eop0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+	  is_eop1 = (s21 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
 
-	  ixge_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
-						 &next0, &error0,
-						 &next1, &error1);
+	  ige_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
+                                                &next0, &error0,
+                                                &next1, &error1);
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next1 = is_eop0 ? next1 : next0;
@@ -1309,12 +1016,15 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  d += 2;
 	  n_descriptors_left -= 2;
 
+          is_vlan0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
+          is_vlan1 = (s21 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
+
 	  /* Point to either l2 or l3 header depending on next. */
-	  l3_offset0 = (is_sop && next0 != IXGE_RX_NEXT_ETHERNET_INPUT
-			? IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s00)
+	  l3_offset0 = (is_sop && next0 == IGE_RX_NEXT_IP4_INPUT
+			? sizeof (ethernet_header_t) + (is_vlan0 ? sizeof (ethernet_vlan_header_t) : 0)
 			: 0);
-	  l3_offset1 = (is_eop0 && next1 != IXGE_RX_NEXT_ETHERNET_INPUT
-			? IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s01)
+	  l3_offset1 = (is_sop && next1 == IGE_RX_NEXT_IP4_INPUT
+			? sizeof (ethernet_header_t) + (is_vlan1 ? sizeof (ethernet_vlan_header_t) : 0)
 			: 0);
 
 	  b0->current_length = len0 - l3_offset0;
@@ -1385,11 +1095,11 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	{
 	  vlib_buffer_t * b0;
 	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
-	  u8 is_eop0, error0, next0;
+	  u8 is_eop0, is_vlan0, error0, next0;
 
 	  s00 = d[0].rx_from_hw.status[0];
 	  s20 = d[0].rx_from_hw.status[2];
-	  if (! (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+	  if (! (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
 	    goto found_hw_owned_descriptor_x1;
 
 	  bi0 = to_rx[0];
@@ -1405,8 +1115,8 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
-	  is_eop0 = (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-	  ixge_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0);
+	  is_eop0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+	  ige_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0);
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next_index_sop = next0;
@@ -1427,9 +1137,11 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  d += 1;
 	  n_descriptors_left -= 1;
 
+          is_vlan0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
+
 	  /* Point to either l2 or l3 header depending on next. */
-	  l3_offset0 = (is_sop && next0 != IXGE_RX_NEXT_ETHERNET_INPUT
-			? IXGE_RX_DESCRIPTOR_STATUS0_L3_OFFSET (s00)
+	  l3_offset0 = (is_sop && next0 == IGE_RX_NEXT_IP4_INPUT
+			? sizeof (ethernet_header_t) + (is_vlan0 ? sizeof (ethernet_vlan_header_t) : 0)
 			: 0);
 	  b0->current_length = len0 - l3_offset0;
 	  b0->current_data = l3_offset0;
@@ -1481,7 +1193,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
     if (n_trace > 0 && n_done > 0)
       {
 	u32 n = clib_min (n_trace, n_done);
-	ixge_rx_trace (xm, xd, dq, rx_state,
+	ige_rx_trace (xm, xd, dq, rx_state,
 		       d_trace_save,
 		       d_trace_buffers,
 		       &dq->descriptors[start_descriptor_index],
@@ -1508,13 +1220,13 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 }
 
 static uword
-ixge_rx_queue (ixge_main_t * xm,
-	       ixge_device_t * xd,
-	       ixge_rx_state_t * rx_state,
+ige_rx_queue (ige_main_t * xm,
+	       ige_device_t * xd,
+	       ige_rx_state_t * rx_state,
 	       u32 queue_index)
 {
-  ixge_dma_queue_t * dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], queue_index);
-  ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
+  ige_dma_queue_t * dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], queue_index);
+  ige_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
   uword n_packets = 0;
   u32 hw_head_index, sw_head_index;
 
@@ -1533,21 +1245,21 @@ ixge_rx_queue (ixge_main_t * xm,
   if (hw_head_index < sw_head_index)
     {
       u32 n_tried = dq->n_descriptors - sw_head_index;
-      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
-      sw_head_index = ixge_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
+      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
+      sw_head_index = ige_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
       if (rx_state->n_descriptors_done_this_call != n_tried)
 	goto done;
     }
   if (hw_head_index >= sw_head_index)
     {
       u32 n_tried = hw_head_index - sw_head_index;
-      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
-      sw_head_index = ixge_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
+      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
+      sw_head_index = ige_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
     }
 
  done:
   dq->head_index = sw_head_index;
-  dq->tail_index = ixge_ring_add (dq, dq->tail_index, rx_state->n_descriptors_done_total);
+  dq->tail_index = ige_ring_add (dq, dq->tail_index, rx_state->n_descriptors_done_total);
 
   /* Give head/tail back to hardware. */
   CLIB_MEMORY_BARRIER ();
@@ -1564,50 +1276,61 @@ ixge_rx_queue (ixge_main_t * xm,
   return n_packets;
 }
 
-static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
+static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
 {
   vlib_main_t * vm = xm->vlib_main;
-  ixge_regs_t * r = xd->regs;
+  ige_regs_t * r = xd->regs;
 
-  if (i != 20)
+  if (i != 2)
     {
       ELOG_TYPE_DECLARE (e) = {
 	.function = (char *) __FUNCTION__,
-	.format = "ixge %d, %s",
+	.format = "ige %d, %s",
 	.format_args = "i1t1",
-	.n_enum_strings = 16,
+	.n_enum_strings = 26,
 	.enum_strings = {
-	  "flow director",
-	  "rx miss",
-	  "pci exception",
-	  "mailbox",
+	  "tx descriptor written back",
+	  "tx queue empty",
 	  "link status change",
-	  "linksec key exchange",
-	  "manageability event",
-	  "reserved23",
+	  "rx sequence error",
+          "rx descriptor min threshold",
+	  "reserved5",
+	  "rx overrrun",
+	  "rx timer interrupt",
+	  "reserved8",
+	  "mdi access complete",
+	  "rx ordered sets",
 	  "sdp0",
 	  "sdp1",
 	  "sdp2",
 	  "sdp3",
-	  "ecc",
-	  "descriptor handler error",
-	  "tcp timer",
-	  "other",
+	  "tx descriptors low",
+	  "rx small packet",
+	  "rx ack",
+	  "reserved18",
+	  "reserved19",
+          "rx queue 0 descriptor fifo parity error",
+          "tx queue 0 descriptor fifo parity error",
+          "pci master fifo parity error",
+          "packet buffer parity error",
+          "rx queue 1 descriptor fifo parity error",
+          "tx queue 1 descriptor fifo parity error",
 	},
       };
       struct { u8 instance; u8 index; } * ed;
       ed = ELOG_DATA (&vm->elog_main, e);
       ed->instance = xd->device_index;
-      ed->index = i - 16;
+      ed->index = i;
     }
   else
     {
+#if 0
       u32 v = r->xge_mac.link_status;
       uword is_up = (v & (1 << 30)) != 0;
 
       ELOG_TYPE_DECLARE (e) = {
 	.function = (char *) __FUNCTION__,
-	.format = "ixge %d, link status change 0x%x",
+	.format = "ige %d, link status change 0x%x",
 	.format_args = "i4i4",
       };
       struct { u32 instance, link_status; } * ed;
@@ -1617,40 +1340,40 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
       xd->link_status_at_last_link_change = v;
       vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
 				   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+#else
+      ASSERT (0);
+#endif
     }
 }
 
 static uword
-ixge_device_input (ixge_main_t * xm,
-		   ixge_device_t * xd,
-		   ixge_rx_state_t * rx_state)
+ige_device_input (ige_main_t * xm,
+		   ige_device_t * xd,
+		   ige_rx_state_t * rx_state)
 {
-  ixge_regs_t * r = xd->regs;
+  ige_regs_t * r = xd->regs;
   u32 i, s;
   uword n_rx_packets = 0;
 
-  s = r->interrupt.status_write_1_to_set;
-  if (s)
-    r->interrupt.status_write_1_to_clear = s;
-
+  s = r->interrupt.status_clear_to_read;
   foreach_set_bit (i, s, ({
-    if (i < 16)
-      n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
+    if (i == 7)
+      n_rx_packets += ige_rx_queue (xm, xd, rx_state, i);
     else
-      ixge_interrupt (xm, xd, i);
+      ige_interrupt (xm, xd, i);
   }));
 
   return n_rx_packets;
 }
 
 static uword
-ixge_input (vlib_main_t * vm,
+ige_input (vlib_main_t * vm,
 	    vlib_node_runtime_t * node,
 	    vlib_frame_t * f)
 {
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd;
-  ixge_rx_state_t _rx_state, * rx_state = &_rx_state;
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd;
+  ige_rx_state_t _rx_state, * rx_state = &_rx_state;
   uword n_rx_packets = 0;
 
   rx_state->node = node;
@@ -1663,7 +1386,7 @@ ixge_input (vlib_main_t * vm,
       /* Loop over devices with interrupts. */
       foreach_set_bit (i, node->runtime_data[0], ({
 	xd = vec_elt_at_index (xm->devices, i);
-	n_rx_packets += ixge_device_input (xm, xd, rx_state);
+	n_rx_packets += ige_device_input (xm, xd, rx_state);
 
 	/* Re-enable interrupts since we're going to stay in interrupt mode. */
 	if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_INTERRUPT_TO_POLLING_MODE))
@@ -1678,7 +1401,7 @@ ixge_input (vlib_main_t * vm,
       /* Poll all devices for input/interrupts. */
       vec_foreach (xd, xm->devices)
 	{
-	  n_rx_packets += ixge_device_input (xm, xd, rx_state);
+	  n_rx_packets += ige_device_input (xm, xd, rx_state);
 
 	  /* Re-enable interrupts when switching out of polling mode. */
 	  if (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE)
@@ -1689,62 +1412,61 @@ ixge_input (vlib_main_t * vm,
   return n_rx_packets;
 }
 
-static char * ixge_rx_error_strings[] = {
+static char * ige_rx_error_strings[] = {
 #define _(n,s) s,
-    foreach_ixge_rx_error
+    foreach_ige_rx_error
 #undef _
 };
 
-static VLIB_REGISTER_NODE (ixge_input_node) = {
-  .function = ixge_input,
+static VLIB_REGISTER_NODE (ige_input_node) = {
+  .function = ige_input,
   .type = VLIB_NODE_TYPE_INPUT,
-  .name = "ixge-input",
+  .name = "ige-input",
 
   /* Will be enabled if/when hardware is detected. */
   .state = VLIB_NODE_STATE_DISABLED,
 
   .format_buffer = format_ethernet_header_with_length,
-  .format_trace = format_ixge_rx_dma_trace,
+  .format_trace = format_ige_rx_dma_trace,
 
-  .n_errors = IXGE_RX_N_ERROR,
-  .error_strings = ixge_rx_error_strings,
+  .n_errors = IGE_RX_N_ERROR,
+  .error_strings = ige_rx_error_strings,
 
-  .n_next_nodes = IXGE_RX_N_NEXT,
+  .n_next_nodes = IGE_RX_N_NEXT,
   .next_nodes = {
-    [IXGE_RX_NEXT_DROP] = "error-drop",
-    [IXGE_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
-    [IXGE_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
-    [IXGE_RX_NEXT_IP6_INPUT] = "ip6-input",
+    [IGE_RX_NEXT_DROP] = "error-drop",
+    [IGE_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
+    [IGE_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
   },
 };
 
-static u8 * format_ixge_device_name (u8 * s, va_list * args)
+static u8 * format_ige_device_name (u8 * s, va_list * args)
 {
   u32 i = va_arg (*args, u32);
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, i);
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd = vec_elt_at_index (xm->devices, i);
   return format (s, "TenGigabitEthernet%U",
 		 format_os_pci_handle, xd->pci_device.os_handle);
 }
 
-#define IXGE_COUNTER_IS_64_BIT (1 << 0)
-#define IXGE_COUNTER_NOT_CLEAR_ON_READ (1 << 1)
+#define IGE_COUNTER_IS_64_BIT (1 << 0)
+#define IGE_COUNTER_NOT_CLEAR_ON_READ (1 << 1)
 
-static u8 ixge_counter_flags[] = {
+static u8 ige_counter_flags[] = {
 #define _(a,f) 0,
-#define _64(a,f) IXGE_COUNTER_IS_64_BIT,
-  foreach_ixge_counter
+#define _64(a,f) IGE_COUNTER_IS_64_BIT,
+  foreach_ige_counter
 #undef _
 #undef _64
 };
 
-static void ixge_update_counters (ixge_device_t * xd)
+static void ige_update_counters (ige_device_t * xd)
 {
   /* Byte offset for counter registers. */
   static u32 reg_offsets[] = {
 #define _(a,f) (a) / sizeof (u32),
 #define _64(a,f) _(a,f)
-    foreach_ixge_counter
+    foreach_ige_counter
 #undef _
 #undef _64
   };
@@ -1755,21 +1477,21 @@ static void ixge_update_counters (ixge_device_t * xd)
     {
       u32 o = reg_offsets[i];
       xd->counters[i] += r[o];
-      if (ixge_counter_flags[i] & IXGE_COUNTER_NOT_CLEAR_ON_READ)
+      if (ige_counter_flags[i] & IGE_COUNTER_NOT_CLEAR_ON_READ)
 	r[o] = 0;
-      if (ixge_counter_flags[i] & IXGE_COUNTER_IS_64_BIT)
+      if (ige_counter_flags[i] & IGE_COUNTER_IS_64_BIT)
 	xd->counters[i] += (u64) r[o+1] << (u64) 32;
     }
 }
 
-static u8 * format_ixge_device_id (u8 * s, va_list * args)
+static u8 * format_ige_device_id (u8 * s, va_list * args)
 {
   u32 device_id = va_arg (*args, u32);
   char * t = 0;
   switch (device_id)
     {
 #define _(f,n) case n: t = #f; break;
-      foreach_ixge_pci_device_id;
+      foreach_ige_pci_device_id;
 #undef _
     default:
       t = 0;
@@ -1782,56 +1504,22 @@ static u8 * format_ixge_device_id (u8 * s, va_list * args)
   return s;
 }
 
-static u8 * format_ixge_link_status (u8 * s, va_list * args)
-{
-  ixge_device_t * xd = va_arg (*args, ixge_device_t *);
-  u32 v = xd->link_status_at_last_link_change;
-
-  s = format (s, "%s", (v & (1 << 30)) ? "up" : "down");
-
-  {
-    char * modes[] = {
-      "1g", "10g parallel", "10g serial", "autoneg",
-    };
-    char * speeds[] = {
-      "unknown", "100m", "1g", "10g",
-    };
-    s = format (s, ", mode %s, speed %s",
-		modes[(v >> 26) & 3],
-		speeds[(v >> 28) & 3]);
-  }
-
-  return s;
-}
-
-static u8 * format_ixge_device (u8 * s, va_list * args)
+static u8 * format_ige_device (u8 * s, va_list * args)
 {
   u32 dev_instance = va_arg (*args, u32);
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, dev_instance);
-  ixge_phy_t * phy = xd->phys + xd->phy_index;
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd = vec_elt_at_index (xm->devices, dev_instance);
+  // ige_phy_t * phy = xd->phys + xd->phy_index;
   uword indent = format_get_indent (s);
 
-  ixge_update_counters (xd);
-  xd->link_status_at_last_link_change = xd->regs->xge_mac.link_status;
+  ige_update_counters (xd);
 
-  s = format (s, "Intel 8259X: id %U\n%Ulink %U",
-	      format_ixge_device_id, xd->device_id,
+  s = format (s, "Intel 8257X: id %U\n%U%U",
+	      format_ige_device_id, xd->device_id,
 	      format_white_space, indent + 2,
-	      format_ixge_link_status, xd);
+	      format_ethernet_media, 0);
 
-  {
-    pcie_config_regs_t * r = pci_config_find_capability (&xd->pci_device.config0, PCI_CAP_ID_PCIE);
-
-    s = format (s, "\n%U", format_white_space, indent + 2);
-    if (r)
-      s = format (s, "PCIE %.1fGb/s width x%d",
-		  (2.5 * (r->link_status & 0xf)),
-		  (r->link_status >> 4) & 0x3f);
-    else
-      s = format (s, "PCIE unknown speed and width");
-  }
-
+#if 0
   s = format (s, "\n%U", format_white_space, indent + 2);
   if (phy->mdio_address != ~0)
     s = format (s, "PHY address %d, id 0x%x", phy->mdio_address, phy->id);
@@ -1839,6 +1527,7 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
     s = format (s, "SFP %U", format_sfp_eeprom, &xd->sfp_eeprom);
   else
     s = format (s, "PHY not found");
+#endif
 
   {
     u32 i;
@@ -1846,7 +1535,7 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
     static char * names[] = {
 #define _(a,f) #f,
 #define _64(a,f) _(a,f)
-    foreach_ixge_counter
+    foreach_ige_counter
 #undef _
 #undef _64
     };
@@ -1865,30 +1554,30 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
   return s;
 }
 
-static void ixge_clear_hw_interface_counters (u32 instance)
+static void ige_clear_hw_interface_counters (u32 instance)
 {
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd = vec_elt_at_index (xm->devices, instance);
-  ixge_update_counters (xd);
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd = vec_elt_at_index (xm->devices, instance);
+  ige_update_counters (xd);
   memcpy (xd->counters_last_clear, xd->counters, sizeof (xd->counters));
 }
 
-VLIB_DEVICE_CLASS (ixge_device_class) = {
-    .name = "ixge",
-    .tx_function = ixge_interface_tx,
-    .format_device_name = format_ixge_device_name,
-    .format_device = format_ixge_device,
-    .format_tx_trace = format_ixge_tx_dma_trace,
-    .clear_counters = ixge_clear_hw_interface_counters,
-    .admin_up_down_function = ixge_interface_admin_up_down,
+VLIB_DEVICE_CLASS (ige_device_class) = {
+    .name = "ige",
+    .tx_function = ige_interface_tx,
+    .format_device_name = format_ige_device_name,
+    .format_device = format_ige_device,
+    .format_tx_trace = format_ige_tx_dma_trace,
+    .clear_counters = ige_clear_hw_interface_counters,
+    .admin_up_down_function = ige_interface_admin_up_down,
 };
 
 static clib_error_t *
-ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
+ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 {
-  ixge_main_t * xm = &ixge_main;
+  ige_main_t * xm = &ige_main;
   vlib_main_t * vm = xm->vlib_main;
-  ixge_dma_queue_t * dq;
+  ige_dma_queue_t * dq;
   clib_error_t * error = 0;
 
   vec_validate (xd->dma_queues[rt], queue_index);
@@ -1907,7 +1596,7 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     }
 
   if (! xm->n_descriptors[rt])
-    xm->n_descriptors[rt] = 4 * VLIB_FRAME_SIZE;
+    xm->n_descriptors[rt] = 3 * VLIB_FRAME_SIZE / 2;
 
   dq->queue_index = queue_index;
   dq->n_descriptors = round_pow2 (xm->n_descriptors[rt], xm->n_descriptors_per_cache_line);
@@ -1940,16 +1629,15 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     {
       u32 i;
 
-      dq->tx.head_index_write_back = vlib_physmem_alloc (vm, &error, CLIB_CACHE_LINE_BYTES);
-
       for (i = 0; i < dq->n_descriptors; i++)
 	dq->descriptors[i].tx = xm->tx_descriptor_template;
 
       vec_validate (xm->tx_buffers_pending_free, dq->n_descriptors - 1);
     }
 
+#if 0
   {
-    ixge_dma_regs_t * dr = get_dma_regs (xd, rt, queue_index);
+    ige_dma_regs_t * dr = get_dma_regs (xd, rt, queue_index);
     uword a;
 
     a = vlib_physmem_virtual_to_physical (vm, dq->descriptors);
@@ -2007,19 +1695,22 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     dr->head_index = dq->head_index;
     dr->tail_index = dq->tail_index;
   }
+#endif
 
   return error;
 }
 
-static void ixge_device_init (ixge_main_t * xm)
+static void ige_device_init (ige_main_t * xm)
 {
+  /* $$$$ jadfix $$$$ */
+#if 0
   vlib_main_t * vm = xm->vlib_main;
-  ixge_device_t * xd;
+  ige_device_t * xd;
     
   /* Reset chip(s). */
   vec_foreach (xd, xm->devices)
     {
-      ixge_regs_t * r = xd->regs;
+      ige_regs_t * r = xd->regs;
       const u32 reset_bit = (1 << 26) | (1 << 3);
 
       r->control |= reset_bit;
@@ -2031,7 +1722,7 @@ static void ixge_device_init (ixge_main_t * xm)
       /* Software loaded. */
       r->extended_control |= (1 << 28);
 
-      ixge_phy_init (xd);
+      ige_phy_init (xd);
 
       /* Register ethernet interface. */
       {
@@ -2046,7 +1737,7 @@ static void ixge_device_init (ixge_main_t * xm)
 
 	error = ethernet_register_interface
 	  (vm,
-	   ixge_device_class.index,
+	   ige_device_class.index,
 	   xd->device_index,
 	   /* ethernet address */ addr8,
 	   /* phy */ 0,
@@ -2060,8 +1751,8 @@ static void ixge_device_init (ixge_main_t * xm)
 	xd->vlib_sw_if_index = sw->sw_if_index;
       }
 
-      ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
-      ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
+      ige_dma_init (xd, VLIB_RX, /* queue_index */ 0);
+      ige_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
       /* RX queue gets mapped to interrupt bit 0.
 	 We don't use TX interrupts. */
@@ -2075,7 +1766,7 @@ static void ixge_device_init (ixge_main_t * xm)
       if (0)
 	{
 	  f64 line_rate_max_pps = 10e9 / (8 * (64 + /* interframe padding */ 20));
-	  ixge_throttle_queue_interrupt (r, 0, .75 * xm->n_descriptors[VLIB_RX] / line_rate_max_pps);
+	  ige_throttle_queue_interrupt (r, 0, .75 * xm->n_descriptors[VLIB_RX] / line_rate_max_pps);
 	}
 
       /* Accept all broadcast packets.  Multicasts must be explicitly
@@ -2086,28 +1777,26 @@ static void ixge_device_init (ixge_main_t * xm)
       r->xge_mac.control |= 1 << 2;
       r->xge_mac.rx_max_frame_size = (9216 + 14) << 16;
 
-      /* Enable all interrupts. */
-#define IXGE_INTERRUPT_DISABLE 0
-      if (! IXGE_INTERRUPT_DISABLE)
-	r->interrupt.enable_write_1_to_set = ~0;
+      r->interrupt.enable_write_1_to_set = ~0;
     }
+#endif
 }
 
 static uword
-ixge_process (vlib_main_t * vm,
+ige_process (vlib_main_t * vm,
 	      vlib_node_runtime_t * rt,
 	      vlib_frame_t * f)
 {
-  ixge_main_t * xm = &ixge_main;
-  ixge_device_t * xd;
+  ige_main_t * xm = &ige_main;
+  ige_device_t * xd;
   uword event_type, * event_data = 0;
     
-  ixge_device_init (xm);
+  ige_device_init (xm);
 
   /* Clear all counters. */
   vec_foreach (xd, xm->devices)
     {
-      ixge_update_counters (xd);
+      ige_update_counters (xd);
       memset (xd->counters, 0, sizeof (xd->counters));
     }
 
@@ -2138,7 +1827,7 @@ ixge_process (vlib_main_t * vm,
 	  {
 	    xm->time_last_stats_update = now;
 	    vec_foreach (xd, xm->devices)
-	      ixge_update_counters (xd);
+	      ige_update_counters (xd);
 	  }
       }
     }
@@ -2146,47 +1835,46 @@ ixge_process (vlib_main_t * vm,
   return 0;
 }
 
-static vlib_node_registration_t ixge_process_node = {
-    .function = ixge_process,
+static vlib_node_registration_t ige_process_node = {
+    .function = ige_process,
     .type = VLIB_NODE_TYPE_PROCESS,
-    .name = "ixge-process",
+    .name = "ige-process",
 };
 
-clib_error_t * ixge_init (vlib_main_t * vm)
+clib_error_t * ige_init (vlib_main_t * vm)
 {
-  ixge_main_t * xm = &ixge_main;
+  ige_main_t * xm = &ige_main;
   clib_error_t * error;
 
   xm->vlib_main = vm;
   memset (&xm->tx_descriptor_template, 0, sizeof (xm->tx_descriptor_template));
   memset (&xm->tx_descriptor_template_mask, 0, sizeof (xm->tx_descriptor_template_mask));
   xm->tx_descriptor_template.status0 =
-    (IXGE_TX_DESCRIPTOR_STATUS0_ADVANCED
-     | IXGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED
-     | IXGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS);
+    (IGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED
+     | IGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS);
   xm->tx_descriptor_template_mask.status0 = 0xffff;
   xm->tx_descriptor_template_mask.status1 = 0x00003fff;
 
   xm->tx_descriptor_template_mask.status0 &=
-    ~(IXGE_TX_DESCRIPTOR_STATUS0_IS_END_OF_PACKET
-      | IXGE_TX_DESCRIPTOR_STATUS0_REPORT_STATUS);
+    ~(IGE_TX_DESCRIPTOR_STATUS0_IS_END_OF_PACKET
+      | IGE_TX_DESCRIPTOR_STATUS0_REPORT_STATUS);
   xm->tx_descriptor_template_mask.status1 &=
-    ~(IXGE_TX_DESCRIPTOR_STATUS1_DONE);
+    ~(IGE_TX_DESCRIPTOR_STATUS1_DONE);
 
   error = vlib_call_init_function (vm, pci_bus_init);
 
   return error;
 }
 
-VLIB_INIT_FUNCTION (ixge_init);
+VLIB_INIT_FUNCTION (ige_init);
 
 static clib_error_t *
-ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
+ige_pci_init (vlib_main_t * vm, pci_device_t * dev)
 {
-  ixge_main_t * xm = &ixge_main;
+  ige_main_t * xm = &ige_main;
   clib_error_t * error;
   void * r;
-  ixge_device_t * xd;
+  ige_device_t * xd;
   
   /* Device found: make sure we have dma memory. */
   error = unix_physmem_init (vm, /* physical_memory_required */ 1);
@@ -2208,34 +1896,31 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   {
     linux_pci_device_t * lp = pci_dev_for_linux (dev);
 
-    vlib_node_set_state (vm, ixge_input_node.index,
-			 (IXGE_INTERRUPT_DISABLE
-			  ? VLIB_NODE_STATE_POLLING
-			  : VLIB_NODE_STATE_INTERRUPT));
-    lp->device_input_node_index = ixge_input_node.index;
+    vlib_node_set_state (vm, ige_input_node.index, VLIB_NODE_STATE_INTERRUPT);
+    lp->device_input_node_index = ige_input_node.index;
     lp->device_index = xd->device_index;
   }
 
   if (vec_len (xm->devices) == 1)
     {
-      vlib_register_node (vm, &ixge_process_node);
-      xm->process_node_index = ixge_process_node.index;
+      vlib_register_node (vm, &ige_process_node);
+      xm->process_node_index = ige_process_node.index;
     }
 
   os_add_pci_disable_interrupts_reg
     (dev->os_handle,
      /* resource */ 0,
-     STRUCT_OFFSET_OF (ixge_regs_t, interrupt.enable_write_1_to_clear),
+     STRUCT_OFFSET_OF (ige_regs_t, interrupt.enable_write_1_to_clear),
      /* value to write */ ~0);
 
   return 0;
 }
 
-static PCI_REGISTER_DEVICE (ixge_pci_device_registration) = {
-  .init_function = ixge_pci_init,
+static PCI_REGISTER_DEVICE (ige_pci_device_registration) = {
+  .init_function = ige_pci_init,
   .supported_devices = {
 #define _(t,i) { .vendor_id = PCI_VENDOR_ID_INTEL, .device_id = i, },
-    foreach_ixge_pci_device_id
+    foreach_ige_pci_device_id
 #undef _
     { 0 },
   },

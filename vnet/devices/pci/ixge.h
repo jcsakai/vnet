@@ -1040,9 +1040,6 @@ typedef struct {
 
   union {
     struct {
-      /* For TX rings the number of descriptors currently active on transmit ring. */
-      u32 n_descriptors_active;
-
       u32 * head_index_write_back;
     } tx;
 
