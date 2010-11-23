@@ -1604,12 +1604,16 @@ static VLIB_REGISTER_NODE (ip4_multicast_node) = {
   },
 };
 
-/* Compute TCP/UDP/ICMP6 checksum in software. */
-u16 ip4_tcp_udp_compute_checksum (ip4_header_t * ip0)
+/* Compute TCP/UDP/ICMP4 checksum in software. */
+u16
+ip4_tcp_udp_compute_checksum (vlib_main_t * vm, vlib_buffer_t * p0,
+			      ip4_header_t * ip0)
 {
   ip_csum_t sum0;
   u32 ip_header_length, payload_length_host_byte_order;
+  u32 n_this_buffer, n_bytes_left;
   u16 sum16;
+  void * data_this_buffer;
   
   /* Initialize checksum with ip6 header. */
   ip_header_length = ip4_header_bytes (ip0);
@@ -1624,15 +1628,30 @@ u16 ip4_tcp_udp_compute_checksum (ip4_header_t * ip0)
   else
     sum0 = ip_csum_with_carry (sum0, clib_mem_unaligned (&ip0->src_address, u64));
 
-  sum0 = ip_incremental_checksum (sum0,
-				  (void *) ip0 + ip_header_length,
-				  payload_length_host_byte_order);
+  n_bytes_left = n_this_buffer = payload_length_host_byte_order;
+  data_this_buffer = (void *) ip0 + ip_header_length;
+  if (n_this_buffer + ip_header_length > p0->current_length)
+    n_this_buffer = p0->current_length > ip_header_length ? p0->current_length - ip_header_length : 0;
+  while (1)
+    {
+      sum0 = ip_incremental_checksum (sum0, data_this_buffer, n_this_buffer);
+      n_bytes_left -= n_this_buffer;
+      if (n_bytes_left == 0)
+	break;
+
+      ASSERT (p0->flags & VLIB_BUFFER_NEXT_PRESENT);
+      p0 = vlib_get_buffer (vm, p0->next_buffer);
+      data_this_buffer = vlib_buffer_get_current (p0);
+      n_this_buffer = p0->current_length;
+    }
+
   sum16 = ~ ip_csum_fold (sum0);
 
   return sum16;
 }
 
-static u32 ip4_tcp_udp_validate_checksum (vlib_buffer_t * p0)
+static u32
+ip4_tcp_udp_validate_checksum (vlib_main_t * vm, vlib_buffer_t * p0)
 {
   ip4_header_t * ip0 = vlib_buffer_get_current (p0);
   udp_header_t * udp0;
@@ -1649,9 +1668,7 @@ static u32 ip4_tcp_udp_validate_checksum (vlib_buffer_t * p0)
       return p0->flags;
     }
 
-  /* Broken for multi buffer packets. */
-  ASSERT (! (p0->flags & VLIB_BUFFER_NEXT_PRESENT));
-  sum16 = ip4_tcp_udp_compute_checksum (ip0);
+  sum16 = ip4_tcp_udp_compute_checksum (vm, p0, ip0);
 
   p0->flags |= (IP_BUFFER_L4_CHECKSUM_COMPUTED
 		| ((sum16 == 0) << LOG2_IP_BUFFER_L4_CHECKSUM_CORRECT));
@@ -1752,7 +1769,7 @@ ip4_local (vlib_main_t * vm,
 		{
 		  if (is_tcp_udp0
 		      && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
-		    flags0 = ip4_tcp_udp_validate_checksum (p0);
+		    flags0 = ip4_tcp_udp_validate_checksum (vm, p0);
 		  good_tcp_udp0 =
 		    (flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 		  good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
@@ -1761,7 +1778,7 @@ ip4_local (vlib_main_t * vm,
 		{
 		  if (is_tcp_udp1
 		      && ! (flags1 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
-		    flags1 = ip4_tcp_udp_validate_checksum (p1);
+		    flags1 = ip4_tcp_udp_validate_checksum (vm, p1);
 		  good_tcp_udp1 =
 		    (flags1 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 		  good_tcp_udp1 |= is_udp1 && udp1->checksum == 0;
@@ -1894,7 +1911,7 @@ ip4_local (vlib_main_t * vm,
 	    {
 	      if (is_tcp_udp0
 		  && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
-		flags0 = ip4_tcp_udp_validate_checksum (p0);
+		flags0 = ip4_tcp_udp_validate_checksum (vm, p0);
 	      good_tcp_udp0 =
 		(flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
 	      good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;

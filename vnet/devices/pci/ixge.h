@@ -1046,6 +1046,22 @@ typedef struct {
     struct {
       /* Buffer indices to use to replenish each descriptor. */
       u32 * replenish_buffer_indices;
+
+      vlib_node_runtime_t * node;
+      u32 next_index;
+
+      u32 saved_start_of_packet_buffer_index;
+
+      u32 saved_start_of_packet_next_index;
+      u32 saved_last_buffer_index;
+
+      u32 is_start_of_packet;
+
+      u32 n_descriptors_done_total;
+
+      u32 n_descriptors_done_this_call;
+
+      u32 n_bytes;
     } rx;
   };
 } ixge_dma_queue_t;
@@ -1083,21 +1099,6 @@ typedef enum {
 } ixge_pci_device_id_t;
 
 typedef struct {
-  u32 saved_start_of_packet_buffer_index;
-
-  u32 saved_start_of_packet_next_index;
-  u32 saved_last_buffer_index;
-
-  u32 is_start_of_packet;
-
-  u32 n_descriptors_done_total;
-
-  u32 n_descriptors_done_this_call;
-
-  u32 n_bytes;
-} ixge_rx_state_t;
-
-typedef struct {
   ixge_regs_t * regs;
 
   /* PCI bus info. */
@@ -1116,8 +1117,6 @@ typedef struct {
 
   ixge_dma_queue_t * dma_queues[VLIB_N_RX_TX];
 
-  ixge_rx_state_t rx_state;
-
   /* Phy index (0 or 1) and address on MDI bus. */
   u32 phy_index;
   ixge_phy_t phys[2];
@@ -1134,9 +1133,6 @@ typedef struct {
 
 typedef struct {
   vlib_main_t * vlib_main;
-
-  /* Node runtime for ixge-input. */
-  vlib_node_runtime_t * input_node;
 
   /* Vector of devices. */
   ixge_device_t * devices;

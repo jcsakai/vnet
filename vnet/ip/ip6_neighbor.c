@@ -336,7 +336,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	      p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
 
 	      h0->icmp.checksum = 0;
-	      h0->icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (ip0);
+	      h0->icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (vm, p0, ip0);
 
 	      n_advertisements_sent++;
 	    }

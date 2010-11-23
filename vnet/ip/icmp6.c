@@ -413,7 +413,7 @@ icmp6_pg_edit_function (pg_main_t * pg,
       ip0 = (void *) (p0->data + ip_offset);
       icmp0 = (void *) (p0->data + icmp_offset);
 
-      icmp0->checksum = ip6_tcp_udp_icmp_compute_checksum (ip0);
+      icmp0->checksum = ip6_tcp_udp_icmp_compute_checksum (vm, p0, ip0);
     }
 }
 

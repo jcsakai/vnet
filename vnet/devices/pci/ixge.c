@@ -587,14 +587,13 @@ static void
 ixge_rx_trace (ixge_main_t * xm,
 	       ixge_device_t * xd,
 	       ixge_dma_queue_t * dq,
-	       ixge_rx_state_t * rx_state,
 	       ixge_descriptor_t * before_descriptors,
 	       u32 * before_buffers,
 	       ixge_descriptor_t * after_descriptors,
 	       uword n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
-  vlib_node_runtime_t * node = xm->input_node;
+  vlib_node_runtime_t * node = dq->rx.node;
   ixge_rx_from_hw_descriptor_t * bd;
   ixge_rx_to_hw_descriptor_t * ad;
   u32 * b, n_left, is_sop, next_index_sop;
@@ -603,8 +602,8 @@ ixge_rx_trace (ixge_main_t * xm,
   b = before_buffers;
   bd = &before_descriptors->rx_from_hw;
   ad = &after_descriptors->rx_to_hw;
-  is_sop = rx_state->is_start_of_packet;
-  next_index_sop = rx_state->saved_start_of_packet_next_index;
+  is_sop = dq->rx.is_start_of_packet;
+  next_index_sop = dq->rx.saved_start_of_packet_next_index;
 
   while (n_left >= 2)
     {
@@ -1146,22 +1145,21 @@ static uword
 ixge_rx_queue_no_wrap (ixge_main_t * xm,
 		       ixge_device_t * xd,
 		       ixge_dma_queue_t * dq,
-		       ixge_rx_state_t * rx_state,
 		       u32 start_descriptor_index,
 		       u32 n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
-  vlib_node_runtime_t * node = xm->input_node;
+  vlib_node_runtime_t * node = dq->rx.node;
   ixge_descriptor_t * d;
   static ixge_descriptor_t * d_trace_save;
   static u32 * d_trace_buffers;
   u32 n_descriptors_left = n_descriptors;
   u32 * to_rx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
   u32 * to_add;
-  u32 bi_sop = rx_state->saved_start_of_packet_buffer_index;
-  u32 bi_last = rx_state->saved_last_buffer_index;
-  u32 next_index_sop = rx_state->saved_start_of_packet_next_index;
-  u32 is_sop = rx_state->is_start_of_packet;
+  u32 bi_sop = dq->rx.saved_start_of_packet_buffer_index;
+  u32 bi_last = dq->rx.saved_last_buffer_index;
+  u32 next_index_sop = dq->rx.saved_start_of_packet_next_index;
+  u32 is_sop = dq->rx.is_start_of_packet;
   u32 next_index, n_left_to_next, * to_next;
   u32 n_packets = 0;
   u32 n_bytes = 0;
@@ -1172,7 +1170,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
   d = &dq->descriptors[start_descriptor_index];
 
   b_last = bi_last != ~0 ? vlib_get_buffer (vm, bi_last) : &b_dummy;
-  next_index = rx_state->next_index;
+  next_index = dq->rx.next_index;
 
   if (n_trace > 0)
     {
@@ -1462,7 +1460,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
     if (n_trace > 0 && n_done > 0)
       {
 	u32 n = clib_min (n_trace, n_done);
-	ixge_rx_trace (xm, xd, dq, rx_state,
+	ixge_rx_trace (xm, xd, dq,
 		       d_trace_save,
 		       d_trace_buffers,
 		       &dq->descriptors[start_descriptor_index],
@@ -1484,14 +1482,14 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
         bi_last = ~0;
       }
 
-    rx_state->n_descriptors_done_this_call = n_done;
-    rx_state->n_descriptors_done_total += n_done;
-    rx_state->is_start_of_packet = is_sop;
-    rx_state->saved_start_of_packet_buffer_index = bi_sop;
-    rx_state->saved_last_buffer_index = bi_last;
-    rx_state->saved_start_of_packet_next_index = next_index_sop;
-    rx_state->next_index = next_index;
-    rx_state->n_bytes += n_bytes;
+    dq->rx.n_descriptors_done_this_call = n_done;
+    dq->rx.n_descriptors_done_total += n_done;
+    dq->rx.is_start_of_packet = is_sop;
+    dq->rx.saved_start_of_packet_buffer_index = bi_sop;
+    dq->rx.saved_last_buffer_index = bi_last;
+    dq->rx.saved_start_of_packet_next_index = next_index_sop;
+    dq->rx.next_index = next_index;
+    dq->rx.n_bytes += n_bytes;
 
     return n_packets;
   }
@@ -1500,17 +1498,28 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 static uword
 ixge_rx_queue (ixge_main_t * xm,
 	       ixge_device_t * xd,
+	       vlib_node_runtime_t * node,
 	       u32 queue_index)
 {
-  ixge_rx_state_t * rx_state = &xd->rx_state;
   ixge_dma_queue_t * dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], queue_index);
   ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
   uword n_packets = 0;
   u32 hw_head_index, sw_head_index;
 
-  rx_state->n_descriptors_done_total = 0;
-  rx_state->n_descriptors_done_this_call = 0;
-  rx_state->n_bytes = 0;
+  /* One time initialization. */
+  if (! dq->rx.node)
+    {
+      dq->rx.node = node;
+      dq->rx.is_start_of_packet = 1;
+      dq->rx.saved_start_of_packet_buffer_index = ~0;
+      dq->rx.saved_last_buffer_index = ~0;
+    }
+
+  dq->rx.next_index = node->cached_next_index;
+
+  dq->rx.n_descriptors_done_total = 0;
+  dq->rx.n_descriptors_done_this_call = 0;
+  dq->rx.n_bytes = 0;
 
   /* Fetch head from hardware and compare to where we think we are. */
   hw_head_index = dr->head_index;
@@ -1521,21 +1530,21 @@ ixge_rx_queue (ixge_main_t * xm,
   if (hw_head_index < sw_head_index)
     {
       u32 n_tried = dq->n_descriptors - sw_head_index;
-      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
-      sw_head_index = ixge_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
-      if (rx_state->n_descriptors_done_this_call != n_tried)
+      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
+      sw_head_index = ixge_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
+      if (dq->rx.n_descriptors_done_this_call != n_tried)
 	goto done;
     }
   if (hw_head_index >= sw_head_index)
     {
       u32 n_tried = hw_head_index - sw_head_index;
-      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
-      sw_head_index = ixge_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
+      n_packets += ixge_rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
+      sw_head_index = ixge_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
     }
 
  done:
   dq->head_index = sw_head_index;
-  dq->tail_index = ixge_ring_add (dq, dq->tail_index, rx_state->n_descriptors_done_total);
+  dq->tail_index = ixge_ring_add (dq, dq->tail_index, dq->rx.n_descriptors_done_total);
 
   /* Give head/tail back to hardware. */
   CLIB_MEMORY_BARRIER ();
@@ -1547,7 +1556,7 @@ ixge_rx_queue (ixge_main_t * xm,
 				   + VLIB_INTERFACE_COUNTER_RX,
 				   xd->vlib_sw_if_index,
 				   n_packets,
-				   rx_state->n_bytes);
+				   dq->rx.n_bytes);
 
   return n_packets;
 }
@@ -1609,7 +1618,9 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
 }
 
 static uword
-ixge_device_input (ixge_main_t * xm, ixge_device_t * xd)
+ixge_device_input (ixge_main_t * xm,
+		   ixge_device_t * xd,
+		   vlib_node_runtime_t * node)
 {
   ixge_regs_t * r = xd->regs;
   u32 i, s;
@@ -1621,7 +1632,7 @@ ixge_device_input (ixge_main_t * xm, ixge_device_t * xd)
 
   foreach_set_bit (i, s, ({
     if (i < 16)
-      n_rx_packets += ixge_rx_queue (xm, xd, i);
+      n_rx_packets += ixge_rx_queue (xm, xd, node, i);
     else
       ixge_interrupt (xm, xd, i);
   }));
@@ -1638,18 +1649,6 @@ ixge_input (vlib_main_t * vm,
   ixge_device_t * xd;
   uword n_rx_packets = 0;
 
-#if 0
-  if (! rx_state->node)
-    {
-      rx_state->node = node;
-      rx_state->is_start_of_packet = 1;
-      rx_state->saved_start_of_packet_buffer_index = ~0;
-      rx_state->saved_last_buffer_index = ~0;
-    }
-
-  rx_state->next_index = node->cached_next_index;
-#endif
-
   if (node->state == VLIB_NODE_STATE_INTERRUPT)
     {    
       uword i;
@@ -1657,7 +1656,7 @@ ixge_input (vlib_main_t * vm,
       /* Loop over devices with interrupts. */
       foreach_set_bit (i, node->runtime_data[0], ({
 	xd = vec_elt_at_index (xm->devices, i);
-	n_rx_packets += ixge_device_input (xm, xd);
+	n_rx_packets += ixge_device_input (xm, xd, node);
 
 	/* Re-enable interrupts since we're going to stay in interrupt mode. */
 	if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_INTERRUPT_TO_POLLING_MODE))
@@ -1672,7 +1671,7 @@ ixge_input (vlib_main_t * vm,
       /* Poll all devices for input/interrupts. */
       vec_foreach (xd, xm->devices)
 	{
-	  n_rx_packets += ixge_device_input (xm, xd);
+	  n_rx_packets += ixge_device_input (xm, xd, node);
 
 	  /* Re-enable interrupts when switching out of polling mode. */
 	  if (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE)
@@ -2210,9 +2209,6 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
       vlib_register_node (vm, &ixge_process_node);
       xm->process_node_index = ixge_process_node.index;
     }
-
-  if (! xm->input_node)
-    xm->input_node = vlib_node_get_runtime (vm, ixge_input_node.index);
 
   os_add_pci_disable_interrupts_reg
     (dev->os_handle,
