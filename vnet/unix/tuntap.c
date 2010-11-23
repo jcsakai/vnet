@@ -530,9 +530,11 @@ tuntap_ip4_add_del_interface_address (ip4_main_t * im,
 
 static void
 tuntap_punt_frame (vlib_main_t * vm,
+                   vlib_node_runtime_t * node,
                    vlib_frame_t * frame)
 {
-  tuntap_tx (vm, /* node */ 0, frame);
+  tuntap_tx (vm, node, frame);
+  vlib_frame_free (vm, node, frame);
 }
 
 static VLIB_HW_INTERFACE_CLASS (tuntap_interface_class) = {
