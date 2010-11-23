@@ -1565,9 +1565,10 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   dq->n_descriptors = round_pow2 (xm->n_descriptors[rt], xm->n_descriptors_per_cache_line);
   dq->head_index = dq->tail_index = 0;
 
+  /* Descriptors must be 128 byte aligned; hardware limit. */
   dq->descriptors = vlib_physmem_alloc_aligned (vm, &error,
 						dq->n_descriptors * sizeof (dq->descriptors[0]),
-						CLIB_CACHE_LINE_BYTES);
+						128);
   if (error)
     return error;
 
@@ -1586,6 +1587,7 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
 	{
 	  vlib_buffer_t * b = vlib_get_buffer (vm, dq->descriptor_buffer_indices[i]);
 	  dq->descriptors[i].rx_to_hw.tail_address = vlib_physmem_virtual_to_physical (vm, b->data);
+	  dq->descriptors[i].rx_to_hw.head_address = 0;
 	}
     }
   else
