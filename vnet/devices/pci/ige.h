@@ -309,9 +309,26 @@ typedef volatile struct {
   ige_dma_regs_t tx_dma[2];
 
   CLIB_PAD_FROM_TO (0x3a00, 0x5000);
+
+  /* [7:0] checksum starting byte offset
+     [8] ip checksum enable
+     [9] tcp/udp checksum enable. */
   u32 rx_checksum_control;
   CLIB_PAD_FROM_TO (0x5004, 0x5008);
+
+  /* [0] iscsi disable
+     [5:1] iscsi word count
+     [6] nfs write disable
+     [7] nfs read disable
+     [9:8] nfs version
+     [10] ip6 filter disable
+     [11] ip6 checksum disable
+     [12] ack accel disable
+     [13] ack data disable
+     [14] ip fragment split disable
+     [15] extended status enable. */
   u32 rx_filter_control;
+
   CLIB_PAD_FROM_TO (0x500c, 0x5200);
   /* 12 bits determined by rx_filter_control
      lookup bits in this vector. */

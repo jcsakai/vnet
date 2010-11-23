@@ -804,8 +804,6 @@ ige_interface_tx (vlib_main_t * vm,
 
   dr->tail_index = dq->tail_index;
 
-  clib_warning ("%d %d", dr->head_index, dr->tail_index);
-
   /* Free any buffers that are done. */
   {
     u32 n = _vec_len (xm->tx_buffers_pending_free);
@@ -1699,6 +1697,14 @@ static void ige_device_init (ige_main_t * xm)
       /* Accept all broadcast packets.  Multicasts must be explicitly
 	 added to dst_ethernet_address register array. */
       r->rx_control |= (1 << 15);
+
+      /* Enable ip/tcp checksums for received packets. */
+      r->rx_checksum_control =
+        (/* checksum start offset */ (sizeof (ethernet_header_t) << 0)
+         | (1 << 8) | (1 << 9));
+
+      /* Extended status enable (since we use extended descriptors). */
+      r->rx_filter_control |= 1 << 15;
 
       /* Pad short packets. */
       r->tx_control |= 1 << 3;
