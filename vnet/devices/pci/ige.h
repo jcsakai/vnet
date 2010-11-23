@@ -61,6 +61,22 @@ typedef struct {
     struct {
       /* Buffer indices to use to replenish each descriptor. */
       u32 * replenish_buffer_indices;
+
+      vlib_node_runtime_t * node;
+      u32 next_index;
+
+      u32 saved_start_of_packet_buffer_index;
+
+      u32 saved_start_of_packet_next_index;
+      u32 saved_last_buffer_index;
+
+      u32 is_start_of_packet;
+
+      u32 n_descriptors_done_total;
+
+      u32 n_descriptors_done_this_call;
+
+      u32 n_bytes;
     } rx;
   };
 } ige_dma_queue_t;

@@ -1,7 +1,9 @@
-#include <vnet/devices/pci/ige.h>
-#include <vnet/ethernet/ethernet.h>
+#include <vlib/vlib.h>
 #include <vlib/unix/unix.h>
 #include <vlib/unix/pci.h>
+#include <vnet/devices/pci/ige.h>
+#include <vnet/ethernet/ethernet.h>
+#include <vnet/vnet/buffer.h>
 
 ige_main_t ige_main;
 
@@ -238,25 +240,6 @@ static u8 * format_ige_rx_dma_trace (u8 * s, va_list * va)
   return s;
 }
 
-typedef struct {
-  vlib_node_runtime_t * node;
-
-  u32 next_index;
-
-  u32 saved_start_of_packet_buffer_index;
-
-  u32 saved_start_of_packet_next_index;
-  u32 saved_last_buffer_index;
-
-  u32 is_start_of_packet;
-
-  u32 n_descriptors_done_total;
-
-  u32 n_descriptors_done_this_call;
-
-  u32 n_bytes;
-} ige_rx_state_t;
-
 #define foreach_ige_rx_error                    \
   _ (none, "no error")                          \
   _ (rx_data_error, "rx data error")            \
@@ -278,9 +261,10 @@ typedef enum {
 
 always_inline void
 ige_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
-                                      u8 * next0, u8 * error0)
+                                      u8 * next0, u8 * error0, u32 * flags0)
 {
   u8 is0_ip4, n0, e0;
+  u32 f0;
 
   e0 = IGE_RX_ERROR_none;
   n0 = IGE_RX_NEXT_ETHERNET_INPUT;
@@ -302,32 +286,41 @@ ige_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
   /* Check for error. */
   n0 = e0 != IGE_RX_ERROR_none ? IGE_RX_NEXT_DROP : n0;
 
+  f0 = ((s02 & (IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_TCP_CHECKSUMMED
+		| IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_UDP_CHECKSUMMED))
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+
+  f0 |= ((s02 & IGE_RX_DESCRIPTOR_STATUS2_IP4_TCP_UDP_CHECKSUM_ERROR)
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+
   *error0 = e0;
   *next0 = n0;
+  *flags0 = f0;
 }
 
 always_inline void
 ige_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
                                       u32 s10, u32 s12,
-                                      u8 * next0, u8 * error0,
-                                      u8 * next1, u8 * error1)
+                                      u8 * next0, u8 * error0, u32 * flags0,
+                                      u8 * next1, u8 * error1, u32 * flags1)
 {
-  ige_rx_next_and_error_from_status_x1 (s00, s02, next0, error0);
-  ige_rx_next_and_error_from_status_x1 (s10, s12, next1, error1);
+  ige_rx_next_and_error_from_status_x1 (s00, s02, next0, error0, flags0);
+  ige_rx_next_and_error_from_status_x1 (s10, s12, next1, error1, flags1);
 }
 
 static void
 ige_rx_trace (ige_main_t * xm,
 	       ige_device_t * xd,
 	       ige_dma_queue_t * dq,
-	       ige_rx_state_t * rx_state,
 	       ige_descriptor_t * before_descriptors,
 	       u32 * before_buffers,
 	       ige_descriptor_t * after_descriptors,
 	       uword n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
-  vlib_node_runtime_t * node = rx_state->node;
+  vlib_node_runtime_t * node = dq->rx.node;
   ige_rx_from_hw_descriptor_t * bd;
   ige_rx_to_hw_descriptor_t * ad;
   u32 * b, n_left, is_sop, next_index_sop;
@@ -336,12 +329,12 @@ ige_rx_trace (ige_main_t * xm,
   b = before_buffers;
   bd = &before_descriptors->rx_from_hw;
   ad = &after_descriptors->rx_to_hw;
-  is_sop = rx_state->is_start_of_packet;
-  next_index_sop = rx_state->saved_start_of_packet_next_index;
+  is_sop = dq->rx.is_start_of_packet;
+  next_index_sop = dq->rx.saved_start_of_packet_next_index;
 
   while (n_left >= 2)
     {
-      u32 bi0, bi1;
+      u32 bi0, bi1, flags0, flags1;
       vlib_buffer_t * b0, * b1;
       ige_rx_dma_trace_t * t0, * t1;
       u8 next0, error0, next1, error1;
@@ -355,8 +348,8 @@ ige_rx_trace (ige_main_t * xm,
 
       ige_rx_next_and_error_from_status_x2 (bd[0].status[0], bd[0].status[2],
                                             bd[1].status[0], bd[1].status[2],
-                                            &next0, &error0,
-                                            &next1, &error1);
+                                            &next0, &error0, &flags0,
+                                            &next1, &error1, &flags1);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -392,7 +385,7 @@ ige_rx_trace (ige_main_t * xm,
 
   while (n_left >= 1)
     {
-      u32 bi0;
+      u32 bi0, flags0;
       vlib_buffer_t * b0;
       ige_rx_dma_trace_t * t0;
       u8 next0, error0;
@@ -403,7 +396,7 @@ ige_rx_trace (ige_main_t * xm,
       b0 = vlib_get_buffer (vm, bi0);
 
       ige_rx_next_and_error_from_status_x1 (bd[0].status[0], bd[0].status[2],
-					     &next0, &error0);
+					    &next0, &error0, &flags0);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -841,22 +834,21 @@ static uword
 ige_rx_queue_no_wrap (ige_main_t * xm,
 		       ige_device_t * xd,
 		       ige_dma_queue_t * dq,
-		       ige_rx_state_t * rx_state,
 		       u32 start_descriptor_index,
 		       u32 n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
-  vlib_node_runtime_t * node = rx_state->node;
+  vlib_node_runtime_t * node = dq->rx.node;
   ige_descriptor_t * d;
   static ige_descriptor_t * d_trace_save;
   static u32 * d_trace_buffers;
   u32 n_descriptors_left = n_descriptors;
   u32 * to_rx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
   u32 * to_add;
-  u32 bi_sop = rx_state->saved_start_of_packet_buffer_index;
-  u32 bi_last = rx_state->saved_last_buffer_index;
-  u32 next_index_sop = rx_state->saved_start_of_packet_next_index;
-  u32 is_sop = rx_state->is_start_of_packet;
+  u32 bi_sop = dq->rx.saved_start_of_packet_buffer_index;
+  u32 bi_last = dq->rx.saved_last_buffer_index;
+  u32 next_index_sop = dq->rx.saved_start_of_packet_next_index;
+  u32 is_sop = dq->rx.is_start_of_packet;
   u32 next_index, n_left_to_next, * to_next;
   u32 n_packets = 0;
   u32 n_bytes = 0;
@@ -867,7 +859,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
   d = &dq->descriptors[start_descriptor_index];
 
   b_last = bi_last != ~0 ? vlib_get_buffer (vm, bi_last) : &b_dummy;
-  next_index = rx_state->next_index;
+  next_index = dq->rx.next_index;
 
   if (n_trace > 0)
     {
@@ -911,8 +903,8 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
       while (n_descriptors_left >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * b0, * b1;
-	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
-	  u32 bi1, fi1, len1, l3_offset1, s21, s01;
+	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
+	  u32 bi1, fi1, len1, l3_offset1, s21, s01, flags1;
 	  u8 is_eop0, is_vlan0, error0, next0;
 	  u8 is_eop1, is_vlan1, error1, next1;
 
@@ -956,15 +948,15 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  is_eop1 = (s21 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
 
 	  ige_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
-                                                &next0, &error0,
-                                                &next1, &error1);
+                                                &next0, &error0, &flags0,
+                                                &next1, &error1, &flags1);
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next1 = is_eop0 ? next1 : next0;
 	  next_index_sop = next1;
 
-	  b0->flags |= (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
-	  b1->flags |= (!is_eop1 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b0->flags |= flags0 | (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b1->flags |= flags1 | (!is_eop1 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
 
 	  b0->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
 	  b1->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
@@ -1001,8 +993,8 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  b0->current_data = l3_offset0;
 	  b1->current_data = l3_offset1;
 
-	  b_last->next_buffer = is_sop ? 0 : bi0;
-	  b0->next_buffer = is_eop0 ? 0 : bi1;
+	  b_last->next_buffer = is_sop ? ~0 : bi0;
+	  b0->next_buffer = is_eop0 ? ~0 : bi1;
 	  bi_last = bi1;
 	  b_last = b1;
 
@@ -1063,7 +1055,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
       while (n_descriptors_left > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * b0;
-	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
+	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
 	  u8 is_eop0, is_vlan0, error0, next0;
 
 	  s00 = d[0].rx_from_hw.status[0];
@@ -1085,12 +1077,12 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  b0 = vlib_get_buffer (vm, bi0);
 
 	  is_eop0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-	  ige_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0);
+	  ige_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0, &flags0);
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next_index_sop = next0;
 
-	  b0->flags |= (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b0->flags |= flags0 | (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
 
 	  b0->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
 
@@ -1115,7 +1107,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  b0->current_length = len0 - l3_offset0;
 	  b0->current_data = l3_offset0;
 
-	  b_last->next_buffer = is_sop ? 0 : bi0;
+	  b_last->next_buffer = is_sop ? ~0 : bi0;
 	  bi_last = bi0;
 	  b_last = b0;
 
@@ -1162,7 +1154,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
     if (n_trace > 0 && n_done > 0)
       {
 	u32 n = clib_min (n_trace, n_done);
-	ige_rx_trace (xm, xd, dq, rx_state,
+	ige_rx_trace (xm, xd, dq,
 		       d_trace_save,
 		       d_trace_buffers,
 		       &dq->descriptors[start_descriptor_index],
@@ -1175,14 +1167,23 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	_vec_len (d_trace_buffers) = 0;
       }
 
-    rx_state->n_descriptors_done_this_call = n_done;
-    rx_state->n_descriptors_done_total += n_done;
-    rx_state->is_start_of_packet = is_sop;
-    rx_state->saved_start_of_packet_buffer_index = bi_sop;
-    rx_state->saved_last_buffer_index = bi_last;
-    rx_state->saved_start_of_packet_next_index = next_index_sop;
-    rx_state->next_index = next_index;
-    rx_state->n_bytes += n_bytes;
+    /* Don't keep a reference to b_last if we don't have to.
+       Otherwise we can over-write a next_buffer pointer after already haven
+       enqueued a packet. */
+    if (is_sop)
+      {
+        b_last->next_buffer = ~0;
+        bi_last = ~0;
+      }
+
+    dq->rx.n_descriptors_done_this_call = n_done;
+    dq->rx.n_descriptors_done_total += n_done;
+    dq->rx.is_start_of_packet = is_sop;
+    dq->rx.saved_start_of_packet_buffer_index = bi_sop;
+    dq->rx.saved_last_buffer_index = bi_last;
+    dq->rx.saved_start_of_packet_next_index = next_index_sop;
+    dq->rx.next_index = next_index;
+    dq->rx.n_bytes += n_bytes;
 
     return n_packets;
   }
@@ -1190,20 +1191,29 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 
 static uword
 ige_rx_queue (ige_main_t * xm,
-	       ige_device_t * xd,
-	       ige_rx_state_t * rx_state,
-	       u32 queue_index)
+	      ige_device_t * xd,
+	      vlib_node_runtime_t * node,
+	      u32 queue_index)
 {
   ige_dma_queue_t * dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], queue_index);
   ige_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
   uword n_packets = 0;
   u32 hw_head_index, sw_head_index;
 
-  rx_state->is_start_of_packet = 1;
-  rx_state->saved_start_of_packet_buffer_index = ~0;
-  rx_state->saved_last_buffer_index = ~0;
-  rx_state->n_descriptors_done_total = 0;
-  rx_state->n_bytes = 0;
+  /* One time initialization. */
+  if (! dq->rx.node)
+    {
+      dq->rx.node = node;
+      dq->rx.is_start_of_packet = 1;
+      dq->rx.saved_start_of_packet_buffer_index = ~0;
+      dq->rx.saved_last_buffer_index = ~0;
+    }
+
+  dq->rx.next_index = node->cached_next_index;
+
+  dq->rx.n_descriptors_done_total = 0;
+  dq->rx.n_descriptors_done_this_call = 0;
+  dq->rx.n_bytes = 0;
 
   /* Fetch head from hardware and compare to where we think we are. */
   hw_head_index = dr->head_index;
@@ -1214,21 +1224,21 @@ ige_rx_queue (ige_main_t * xm,
   if (hw_head_index < sw_head_index)
     {
       u32 n_tried = dq->n_descriptors - sw_head_index;
-      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
-      sw_head_index = ige_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
-      if (rx_state->n_descriptors_done_this_call != n_tried)
+      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
+      sw_head_index = ige_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
+      if (dq->rx.n_descriptors_done_this_call != n_tried)
 	goto done;
     }
   if (hw_head_index >= sw_head_index)
     {
       u32 n_tried = hw_head_index - sw_head_index;
-      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, rx_state, sw_head_index, n_tried);
-      sw_head_index = ige_ring_add (dq, sw_head_index, rx_state->n_descriptors_done_this_call);
+      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
+      sw_head_index = ige_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
     }
 
  done:
   dq->head_index = sw_head_index;
-  dq->tail_index = ige_ring_add (dq, dq->tail_index, rx_state->n_descriptors_done_total);
+  dq->tail_index = ige_ring_add (dq, dq->tail_index, dq->rx.n_descriptors_done_total);
 
   /* Give head/tail back to hardware. */
   CLIB_MEMORY_BARRIER ();
@@ -1240,7 +1250,7 @@ ige_rx_queue (ige_main_t * xm,
 				   + VLIB_INTERFACE_COUNTER_RX,
 				   xd->vlib_sw_if_index,
 				   n_packets,
-				   rx_state->n_bytes);
+				   dq->rx.n_bytes);
 
   return n_packets;
 }
@@ -1319,8 +1329,8 @@ static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
 
 static uword
 ige_device_input (ige_main_t * xm,
-                  ige_device_t * xd,
-                  ige_rx_state_t * rx_state)
+		  ige_device_t * xd,
+		  vlib_node_runtime_t * node)
 {
   ige_regs_t * r = xd->regs;
   u32 i, s;
@@ -1329,7 +1339,7 @@ ige_device_input (ige_main_t * xm,
   s = r->interrupt.status_clear_to_read;
   foreach_set_bit (i, s, ({
     if (i == 7)
-      n_rx_packets += ige_rx_queue (xm, xd, rx_state, 0);
+      n_rx_packets += ige_rx_queue (xm, xd, node, 0);
     else
       ige_interrupt (xm, xd, i);
   }));
@@ -1344,11 +1354,7 @@ ige_input (vlib_main_t * vm,
 {
   ige_main_t * xm = &ige_main;
   ige_device_t * xd;
-  ige_rx_state_t _rx_state, * rx_state = &_rx_state;
   uword n_rx_packets = 0;
-
-  rx_state->node = node;
-  rx_state->next_index = node->cached_next_index;
 
   if (node->state == VLIB_NODE_STATE_INTERRUPT)
     {    
@@ -1357,7 +1363,7 @@ ige_input (vlib_main_t * vm,
       /* Loop over devices with interrupts. */
       foreach_set_bit (i, node->runtime_data[0], ({
 	xd = vec_elt_at_index (xm->devices, i);
-	n_rx_packets += ige_device_input (xm, xd, rx_state);
+	n_rx_packets += ige_device_input (xm, xd, node);
 
 	/* Re-enable interrupts since we're going to stay in interrupt mode. */
 	if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_INTERRUPT_TO_POLLING_MODE))
@@ -1372,7 +1378,7 @@ ige_input (vlib_main_t * vm,
       /* Poll all devices for input/interrupts. */
       vec_foreach (xd, xm->devices)
 	{
-	  n_rx_packets += ige_device_input (xm, xd, rx_state);
+	  n_rx_packets += ige_device_input (xm, xd, node);
 
 	  /* Re-enable interrupts when switching out of polling mode. */
 	  if (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE)
