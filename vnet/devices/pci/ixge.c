@@ -1,8 +1,10 @@
+#include <vlib/vlib.h>
+#include <vlib/unix/unix.h>
+#include <vlib/unix/pci.h>
 #include <vnet/devices/pci/ixge.h>
 #include <vnet/devices/xge/xge.h>
 #include <vnet/ethernet/ethernet.h>
-#include <vlib/unix/unix.h>
-#include <vlib/unix/pci.h>
+#include <vnet/vnet/buffer.h>
 
 ixge_main_t ixge_main;
 
@@ -384,9 +386,9 @@ static u8 * format_ixge_rx_from_hw_descriptor (u8 * s, va_list * va)
 	s = format (s, ", udp");
     }
 
-  if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_L4_CHECKSUMMED)
-    s = format (s, ", l4 checksum %s",
-		(s2 & IXGE_RX_DESCRIPTOR_STATUS2_L4_CHECKSUM_ERROR) ? "bad" : "ok");
+  if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_TCP_CHECKSUMMED)
+    s = format (s, ", tcp checksum %s",
+		(s2 & IXGE_RX_DESCRIPTOR_STATUS2_TCP_CHECKSUM_ERROR) ? "bad" : "ok");
   if (s2 & IXGE_RX_DESCRIPTOR_STATUS2_IS_UDP_CHECKSUMMED)
     s = format (s, ", udp checksum %s",
 		(s2 & IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_ERROR) ? "bad" : "ok");
@@ -518,9 +520,10 @@ typedef enum {
 
 always_inline void
 ixge_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
-				       u8 * next0, u8 * error0)
+				       u8 * next0, u8 * error0, u32 * flags0)
 {
   u8 is0_ip4, is0_ip6, n0, e0;
+  u32 f0;
 
   e0 = IXGE_RX_ERROR_none;
   n0 = IXGE_RX_NEXT_ETHERNET_INPUT;
@@ -537,18 +540,30 @@ ixge_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
   /* Check for error. */
   n0 = e0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
 
+  f0 = ((s02 & (IXGE_RX_DESCRIPTOR_STATUS2_IS_TCP_CHECKSUMMED
+		| IXGE_RX_DESCRIPTOR_STATUS2_IS_UDP_CHECKSUMMED))
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+
+  f0 |= ((s02 & (IXGE_RX_DESCRIPTOR_STATUS2_TCP_CHECKSUM_ERROR
+		 | IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_ERROR))
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+
   *error0 = e0;
   *next0 = n0;
+  *flags0 = f0;
 }
 
 always_inline void
 ixge_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
 				       u32 s10, u32 s12,
-				       u8 * next0, u8 * error0,
-				       u8 * next1, u8 * error1)
+				       u8 * next0, u8 * error0, u32 * flags0,
+				       u8 * next1, u8 * error1, u32 * flags1)
 {
   u8 is0_ip4, is0_ip6, n0, e0;
   u8 is1_ip4, is1_ip6, n1, e1;
+  u32 f0, f1;
 
   e0 = e1 = IXGE_RX_ERROR_none;
   n0 = n1 = IXGE_RX_NEXT_ETHERNET_INPUT;
@@ -581,6 +596,27 @@ ixge_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
 
   *next0 = n0;
   *next1 = n1;
+
+  f0 = ((s02 & (IXGE_RX_DESCRIPTOR_STATUS2_IS_TCP_CHECKSUMMED
+		| IXGE_RX_DESCRIPTOR_STATUS2_IS_UDP_CHECKSUMMED))
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+  f1 = ((s12 & (IXGE_RX_DESCRIPTOR_STATUS2_IS_TCP_CHECKSUMMED
+		| IXGE_RX_DESCRIPTOR_STATUS2_IS_UDP_CHECKSUMMED))
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+
+  f0 |= ((s02 & (IXGE_RX_DESCRIPTOR_STATUS2_TCP_CHECKSUM_ERROR
+		 | IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_ERROR))
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+  f1 |= ((s12 & (IXGE_RX_DESCRIPTOR_STATUS2_TCP_CHECKSUM_ERROR
+		 | IXGE_RX_DESCRIPTOR_STATUS2_UDP_CHECKSUM_ERROR))
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+
+  *flags0 = f0;
+  *flags1 = f1;
 }
 
 static void
@@ -607,7 +643,7 @@ ixge_rx_trace (ixge_main_t * xm,
 
   while (n_left >= 2)
     {
-      u32 bi0, bi1;
+      u32 bi0, bi1, flags0, flags1;
       vlib_buffer_t * b0, * b1;
       ixge_rx_dma_trace_t * t0, * t1;
       u8 next0, error0, next1, error1;
@@ -621,8 +657,8 @@ ixge_rx_trace (ixge_main_t * xm,
 
       ixge_rx_next_and_error_from_status_x2 (bd[0].status[0], bd[0].status[2],
 					     bd[1].status[0], bd[1].status[2],
-					     &next0, &error0,
-					     &next1, &error1);
+					     &next0, &error0, &flags0,
+					     &next1, &error1, &flags1);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -658,7 +694,7 @@ ixge_rx_trace (ixge_main_t * xm,
 
   while (n_left >= 1)
     {
-      u32 bi0;
+      u32 bi0, flags0;
       vlib_buffer_t * b0;
       ixge_rx_dma_trace_t * t0;
       u8 next0, error0;
@@ -669,7 +705,7 @@ ixge_rx_trace (ixge_main_t * xm,
       b0 = vlib_get_buffer (vm, bi0);
 
       ixge_rx_next_and_error_from_status_x1 (bd[0].status[0], bd[0].status[2],
-					     &next0, &error0);
+					     &next0, &error0, &flags0);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -1214,8 +1250,8 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
       while (n_descriptors_left >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * b0, * b1;
-	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
-	  u32 bi1, fi1, len1, l3_offset1, s21, s01;
+	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
+	  u32 bi1, fi1, len1, l3_offset1, s21, s01, flags1;
 	  u8 is_eop0, error0, next0;
 	  u8 is_eop1, error1, next1;
 
@@ -1259,15 +1295,15 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  is_eop1 = (s21 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
 
 	  ixge_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
-						 &next0, &error0,
-						 &next1, &error1);
+						 &next0, &error0, &flags0,
+						 &next1, &error1, &flags1);
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next1 = is_eop0 ? next1 : next0;
 	  next_index_sop = next1;
 
-	  b0->flags |= (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
-	  b1->flags |= (!is_eop1 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b0->flags |= flags0 | (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b1->flags |= flags1 | (!is_eop1 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
 
 	  b0->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
 	  b1->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
@@ -1363,7 +1399,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
       while (n_descriptors_left > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * b0;
-	  u32 bi0, fi0, len0, l3_offset0, s20, s00;
+	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
 	  u8 is_eop0, error0, next0;
 
 	  s00 = d[0].rx_from_hw.status[0];
@@ -1385,12 +1421,12 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  b0 = vlib_get_buffer (vm, bi0);
 
 	  is_eop0 = (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-	  ixge_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0);
+	  ixge_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0, &flags0);
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next_index_sop = next0;
 
-	  b0->flags |= (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
+	  b0->flags |= flags0 | (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
 
 	  b0->sw_if_index[VLIB_RX] = xd->vlib_sw_if_index;
 
