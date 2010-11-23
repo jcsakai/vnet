@@ -497,25 +497,6 @@ static u8 * format_ixge_rx_dma_trace (u8 * s, va_list * va)
   return s;
 }
 
-typedef struct {
-  vlib_node_runtime_t * node;
-
-  u32 next_index;
-
-  u32 saved_start_of_packet_buffer_index;
-
-  u32 saved_start_of_packet_next_index;
-  u32 saved_last_buffer_index;
-
-  u32 is_start_of_packet;
-
-  u32 n_descriptors_done_total;
-
-  u32 n_descriptors_done_this_call;
-
-  u32 n_bytes;
-} ixge_rx_state_t;
-
 #define foreach_ixge_rx_error				\
   _ (none, "no error")					\
   _ (ip4_checksum_error, "ip4 checksum errors")
@@ -613,7 +594,7 @@ ixge_rx_trace (ixge_main_t * xm,
 	       uword n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
-  vlib_node_runtime_t * node = rx_state->node;
+  vlib_node_runtime_t * node = xm->input_node;
   ixge_rx_from_hw_descriptor_t * bd;
   ixge_rx_to_hw_descriptor_t * ad;
   u32 * b, n_left, is_sop, next_index_sop;
@@ -1170,7 +1151,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 		       u32 n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
-  vlib_node_runtime_t * node = rx_state->node;
+  vlib_node_runtime_t * node = xm->input_node;
   ixge_descriptor_t * d;
   static ixge_descriptor_t * d_trace_save;
   static u32 * d_trace_buffers;
@@ -1322,8 +1303,8 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  b0->current_data = l3_offset0;
 	  b1->current_data = l3_offset1;
 
-	  b_last->next_buffer = is_sop ? 0 : bi0;
-	  b0->next_buffer = is_eop0 ? 0 : bi1;
+	  b_last->next_buffer = is_sop ? ~0 : bi0;
+	  b0->next_buffer = is_eop0 ? ~0 : bi1;
 	  bi_last = bi1;
 	  b_last = b1;
 
@@ -1434,7 +1415,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  b0->current_length = len0 - l3_offset0;
 	  b0->current_data = l3_offset0;
 
-	  b_last->next_buffer = is_sop ? 0 : bi0;
+	  b_last->next_buffer = is_sop ? ~0 : bi0;
 	  bi_last = bi0;
 	  b_last = b0;
 
@@ -1494,6 +1475,15 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	_vec_len (d_trace_buffers) = 0;
       }
 
+    /* Don't keep a reference to b_last if we don't have to.
+       Otherwise we can over-write a next_buffer pointer after already haven
+       enqueued a packet. */
+    if (is_sop)
+      {
+        b_last->next_buffer = ~0;
+        bi_last = ~0;
+      }
+
     rx_state->n_descriptors_done_this_call = n_done;
     rx_state->n_descriptors_done_total += n_done;
     rx_state->is_start_of_packet = is_sop;
@@ -1510,18 +1500,16 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 static uword
 ixge_rx_queue (ixge_main_t * xm,
 	       ixge_device_t * xd,
-	       ixge_rx_state_t * rx_state,
 	       u32 queue_index)
 {
+  ixge_rx_state_t * rx_state = &xd->rx_state;
   ixge_dma_queue_t * dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], queue_index);
   ixge_dma_regs_t * dr = get_dma_regs (xd, VLIB_RX, dq->queue_index);
   uword n_packets = 0;
   u32 hw_head_index, sw_head_index;
 
-  rx_state->is_start_of_packet = 1;
-  rx_state->saved_start_of_packet_buffer_index = ~0;
-  rx_state->saved_last_buffer_index = ~0;
   rx_state->n_descriptors_done_total = 0;
+  rx_state->n_descriptors_done_this_call = 0;
   rx_state->n_bytes = 0;
 
   /* Fetch head from hardware and compare to where we think we are. */
@@ -1621,9 +1609,7 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
 }
 
 static uword
-ixge_device_input (ixge_main_t * xm,
-		   ixge_device_t * xd,
-		   ixge_rx_state_t * rx_state)
+ixge_device_input (ixge_main_t * xm, ixge_device_t * xd)
 {
   ixge_regs_t * r = xd->regs;
   u32 i, s;
@@ -1635,7 +1621,7 @@ ixge_device_input (ixge_main_t * xm,
 
   foreach_set_bit (i, s, ({
     if (i < 16)
-      n_rx_packets += ixge_rx_queue (xm, xd, rx_state, i);
+      n_rx_packets += ixge_rx_queue (xm, xd, i);
     else
       ixge_interrupt (xm, xd, i);
   }));
@@ -1650,11 +1636,19 @@ ixge_input (vlib_main_t * vm,
 {
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd;
-  ixge_rx_state_t _rx_state, * rx_state = &_rx_state;
   uword n_rx_packets = 0;
 
-  rx_state->node = node;
+#if 0
+  if (! rx_state->node)
+    {
+      rx_state->node = node;
+      rx_state->is_start_of_packet = 1;
+      rx_state->saved_start_of_packet_buffer_index = ~0;
+      rx_state->saved_last_buffer_index = ~0;
+    }
+
   rx_state->next_index = node->cached_next_index;
+#endif
 
   if (node->state == VLIB_NODE_STATE_INTERRUPT)
     {    
@@ -1663,7 +1657,7 @@ ixge_input (vlib_main_t * vm,
       /* Loop over devices with interrupts. */
       foreach_set_bit (i, node->runtime_data[0], ({
 	xd = vec_elt_at_index (xm->devices, i);
-	n_rx_packets += ixge_device_input (xm, xd, rx_state);
+	n_rx_packets += ixge_device_input (xm, xd);
 
 	/* Re-enable interrupts since we're going to stay in interrupt mode. */
 	if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_INTERRUPT_TO_POLLING_MODE))
@@ -1678,7 +1672,7 @@ ixge_input (vlib_main_t * vm,
       /* Poll all devices for input/interrupts. */
       vec_foreach (xd, xm->devices)
 	{
-	  n_rx_packets += ixge_device_input (xm, xd, rx_state);
+	  n_rx_packets += ixge_device_input (xm, xd);
 
 	  /* Re-enable interrupts when switching out of polling mode. */
 	  if (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE)
@@ -2087,9 +2081,7 @@ static void ixge_device_init (ixge_main_t * xm)
       r->xge_mac.rx_max_frame_size = (9216 + 14) << 16;
 
       /* Enable all interrupts. */
-#define IXGE_INTERRUPT_DISABLE 0
-      if (! IXGE_INTERRUPT_DISABLE)
-	r->interrupt.enable_write_1_to_set = ~0;
+      r->interrupt.enable_write_1_to_set = ~0;
     }
 }
 
@@ -2208,10 +2200,7 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   {
     linux_pci_device_t * lp = pci_dev_for_linux (dev);
 
-    vlib_node_set_state (vm, ixge_input_node.index,
-			 (IXGE_INTERRUPT_DISABLE
-			  ? VLIB_NODE_STATE_POLLING
-			  : VLIB_NODE_STATE_INTERRUPT));
+    vlib_node_set_state (vm, ixge_input_node.index, VLIB_NODE_STATE_INTERRUPT);
     lp->device_input_node_index = ixge_input_node.index;
     lp->device_index = xd->device_index;
   }
@@ -2221,6 +2210,9 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
       vlib_register_node (vm, &ixge_process_node);
       xm->process_node_index = ixge_process_node.index;
     }
+
+  if (! xm->input_node)
+    xm->input_node = vlib_node_get_runtime (vm, ixge_input_node.index);
 
   os_add_pci_disable_interrupts_reg
     (dev->os_handle,
