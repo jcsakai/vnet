@@ -243,7 +243,7 @@ typedef volatile struct {
      [13:12] multicast filter 12 bit offset
      [15] accept all broadcast
      [17:16] rx buffer size
-     [25] rx buffer size ext
+     [25] rx buffer size ext (multiples sizes by 16)
      [18] vlan filter enable
      [22] discard pause frames
      [23] accept mac control frames (not pause)
@@ -283,7 +283,9 @@ typedef volatile struct {
   CLIB_PAD_FROM_TO (0x1004, 0x1010);
   u32 management_eeprom_control;
 
-  CLIB_PAD_FROM_TO (0x1014, 0x2008);
+  CLIB_PAD_FROM_TO (0x1014, 0x1100);
+  u32 packet_buffer_ecc_control;
+  CLIB_PAD_FROM_TO (0x1104, 0x2008);
   u32 early_rx_threshold;
 
   CLIB_PAD_FROM_TO (0x200c, 0x2160);
