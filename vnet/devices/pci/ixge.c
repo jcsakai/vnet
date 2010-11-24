@@ -2024,6 +2024,7 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     else
       xd->regs->tx_dma_control |= (1 << 0);
 
+    dr->control &= ~((0x3f << 0) | (0x3f << 16));
     dr->control |= ((/* prefetch threshold */ 32 << 0)
 		    | (/* writeback threshold */ 16 << 16));
 
