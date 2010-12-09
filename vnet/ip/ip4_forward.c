@@ -987,7 +987,9 @@ static void unserialize_vec_ip4_set_interface_address (serialize_main_t * m, va_
 static void serialize_ip4_set_interface_address_msg (serialize_main_t * m, va_list * va)
 {
   ip4_interface_address_t * a = va_arg (*va, ip4_interface_address_t *);
+  int is_del = va_arg (*va, int);
   serialize (m, serialize_vec_ip4_set_interface_address, a, 1);
+  serialize_integer (m, is_del, sizeof (is_del));
 }
 
 static clib_error_t *
@@ -1005,13 +1007,15 @@ static void unserialize_ip4_set_interface_address_msg (serialize_main_t * m, va_
   vlib_main_t * vm = mcm->vlib_main;
   ip4_interface_address_t a;
   clib_error_t * error;
+  int is_del;
 
   unserialize (m, unserialize_vec_ip4_set_interface_address, &a, 1);
+  unserialize_integer (m, &is_del, sizeof (is_del));
   error = ip4_add_del_interface_address_internal
     (vm, a.sw_if_index, &a.address, a.length,
      /* redistribute */ 0,
      /* insert_routes */ 1,
-     /* is_del */ 0);
+     is_del);
   if (error)
     clib_error_report (error);
 }
@@ -1033,11 +1037,22 @@ ip4_add_del_interface_address_internal (vlib_main_t * vm,
 {
   ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
-  clib_error_t * error;
+  clib_error_t * error = 0;
   u32 if_address_index;
 
   {
     uword elts_before = pool_elts (lm->if_address_pool);
+
+    if (vm->mc_main && redistribute)
+      {
+	ip4_interface_address_t a;
+	a.sw_if_index = sw_if_index;
+	a.address = address[0];
+	a.length = address_length;
+	mc_serialize (vm->mc_main, &ip4_set_interface_address_msg, 
+		      &a, (int)is_del);
+	goto done;
+      }
 
     error = ip_interface_address_add_del
       (lm,
@@ -1053,16 +1068,6 @@ ip4_add_del_interface_address_internal (vlib_main_t * vm,
     if (elts_before == pool_elts (lm->if_address_pool))
       goto done;
   }
-
-  if (vm->mc_main && redistribute)
-    {
-      ip4_interface_address_t a;
-      a.sw_if_index = sw_if_index;
-      a.address = address[0];
-      a.length = address_length;
-      mc_serialize (vm->mc_main, &ip4_set_interface_address_msg, &a);
-      goto done;
-    }
 
   if (vlib_sw_interface_is_admin_up (vm, sw_if_index) && insert_routes)
     {
