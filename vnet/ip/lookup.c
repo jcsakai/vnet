@@ -545,10 +545,16 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
 
   if (is_del)
     {
-      if (a)
-	return clib_error_create ("%U not found for interface %U",
-				  lm->format_address_and_length, address, address_length,
-				  format_vlib_sw_interface_name, &vlib_global_main, sw_if_index);
+      if (!a) 
+        {
+          vlib_sw_interface_t * si = vlib_get_sw_interface (&vlib_global_main, 
+                                                            sw_if_index);
+          return clib_error_create ("%U not found for interface %U",
+                                    lm->format_address_and_length, 
+                                    address, address_length,
+                                    format_vlib_sw_interface_name, 
+                                    &vlib_global_main, si);
+        }
 
       if (a->prev_this_sw_interface != ~0)
 	{
