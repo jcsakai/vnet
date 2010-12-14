@@ -345,11 +345,14 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
   struct ifreq ifr;
   struct sockaddr_in *sin;
   int flags = IFF_TUN | IFF_NO_PI;
+  int disabled = 0;
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "mtu %d", &tm->mtu_bytes))
 	;
+      else if (unformat (input, "disable"))
+        disabled = 1;
 
       else
 	return clib_error_return (0, "unknown input `%U'",
@@ -358,6 +361,9 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 
   tm->dev_net_tun_fd = -1;
   tm->dev_tap_fd = -1;
+
+  if (disabled)
+    return 0;
 
   if (geteuid()) 
     {
