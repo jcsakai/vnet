@@ -208,4 +208,4 @@ noinst_PROGRAMS = vnet_unix
 
 vnet_unix_SOURCES = example/main_stub.c
 vnet_unix_LDFLAGS = -static
-vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm
+vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm -ldl
