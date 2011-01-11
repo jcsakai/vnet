@@ -53,6 +53,33 @@ ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
   return lm->miss_adj_index;
 }
 
+static void
+ip6_fib_init (ip6_main_t * im, u32 fib_index)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip6_add_del_route_args_t a;
+  ip_adjacency_t * adj;
+
+  /* Add ff02::1:ff00:0/104 via local route for all tables.
+     This is required for neighbor discovery to work. */
+  adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
+			  &a.adj_index);
+  adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
+  adj->if_address_index = ~0;
+
+  a.table_index_or_table_id = fib_index;
+  a.flags = (IP6_ROUTE_FLAG_ADD
+	     | IP6_ROUTE_FLAG_FIB_INDEX
+	     | IP6_ROUTE_FLAG_KEEP_OLD_ADJACENCY
+	     | IP6_ROUTE_FLAG_NO_REDISTRIBUTE);
+  ip6_set_solicited_node_multicast_address (&a.dst_address, 0);
+  a.dst_address_length = 104;
+  a.add_adj = 0;
+  a.n_add_adj = 0;
+
+  ip6_add_del_route (im, &a);
+}
+
 static ip6_fib_t *
 create_fib_with_table_id (ip6_main_t * im, u32 table_id)
 {
@@ -62,6 +89,7 @@ create_fib_with_table_id (ip6_main_t * im, u32 table_id)
   memset (fib->mhash_index_by_dst_address_length, ~0, sizeof (fib->mhash_index_by_dst_address_length));
   fib->table_id = table_id;
   fib->index = fib - im->fibs;
+  ip6_fib_init (im, fib->index);
   return fib;
 }
 
@@ -2350,10 +2378,10 @@ ip6_lookup_init (vlib_main_t * vm)
 	im->fib_masks[i].as_u32[i0] = clib_host_to_net_u32 (pow2_mask (i1) << (32 - i1));
     }
 
+  ip_lookup_init (&im->lookup_main, /* is_ip6 */ 1);
+
   /* Create FIB with index 0 and table id of 0. */
   find_fib_by_table_index_or_id (im, /* table id */ 0, IP6_ROUTE_FLAG_TABLE_ID);
-
-  ip_lookup_init (&im->lookup_main, /* is_ip6 */ 1);
 
   {
     pg_node_t * pn;

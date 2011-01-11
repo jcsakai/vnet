@@ -19,5 +19,3 @@ set int state fake-eth1 up
 
 set int ip address fake-eth0 2000::1/64
 set int ip address fake-eth1 2001::1/64
-
-ip route add ff02::1:ff00:0/104 via local
