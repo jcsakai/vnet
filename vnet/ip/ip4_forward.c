@@ -1106,66 +1106,50 @@ ip4_add_del_interface_address (vlib_main_t * vm, u32 sw_if_index,
      is_del);
 }
 
-static void serialize_vec_ip4_fib (serialize_main_t * m, va_list * va)
+static void serialize_ip4_fib (serialize_main_t * m, va_list * va)
 {
-  ip4_fib_t * fibs = va_arg (*va, ip4_fib_t *);
-  u32 n = va_arg (*va, u32);
-  u32 i, l, dst, adj_index;
+  ip4_fib_t * f = va_arg (*va, ip4_fib_t *);
+  u32 l, dst, adj_index;
 
-  for (i = 0; i < n; i++)
+  serialize_integer (m, f->table_id, sizeof (f->table_id));
+  for (l = 0; l < ARRAY_LEN (f->adj_index_by_dst_address); l++)
     {
-      ip4_fib_t * f = fibs + i;
-      serialize_integer (m, f->table_id, sizeof (f->table_id));
-      for (l = 0; l < ARRAY_LEN (f->adj_index_by_dst_address); l++)
-	{
-	  u32 n_elts = hash_elts (f->adj_index_by_dst_address[l]);
+      u32 n_elts = hash_elts (f->adj_index_by_dst_address[l]);
 
-	  serialize_integer (m, n_elts, sizeof (n_elts));
-	  hash_foreach (dst, adj_index, f->adj_index_by_dst_address[l], ({
-	    serialize_integer (m, dst, sizeof (dst));
-	    serialize_integer (m, adj_index, sizeof (adj_index));
-	  }));
-	}
+      serialize_integer (m, n_elts, sizeof (n_elts));
+      hash_foreach (dst, adj_index, f->adj_index_by_dst_address[l], ({
+	serialize_integer (m, dst, sizeof (dst));
+        serialize_integer (m, adj_index, sizeof (adj_index));
+      }));
     }
 }
 
-static void unserialize_vec_ip4_fib (serialize_main_t * m, va_list * va)
+static void unserialize_ip4_fib (serialize_main_t * m, va_list * va)
 {
-  ip4_fib_t * fibs = va_arg (*va, ip4_fib_t *);
-  u32 n = va_arg (*va, u32);
-  u32 i, l, flags;
+  ip4_add_del_route_args_t a;
+  u32 i;
 
-  flags = IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_NO_REDISTRIBUTE;
+  a.flags = (IP4_ROUTE_FLAG_ADD
+             | IP4_ROUTE_FLAG_NO_REDISTRIBUTE
+             | IP4_ROUTE_FLAG_TABLE_ID);
+  a.n_add_adj = 0;
+  a.add_adj = 0;
 
-  for (i = 0; i < n; i++)
+  unserialize_integer (m, &a.table_index_or_table_id,
+                       sizeof (a.table_index_or_table_id));
+
+  for (i = 0; i < STRUCT_ARRAY_LEN (ip4_fib_t, adj_index_by_dst_address); i++)
     {
-      ip4_fib_t * f = fibs + i;
-
-      memset (f, 0, sizeof (f[0]));
-      unserialize_integer (m, &f->table_id, sizeof (f->table_id));
-      f->index = i;
-
-      for (l = 0; l < ARRAY_LEN (f->adj_index_by_dst_address); l++)
-	{
-	  u32 n_elts;
-
-	  unserialize_integer (m, &n_elts, sizeof (u32));
-	  if (n_elts == 0)
-	    continue;
-
-	  ASSERT (! f->adj_index_by_dst_address[l]);
-	  ip4_fib_init_adj_index_by_dst_address (&ip4_main.lookup_main, f, l);
-
-	  while (n_elts > 0)
-	    {
-	      u32 dst_address, adj_index;
-
-	      unserialize_integer (m, &dst_address, sizeof (dst_address));
-	      unserialize_integer (m, &adj_index, sizeof (adj_index));
-	      ip4_fib_set_adj_index (&ip4_main, f, flags, dst_address, l, adj_index);
-	      n_elts--;
-	    }
-	}
+      u32 n_elts;
+      unserialize_integer (m, &n_elts, sizeof (u32));
+      a.dst_address_length = i;
+      while (n_elts > 0)
+        {
+          unserialize_integer (m, &a.dst_address.data_u32, sizeof (a.dst_address));
+          unserialize_integer (m, &a.adj_index, sizeof (a.adj_index));
+          ip4_add_del_route (&ip4_main, &a);
+          n_elts--;
+        }
     }
 }
 
@@ -1181,7 +1165,13 @@ void serialize_vnet_ip4_main (serialize_main_t * m, va_list * va)
   serialize (m, serialize_ip_lookup_main, &i4m->lookup_main);
 
   /* FIBs. */
-  vec_serialize (m, i4m->fibs, serialize_vec_ip4_fib);
+  {
+    ip4_fib_t * f;
+    u32 n_fibs = vec_len (i4m->fibs);
+    serialize_integer (m, n_fibs, sizeof (n_fibs));
+    vec_foreach (f, i4m->fibs)
+      serialize (m, serialize_ip4_fib, f);
+  }
 
   /* FIB interface config. */
   vec_serialize (m, i4m->fib_index_by_sw_if_index, serialize_vec_32);
@@ -1218,13 +1208,12 @@ void unserialize_vnet_ip4_main (serialize_main_t * m, va_list * va)
     }));
   }
 
-  vec_unserialize (m, &i4m->fibs, unserialize_vec_ip4_fib);
-
-  /* Re-construct table id -> table index hash. */
+  /* FIBs */
   {
-    ip4_fib_t * f;
-    vec_foreach (f, i4m->fibs)
-      hash_set (i4m->fib_index_by_table_id, f->table_id, f->index);
+    u32 i, n_fibs;
+    unserialize_integer (m, &n_fibs, sizeof (n_fibs));
+    for (i = 0; i < n_fibs; i++)
+      unserialize (m, unserialize_ip4_fib);
   }
 
   vec_unserialize (m, &i4m->fib_index_by_sw_if_index, unserialize_vec_32);

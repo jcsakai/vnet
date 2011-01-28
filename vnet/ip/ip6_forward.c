@@ -1148,78 +1148,61 @@ ip6_add_del_interface_address (vlib_main_t * vm, u32 sw_if_index,
      is_del);
 }
 
-static void serialize_vec_ip6_fib (serialize_main_t * m, va_list * va)
+static void serialize_ip6_fib (serialize_main_t * m, va_list * va)
 {
-  ip6_fib_t * fibs = va_arg (*va, ip6_fib_t *);
-  u32 n = va_arg (*va, u32);
-  u32 i;
+  ip6_fib_t * f = va_arg (*va, ip6_fib_t *);
+  ip6_fib_mhash_t * mh;
+  ip6_address_t * dst;
+  uword * v;
 
-  for (i = 0; i < n; i++)
+  serialize_integer (m, f->table_id, sizeof (f->table_id));
+  serialize_integer (m, vec_len (f->non_empty_dst_address_length_mhash), sizeof (u32));
+
+  vec_foreach (mh, f->non_empty_dst_address_length_mhash)
     {
-      ip6_fib_t * f = fibs + i;
-      ip6_fib_mhash_t * mh;
-      ip6_address_t * dst;
-      uword * v;
+      u32 n_elts;
 
-      serialize_integer (m, f->table_id, sizeof (f->table_id));
-      serialize_integer (m, vec_len (f->non_empty_dst_address_length_mhash), sizeof (u32));
+      n_elts = mhash_elts (&mh->adj_index_by_dst_address);
 
-      vec_foreach (mh, f->non_empty_dst_address_length_mhash)
-	{
-	  u32 n_elts;
-
-	  n_elts = mhash_elts (&mh->adj_index_by_dst_address);
-
-	  serialize_integer (m, mh->dst_address_length, sizeof (mh->dst_address_length));
-	  serialize_integer (m, n_elts, sizeof (n_elts));
+      serialize_integer (m, mh->dst_address_length, sizeof (mh->dst_address_length));
+      serialize_integer (m, n_elts, sizeof (n_elts));
 	  
-	  mhash_foreach (dst, v, &mh->adj_index_by_dst_address, ({
+      mhash_foreach (dst, v, &mh->adj_index_by_dst_address, ({
 	    serialize (m, serialize_ip6_address, dst);
 	    serialize_integer (m, v[0], sizeof (u32));
 	  }));
-	}
     }
 }
 
-static void unserialize_vec_ip6_fib (serialize_main_t * m, va_list * va)
+static void unserialize_ip6_fib (serialize_main_t * m, va_list * va)
 {
-  ip6_fib_t * fibs = va_arg (*va, ip6_fib_t *);
-  u32 n = va_arg (*va, u32);
-  u32 i, l, flags;
+  ip6_add_del_route_args_t a;
+  u32 i, n_dst_address_lengths;
 
-  flags = IP6_ROUTE_FLAG_ADD | IP6_ROUTE_FLAG_NO_REDISTRIBUTE;
+  a.flags = (IP6_ROUTE_FLAG_ADD
+             | IP6_ROUTE_FLAG_NO_REDISTRIBUTE
+             | IP6_ROUTE_FLAG_TABLE_ID);
+  a.n_add_adj = 0;
+  a.add_adj = 0;
 
-  for (i = 0; i < n; i++)
+  unserialize_integer (m, &a.table_index_or_table_id,
+                       sizeof (a.table_index_or_table_id));
+
+  unserialize_integer (m, &n_dst_address_lengths, sizeof (n_dst_address_lengths));
+  for (i = 0; i < n_dst_address_lengths; i++)
     {
-      ip6_fib_t * f = fibs + i;
-      ip6_fib_mhash_t * mh;
+      u32 n_elts;
 
-      memset (f, 0, sizeof (f[0]));
-      unserialize_integer (m, &f->table_id, sizeof (f->table_id));
-      f->index = i;
-
-      unserialize_integer (m, &l, sizeof (l));
-
-      vec_resize (f->non_empty_dst_address_length_mhash, l);
-      vec_foreach (mh, f->non_empty_dst_address_length_mhash)
-	{
-	  ip6_address_t dst_address;
-	  u32 n_elts, adj_index;
-
-	  unserialize_integer (m, &l, sizeof (l));
-
-	  mh->dst_address_length = l;
-	  f->mhash_index_by_dst_address_length[l] = mh - f->non_empty_dst_address_length_mhash;
-	  unserialize_integer (m, &n_elts, sizeof (u32));
-
-	  while (n_elts > 0)
-	    {
-	      unserialize (m, unserialize_ip6_address, &dst_address);
-	      unserialize_integer (m, &adj_index, sizeof (adj_index));
-	      ip6_fib_set_adj_index (&ip6_main, f, flags, &dst_address, l, adj_index);
-	      n_elts--;
-	    }
-	}
+      unserialize_integer (m, &a.dst_address_length,
+                           sizeof (a.dst_address_length));
+      unserialize_integer (m, &n_elts, sizeof (u32));
+      while (n_elts > 0)
+        {
+          unserialize (m, unserialize_ip6_address, &a.dst_address);
+          unserialize_integer (m, &a.adj_index, sizeof (a.adj_index));
+          ip6_add_del_route (&ip6_main, &a);
+          n_elts--;
+        }
     }
 }
 
@@ -1236,7 +1219,13 @@ void serialize_vnet_ip6_main (serialize_main_t * m, va_list * va)
   serialize (m, serialize_ip_lookup_main, lm);
 
   /* FIBs. */
-  vec_serialize (m, im->fibs, serialize_vec_ip6_fib);
+  {
+    ip6_fib_t * f;
+    u32 n_fibs = vec_len (im->fibs);
+    serialize_integer (m, n_fibs, sizeof (n_fibs));
+    vec_foreach (f, im->fibs)
+      serialize (m, serialize_ip6_fib, f);
+  }
 
   /* FIB interface config. */
   vec_serialize (m, im->fib_index_by_sw_if_index, serialize_vec_32);
@@ -1274,13 +1263,12 @@ void unserialize_vnet_ip6_main (serialize_main_t * m, va_list * va)
     }));
   }
 
-  vec_unserialize (m, &im->fibs, unserialize_vec_ip6_fib);
-
-  /* Re-construct table id -> table index hash. */
+  /* FIBs */
   {
-    ip6_fib_t * f;
-    vec_foreach (f, im->fibs)
-      hash_set (im->fib_index_by_table_id, f->table_id, f->index);
+    u32 i, n_fibs;
+    unserialize_integer (m, &n_fibs, sizeof (n_fibs));
+    for (i = 0; i < n_fibs; i++)
+      unserialize (m, unserialize_ip6_fib);
   }
 
   vec_unserialize (m, &im->fib_index_by_sw_if_index, unserialize_vec_32);
