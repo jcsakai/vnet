@@ -982,7 +982,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  l3_offset0 = (is_sop && next0 == IGE_RX_NEXT_IP4_INPUT
 			? sizeof (ethernet_header_t) + (is_vlan0 ? sizeof (ethernet_vlan_header_t) : 0)
 			: 0);
-	  l3_offset1 = (is_sop && next1 == IGE_RX_NEXT_IP4_INPUT
+	  l3_offset1 = (is_eop0 && next1 == IGE_RX_NEXT_IP4_INPUT
 			? sizeof (ethernet_header_t) + (is_vlan1 ? sizeof (ethernet_vlan_header_t) : 0)
 			: 0);
 
@@ -1638,6 +1638,21 @@ static void ige_device_init (ige_main_t * xm)
       ige_regs_t * r = xd->regs;
       const u32 reset_bit = (1 << 26);
 
+      /* Make sure TX packet buffer has room for 2 9k frames. */
+      {
+	u32 pba = r->packet_buffer_allocation;
+	u32 rx_k_bytes = pba & 0xffff;
+	u32 tx_k_bytes = pba >> 16;
+	u32 total_k_bytes = rx_k_bytes + tx_k_bytes;
+
+	/* Want enough space for 2 9k jumbo frames. */
+	tx_k_bytes = 2 * 9;
+	rx_k_bytes = total_k_bytes - tx_k_bytes;
+
+	r->packet_buffer_allocation = (tx_k_bytes << 16) | rx_k_bytes;
+      }
+
+      /* Reset will allocate packet buffer. */
       r->control |= reset_bit;
 
       /* No need to suspend.  Timed to take ~1e-6 secs */
