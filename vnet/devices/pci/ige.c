@@ -1238,10 +1238,9 @@ ige_rx_queue (ige_main_t * xm,
   dq->head_index = sw_head_index;
   dq->tail_index = ige_ring_add (dq, dq->tail_index, dq->rx.n_descriptors_done_total);
 
-  /* Give head/tail back to hardware. */
+  /* Give tail back to hardware. */
   CLIB_MEMORY_BARRIER ();
 
-  dr->head_index = dq->head_index;
   dr->tail_index = dq->tail_index;
 
   vlib_increment_combined_counter (xm->vlib_main->interface_main.combined_sw_if_counters
