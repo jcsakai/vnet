@@ -310,6 +310,9 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 
 	  ip0->checksum = ip_csum_fold (sum0);
 	  ip1->checksum = ip_csum_fold (sum1);
+
+	  ASSERT (ip0->checksum == ip4_header_checksum (ip0));
+	  ASSERT (ip1->checksum == ip4_header_checksum (ip1));
 	}
   
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -360,6 +363,8 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  fid += 1;
 
 	  ip0->checksum = ip_csum_fold (sum0);
+
+	  ASSERT (ip0->checksum == ip4_header_checksum (ip0));
 	}
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);
