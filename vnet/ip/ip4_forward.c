@@ -2330,10 +2330,10 @@ ip4_rewrite (vlib_main_t * vm,
 
 	    ip0->ttl = ttl0;
 
+	    ASSERT (ip0->checksum == ip4_header_checksum (ip0));
+
 	    error0 = ttl0 <= 0 ? IP4_ERROR_TIME_EXPIRED : error0;
 	  }
-
-	  ASSERT (ip0->checksum == ip4_header_checksum (ip0));
 
 	  p0->error = error_node->errors[error0];
 
