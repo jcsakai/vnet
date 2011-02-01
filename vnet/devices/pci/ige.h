@@ -397,24 +397,54 @@ typedef volatile struct {
 } ige_regs_t;
 
 #define foreach_ige_pci_device_id		\
-  _ (82547_copper, 0x1019)			\
-  _ (82547ei_b0_mobile, 0x101a)                 \
-  _ (82546eb_a1_copper_dual_port, 0x1010)	\
-  _ (82546eb_a1_fiber_dual_port, 0x1012)	\
-  _ (82546eb_a1_copper_quad_port, 0x101d)	\
-  _ (82546gb_b0_copper_dual_port, 0x1079)	\
-  _ (82546gb_b0_fiber_dual_port, 0x107a)	\
-  _ (82546gb_b0_serdes_dual_port, 0x107b)	\
-  _ (82545em_a_copper, 0x100f)			\
-  _ (82545em_a_fiber, 0x1011)			\
-  _ (82545gm_b_copper, 0x1026)			\
-  _ (82545gm_b_fiber, 0x1027)			\
-  _ (82545gm_b_serdes, 0x1028)			\
-  _ (82544ei_a4_copper, 0x1107)			\
-  _ (82544gc_a4_copper, 0x1112)			\
-  _ (82541_copper, 0x1013)			\
-  _ (kludge, 0x105e)			\
-  _ (82541ei_b0_mobile, 0x1018)
+  _ (82571eb_copper, 0x105e)			\
+  _ (82571eb_fiber, 0x105f)			\
+  _ (82571eb_serdes, 0x1060)			\
+  _ (82571eb_quad_copper, 0x10a4)		\
+  _ (82571pt_quad_copper, 0x10d5)		\
+  _ (82571eb_quad_fiber, 0x10a5)		\
+  _ (82571eb_quad_copper_lp, 0x10bc)		\
+  _ (82571eb_serdes_dual, 0x10d9)		\
+  _ (82571eb_serdes_quad, 0x10da)		\
+  _ (82572ei_copper, 0x107d)			\
+  _ (82572ei_fiber, 0x107e)			\
+  _ (82572ei_serdes, 0x107f)			\
+  _ (82572ei, 0x10b9)				\
+  _ (82573e, 0x108b)				\
+  _ (82573e_iamt, 0x108c)			\
+  _ (82573l, 0x109a)				\
+  _ (82574l, 0x10d3)				\
+  _ (82574la, 0x10f6)				\
+  _ (82583v, 0x150c)				\
+  _ (80003es2lan_copper_dpt, 0x1096)		\
+  _ (80003es2lan_serdes_dpt, 0x1098)		\
+  _ (80003es2lan_copper_spt, 0x10ba)		\
+  _ (80003es2lan_serdes_spt, 0x10bb)		\
+  _ (ich8_igp_m_amt, 0x1049)			\
+  _ (ich8_igp_amt, 0x104a)			\
+  _ (ich8_igp_c, 0x104b)			\
+  _ (ich8_ife, 0x104c)				\
+  _ (ich8_ife_gt, 0x10c4)			\
+  _ (ich8_ife_g, 0x10c5)			\
+  _ (ich8_igp_m, 0x104d)			\
+  _ (ich9_igp_amt, 0x10bd)			\
+  _ (ich9_bm, 0x10e5)				\
+  _ (ich9_igp_m_amt, 0x10f5)			\
+  _ (ich9_igp_m, 0x10bf)			\
+  _ (ich9_igp_m_v, 0x10cb)			\
+  _ (ich9_igp_c, 0x294c)			\
+  _ (ich9_ife, 0x10c0)				\
+  _ (ich9_ife_gt, 0x10c3)			\
+  _ (ich9_ife_g, 0x10c2)			\
+  _ (ich10_r_bm_lm, 0x10cc)			\
+  _ (ich10_r_bm_lf, 0x10cd)			\
+  _ (ich10_r_bm_v, 0x10ce)			\
+  _ (ich10_d_bm_lm, 0x10de)			\
+  _ (ich10_d_bm_lf, 0x10df)			\
+  _ (pch_m_hv_lm, 0x10ea)			\
+  _ (pch_m_hv_lc, 0x10eb)			\
+  _ (pch_d_hv_dm, 0x10ef)			\
+  _ (pch_d_hv_dc, 0x10f0)
 
 typedef enum {
 #define _(f,n) IGE_##f = n,
