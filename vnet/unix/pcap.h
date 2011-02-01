@@ -148,7 +148,7 @@ pcap_add_buffer (pcap_main_t * pm,
 {
   vlib_buffer_t * b = vlib_get_buffer (vm, buffer_index);
   u32 n = vlib_buffer_length_in_chain (vm, b);
-  u32 n_left = clib_min (n_bytes_in_trace, n);
+  i32 n_left = clib_min (n_bytes_in_trace, n);
   f64 time_now = vlib_time_now (vm);
   void * d;
 
@@ -157,7 +157,7 @@ pcap_add_buffer (pcap_main_t * pm,
     {
       memcpy (d, b->data + b->current_data, b->current_length);
       n_left -= b->current_length;
-      if (n_left == 0)
+      if (n_left <= 0)
 	break;
       d += b->current_length;
       ASSERT (b->flags & VLIB_BUFFER_NEXT_PRESENT);
