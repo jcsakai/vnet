@@ -122,6 +122,11 @@ ip4_header_checksum (ip4_header_t * i)
 
   i->checksum = save;
 
+  /* Make checksum agree for special case where either
+     0 or 0xffff would give same 1s complement sum. */
+  if (csum == 0 && save == 0xffff)
+    csum = save;
+
   return csum;
 }
 
