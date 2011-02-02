@@ -305,6 +305,10 @@ snap_register_input_protocol (vlib_main_t * vm,
       clib_error_report (error);
   }
 
+  h.protocol = clib_host_to_net_u16 (protocol);
+  h.oui[0] = (ieee_oui >> 16) & 0xff;
+  h.oui[1] = (ieee_oui >>  8) & 0xff;
+  h.oui[2] = (ieee_oui >>  0) & 0xff;
   pi = snap_get_protocol_info (sm, &h);
   if (pi)
     return;
