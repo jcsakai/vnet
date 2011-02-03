@@ -145,17 +145,15 @@ ip6_fib_init_address_length (ip_lookup_main_t * lm, ip6_fib_t * fib, u32 address
 static void serialize_ip6_address (serialize_main_t * m, va_list * va)
 {
   ip6_address_t * a = va_arg (*va, ip6_address_t *);
-  int i;
-  for (i = 0; i < ARRAY_LEN (a->as_u32); i++)
-    serialize_integer (m, a->as_u32[i], sizeof (a->as_u32[i]));
+  u8 * p = serialize_get (m, sizeof (a->as_u8));
+  memcpy (p, a->as_u8, sizeof (a->as_u8));
 }
 
 static void unserialize_ip6_address (serialize_main_t * m, va_list * va)
 {
   ip6_address_t * a = va_arg (*va, ip6_address_t *);
-  int i;
-  for (i = 0; i < ARRAY_LEN (a->as_u32); i++)
-    unserialize_integer (m, &a->as_u32[i], sizeof (a->as_u32[i]));
+  u8 * p = unserialize_get (m, sizeof (a->as_u8));
+  memcpy (a->as_u8, p, sizeof (a->as_u8));
 }
 
 static void serialize_ip6_add_del_route_msg (serialize_main_t * m, va_list * va)

@@ -112,6 +112,19 @@ ip4_fib_init_adj_index_by_dst_address (ip_lookup_main_t * lm,
   vec_validate_init_empty (fib->old_hash_values, max_index, ~0);
 }
 
+static void serialize_ip4_address (serialize_main_t * m, va_list * va)
+{
+  ip4_address_t * a = va_arg (*va, ip4_address_t *);
+  u8 * p = serialize_get (m, sizeof (a->as_u8));
+  memcpy (p, a->as_u8, sizeof (a->as_u8));
+}
+
+static void unserialize_ip4_address (serialize_main_t * m, va_list * va)
+{
+  ip4_address_t * a = va_arg (*va, ip4_address_t *);
+  u8 * p = unserialize_get (m, sizeof (a->as_u8));
+  memcpy (a->as_u8, p, sizeof (a->as_u8));
+}
 
 static void serialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * va)
 {
@@ -119,7 +132,7 @@ static void serialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * va)
     
   serialize_integer (m, a->table_index_or_table_id, sizeof (a->table_index_or_table_id));
   serialize_integer (m, a->flags, sizeof (a->flags));
-  serialize_integer (m, a->dst_address.data_u32, sizeof (a->dst_address.data_u32));
+  serialize (m, serialize_ip4_address, &a->dst_address);
   serialize_integer (m, a->dst_address_length, sizeof (a->dst_address_length));
   serialize_integer (m, a->adj_index, sizeof (a->adj_index));
   serialize_integer (m, a->n_add_adj, sizeof (a->n_add_adj));
@@ -165,7 +178,7 @@ static void unserialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * v
     
   unserialize_integer (m, &a.table_index_or_table_id, sizeof (a.table_index_or_table_id));
   unserialize_integer (m, &a.flags, sizeof (a.flags));
-  unserialize_integer (m, &a.dst_address.data_u32, sizeof (a.dst_address.data_u32));
+  unserialize (m, unserialize_ip4_address, &a.dst_address);
   unserialize_integer (m, &a.dst_address_length, sizeof (a.dst_address_length));
   unserialize_integer (m, &a.adj_index, sizeof (a.adj_index));
   unserialize_integer (m, &a.n_add_adj, sizeof (a.n_add_adj));
