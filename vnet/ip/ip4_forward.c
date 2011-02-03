@@ -330,9 +330,9 @@ static void serialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_l
   u32 next_hop_weight = va_arg (*va, u32);
 
   serialize_integer (m, flags, sizeof (flags));
-  serialize_integer (m, dst_address->data_u32, sizeof (dst_address->data_u32));
+  serialize (m, serialize_ip4_address, dst_address);
   serialize_integer (m, dst_address_length, sizeof (dst_address_length));
-  serialize_integer (m, next_hop_address->data_u32, sizeof (next_hop_address->data_u32));
+  serialize (m, serialize_ip4_address, next_hop_address);
   serialize_integer (m, next_hop_sw_if_index, sizeof (next_hop_sw_if_index));
   serialize_integer (m, next_hop_weight, sizeof (next_hop_weight));
 }
@@ -344,9 +344,9 @@ static void unserialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va
   ip4_address_t dst_address, next_hop_address;
 
   unserialize_integer (m, &flags, sizeof (flags));
-  unserialize_integer (m, &dst_address.data_u32, sizeof (dst_address));
+  unserialize (m, unserialize_ip4_address, &dst_address);
   unserialize_integer (m, &dst_address_length, sizeof (dst_address_length));
-  unserialize_integer (m, &next_hop_address.data_u32, sizeof (next_hop_address));
+  unserialize (m, unserialize_ip4_address, &next_hop_address);
   unserialize_integer (m, &next_hop_sw_if_index, sizeof (next_hop_sw_if_index));
   unserialize_integer (m, &next_hop_weight, sizeof (next_hop_weight));
 
@@ -980,7 +980,7 @@ static void serialize_vec_ip4_set_interface_address (serialize_main_t * m, va_li
     u32 i;
     for (i = 0; i < n; i++) {
         serialize_integer (m, a[i].sw_if_index, sizeof (a[i].sw_if_index));
-        serialize_integer (m, a[i].address.data_u32, sizeof (a[i].address));
+        serialize (m, serialize_ip4_address, &a[i].address);
         serialize_integer (m, a[i].length, sizeof (a[i].length));
     }
 }
@@ -992,7 +992,7 @@ static void unserialize_vec_ip4_set_interface_address (serialize_main_t * m, va_
     u32 i;
     for (i = 0; i < n; i++) {
         unserialize_integer (m, &a[i].sw_if_index, sizeof (a[i].sw_if_index));
-        unserialize_integer (m, &a[i].address.data_u32, sizeof (a[i].address));
+        unserialize (m, unserialize_ip4_address, &a[i].address);
         unserialize_integer (m, &a[i].length, sizeof (a[i].length));
     }
 }
@@ -1131,7 +1131,9 @@ static void serialize_ip4_fib (serialize_main_t * m, va_list * va)
 
       serialize_integer (m, n_elts, sizeof (n_elts));
       hash_foreach (dst, adj_index, f->adj_index_by_dst_address[l], ({
-	serialize_integer (m, dst, sizeof (dst));
+        ip4_address_t tmp;
+        tmp.as_u32 = dst;
+	serialize (m, serialize_ip4_address, &tmp);
         serialize_integer (m, adj_index, sizeof (adj_index));
       }));
     }
@@ -1158,7 +1160,7 @@ static void unserialize_ip4_fib (serialize_main_t * m, va_list * va)
       a.dst_address_length = i;
       while (n_elts > 0)
         {
-          unserialize_integer (m, &a.dst_address.data_u32, sizeof (a.dst_address));
+          unserialize (m, unserialize_ip4_address, &a.dst_address);
           unserialize_integer (m, &a.adj_index, sizeof (a.adj_index));
           ip4_add_del_route (&ip4_main, &a);
           n_elts--;
