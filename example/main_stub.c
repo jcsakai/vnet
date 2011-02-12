@@ -32,6 +32,9 @@ vnet_main_init (vlib_main_t * vm)
       error = unix_physmem_init (vm, /* physical_memory_required */ 0);
     }
 
+  if ((error = unix_physmem_init (vm, /* physical_memory_required */ 0)))
+    return error;
+
   if ((error = vlib_call_init_function (vm, tuntap_init)))
     return error;
 
@@ -46,3 +49,36 @@ int main (int argc, char * argv[])
 {
   return vlib_unix_main (argc, argv);
 }
+
+static uword
+tcp_test (vlib_main_t * vm,
+	  vlib_node_runtime_t * node,
+	  vlib_frame_t * frame)
+{
+  ASSERT (0);
+  return frame->n_vectors;
+}
+
+VLIB_REGISTER_NODE (tcp_test_node) = {
+  .function = tcp_test,
+  .name = "tcp-test",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = "error-drop",
+  },
+};
+
+static clib_error_t *
+tcp_test_init (vlib_main_t * vm)
+{
+  clib_error_t * error = 0;
+
+  ip4_tcp_register_listener (vm, 1234, tcp_test_node.index);
+
+  return error;
+}
+
+static VLIB_INIT_FUNCTION (tcp_test_init);
