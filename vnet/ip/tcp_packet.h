@@ -60,10 +60,11 @@ typedef struct {
   /* Sequence and acknowledgment number. */
   u32 seq_number, ack_number;
 
-  /* High 4 bits are data offset in units of 32bit words; the other 12
-     bits are flags (see foreach_tcp_flag for enumation of tcp
-     flags). */
-  u16 data_offset_and_flags;
+  /* Size of TCP header in 32-bit units plus 4 reserved bits. */
+  u8 tcp_header_u32s_and_reserved;
+
+  /* see foreach_tcp_flag for enumation of tcp flags. */
+  u8 flags;
 
   /* Current window advertised by sender.
      This is the number of bytes sender is willing to receive
@@ -78,7 +79,7 @@ typedef struct {
 
 always_inline int
 tcp_header_bytes (tcp_header_t * t)
-{ return (t->data_offset_and_flags >> 12) * sizeof (u32); }
+{ return (t->tcp_header_u32s_and_reserved >> 4) * sizeof (u32); }
 
 /* TCP options. */
 typedef enum tcp_option_type {

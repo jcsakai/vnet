@@ -1127,6 +1127,7 @@ ip6_add_del_interface_address_internal (vlib_main_t * vm,
     vec_foreach (cb, im->add_del_interface_address_callbacks)
       cb->function (im, cb->function_opaque, sw_if_index,
 		    address, address_length,
+		    if_address_index,
 		    is_del);
   }
 
@@ -1678,7 +1679,7 @@ ip6_local (vlib_main_t * vm,
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
-	  ip_local_buffer_opaque_t * i0, * i1;
+	  ip_buffer_opaque_t * i0, * i1;
 	  ip6_header_t * ip0, * ip1;
 	  udp_header_t * udp0, * udp1;
 	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
@@ -1703,8 +1704,8 @@ ip6_local (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = i0->non_local.dst_adj_index;
-	  adj_index1 = i1->non_local.dst_adj_index;
+	  adj_index0 = i0->dst_adj_index;
+	  adj_index1 = i1->dst_adj_index;
 
 	  type0 = lm->builtin_protocol_by_ip_protocol[ip0->protocol];
 	  type1 = lm->builtin_protocol_by_ip_protocol[ip1->protocol];
@@ -1803,7 +1804,7 @@ ip6_local (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip6_header_t * ip0;
-	  ip_local_buffer_opaque_t * i0;
+	  ip_buffer_opaque_t * i0;
 	  udp_header_t * udp0;
 	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
 	  i32 len_diff0;
@@ -1818,7 +1819,7 @@ ip6_local (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  i0 = vlib_get_buffer_opaque (p0);
 
-	  adj_index0 = i0->non_local.dst_adj_index;
+	  adj_index0 = i0->dst_adj_index;
 
 	  ip0 = vlib_buffer_get_current (p0);
 
@@ -1898,8 +1899,8 @@ static VLIB_REGISTER_NODE (ip6_local_node) = {
   .next_nodes = {
     [IP_LOCAL_NEXT_DROP] = "error-drop",
     [IP_LOCAL_NEXT_PUNT] = "error-punt",
-    [IP_LOCAL_NEXT_TCP_LOOKUP] = "tcp4-lookup",
-    [IP_LOCAL_NEXT_UDP_LOOKUP] = "udp4-lookup",
+    [IP_LOCAL_NEXT_TCP_LOOKUP] = "ip6-tcp-lookup",
+    [IP_LOCAL_NEXT_UDP_LOOKUP] = "ip6-udp-lookup",
     [IP_LOCAL_NEXT_ICMP] = "ip6-icmp-input",
   },
 };

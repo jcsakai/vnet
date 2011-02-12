@@ -24,32 +24,57 @@
  */
 
 #include <vnet/ip/ip.h>
+#include <math.h>
+
+typedef union {
+  struct {
+    u16 src, dst;
+  };
+  u32 as_u32;
+} tcp_udp_ports_t;
 
 typedef struct {
   union {
-    u8 src_address[4], dst_address[4];
-    u16 src_port, dst_port;
-  };
-
-  union {
-    u32 src_address32;
-    u32 dst_address32;
-    u32 src_dst_port32;
-  };
-
-  union {
-    u64 src_dst_address64;
-    u32 src_dst_port32;
-  };
+    struct {
+      ip4_address_t src, dst;
+    };
+    u64 as_u64;
+  } addresses;
+  tcp_udp_ports_t ports;
 } ip4_tcp_udp_address_t;
+
+always_inline void
+ip4_tcp_udp_address_from_header2 (ip4_tcp_udp_address_t * a,
+				  ip4_header_t * ip,
+				  tcp_header_t * tcp)
+{
+  a->addresses.as_u64 = clib_mem_unaligned (&ip->src_address, u64);
+  a->ports.as_u32 = clib_mem_unaligned (&tcp->ports.src_and_dst, u32);
+}
 
 always_inline void
 ip4_tcp_udp_address_from_header (ip4_tcp_udp_address_t * a,
 				 ip4_header_t * ip)
 {
   tcp_header_t * tcp = ip4_next_header (ip);
-  a->src_dst_address64 = clib_mem_unaligned (&ip->src_address, u64);
-  a->src_dst_port32 = clib_mem_unaligned (&tcp->ports.src_and_dst, u32);
+  ip4_tcp_udp_address_from_header2 (a, ip, tcp);
+}
+
+always_inline uword
+ip4_tcp_udp_address_is_equal (ip4_tcp_udp_address_t * a0,
+			      ip4_tcp_udp_address_t * a1)
+{
+  return (a0->addresses.as_u64 == a1->addresses.as_u64
+	  && a0->ports.as_u32 == a1->ports.as_u32);
+}
+
+always_inline uword
+ip4_tcp_udp_address_is_equal_to_header (ip4_tcp_udp_address_t * a,
+					ip4_header_t * ip,
+					tcp_header_t * tcp)
+{
+  return (a->addresses.as_u64 == clib_mem_unaligned (&ip->src_address, u64)
+	  && a->ports.as_u32 == clib_mem_unaligned (&tcp->ports.src_and_dst, u32));
 }
 
 static u8 * format_ip4_tcp_udp_address (u8 * s, va_list * args)
@@ -57,227 +82,584 @@ static u8 * format_ip4_tcp_udp_address (u8 * s, va_list * args)
   ip4_tcp_udp_address_t * a = va_arg (*args, ip4_tcp_udp_address_t *);
 
   s = format (s, "%U:%d -> %U:%d",
-	      format_ip4_address, a->src_address,
-	      clib_net_to_host_u16 (a->src_port),
-	      format_ip4_address, a->dst_address,
-	      clib_net_to_host_u16 (a->dst_port));
+	      format_ip4_address, a->addresses.src,
+	      clib_net_to_host_u16 (a->ports.src),
+	      format_ip4_address, a->addresses.dst,
+	      clib_net_to_host_u16 (a->ports.dst));
 
   return s;
 }
 
 typedef struct {
-  /* CPU cycle counter of last packet received. */
-  u64 cpu_time_last_packet;
+  union {
+    struct {
+      ip6_address_t src, dst;
+    };
+    u64 as_u64[4];
+  } addresses;
+  tcp_udp_ports_t ports;
+} ip6_tcp_udp_address_t;
 
-  /* Number of bytes pending processing. */
-  u32 n_bytes_pending;
+always_inline void
+ip6_tcp_udp_address_from_header2 (ip6_tcp_udp_address_t * a,
+				  ip6_header_t * ip,
+				  tcp_header_t * tcp)
+{
+  a->addresses.as_u64[0] = clib_mem_unaligned (&ip->src_address.as_u64[0], u64);
+  a->addresses.as_u64[1] = clib_mem_unaligned (&ip->src_address.as_u64[1], u64);
+  a->addresses.as_u64[2] = clib_mem_unaligned (&ip->src_address.as_u64[2], u64);
+  a->addresses.as_u64[3] = clib_mem_unaligned (&ip->src_address.as_u64[3], u64);
+  a->ports.as_u32 = clib_mem_unaligned (&tcp->ports.src_and_dst, u32);
+}
 
-  /* Buffer head/tail pointer. */
-  u32 pending_buffer_head, pending_buffer_tail;
+always_inline void
+ip6_tcp_udp_address_from_header (ip6_tcp_udp_address_t * a,
+				 ip6_header_t * ip)
+{
+  tcp_header_t * tcp = ip6_next_header (ip);
+  ip6_tcp_udp_address_from_header2 (a, ip, tcp);
+}
 
-  u32 flags;
-#define IP4_TCP_UDP_CONNECTION_IS_UDP (1 << 0)
+always_inline uword
+ip6_tcp_udp_address_is_equal (ip6_tcp_udp_address_t * a0,
+			      ip6_tcp_udp_address_t * a1)
+{
+  return (a0->addresses.as_u64 == a1->addresses.as_u64
+	  && a0->ports.as_u32 == a1->ports.as_u32);
+}
 
-  /* {tcp4,udp4}-lookup next index for packets matching this connection. */
-  u16 next_index;
+always_inline uword
+ip6_tcp_udp_address_is_equal_to_header (ip6_tcp_udp_address_t * a,
+					ip6_header_t * ip,
+					tcp_header_t * tcp)
+{
+  return (a->addresses.as_u64[0] == clib_mem_unaligned (&ip->src_address.as_u64[0], u64)
+	  && a->addresses.as_u64[1] == clib_mem_unaligned (&ip->src_address.as_u64[1], u64)
+	  && a->addresses.as_u64[2] == clib_mem_unaligned (&ip->src_address.as_u64[2], u64)
+	  && a->addresses.as_u64[3] == clib_mem_unaligned (&ip->src_address.as_u64[3], u64)
+	  && a->ports.as_u32 == clib_mem_unaligned (&tcp->ports.src_and_dst, u32));
+}
 
-  u16 listener_index;
-} ip_tcp_udp_connection_header_t;
+static u8 * format_ip6_tcp_udp_address (u8 * s, va_list * args)
+{
+  ip6_tcp_udp_address_t * a = va_arg (*args, ip6_tcp_udp_address_t *);
+
+  s = format (s, "%U:%d -> %U:%d",
+	      format_ip6_address, &a->addresses.src,
+	      clib_net_to_host_u16 (a->ports.src),
+	      format_ip6_address, &a->addresses.dst,
+	      clib_net_to_host_u16 (a->ports.dst));
+
+  return s;
+}
+
+static u8 my_zero_mask_table[256] = {
+  [0xf0] = (1 << 1),
+  [0x0f] = (1 << 0),
+  [0xff] = (1 << 0) | (1 << 1),
+};
+
+always_inline u32 my_zero_mask (u32 x)
+{
+  return ((my_zero_mask_table[(x >> 0) & 0xff] << 0)
+	  | (my_zero_mask_table[(x >> 8) & 0xff] << 2));
+}
+
+static u8 my_first_set_table[256] = {
+  [0x00] = 4,
+  [0xf0] = 1,
+  [0x0f] = 0,
+  [0xff] = 0,
+};
+
+always_inline u32 my_first_set (u32 zero_mask)
+{
+  u8 r0 = my_first_set_table[(zero_mask >> 0) & 0xff];
+  u8 r1 = 2 + my_first_set_table[(zero_mask >> 8) & 0xff];
+  return r0 != 4 ? r0 : r1;
+}
+
+typedef union {
+  u32x4 as_u32x4;
+  tcp_udp_ports_t as_ports[4];
+} tcp_udp_ports_x4_t;
 
 typedef struct {
-  /* Source/destination address/ports. */
-  ip4_tcp_udp_address_t address;
+  union {
+    u32x4 as_u32x4;
+    ip4_address_t as_ip4_address[4];
+  } src, dst;
+  tcp_udp_ports_x4_t ports;
+} ip4_tcp_udp_address_x4_t;
 
-  ip_tcp_udp_connection_header_t header;
+always_inline void
+ip4_tcp_udp_address_x4_set_from_headers (ip4_tcp_udp_address_x4_t * a,
+					 ip4_header_t * ip,
+					 tcp_header_t * tcp,
+					 u32 i)
+{
+  a->src.as_ip4_address[i] = ip->src_address;
+  a->dst.as_ip4_address[i] = ip->dst_address;
+  a->ports.as_ports[i].as_u32 = tcp->ports.src_and_dst;
+}
 
-  /* User's per-connection data follows.
-     Should be aligned to 64 bits. */
-  u8 user_data[64
-	       - 1*sizeof (ip4_tcp_udp_address_t)
-	       - 1*sizeof (ip_tcp_udp_connection_header_t)];
-} ip4_tcp_udp_connection_t;
+always_inline void
+ip4_tcp_udp_address_x4_copy_and_invalidate (ip4_tcp_udp_address_x4_t * dst,
+					    ip4_tcp_udp_address_x4_t * src,
+					    u32 dst_i, u32 src_i)
+{
+#define _(d,s) d = s; s = 0;
+  _ (dst->src.as_ip4_address[dst_i].as_u32, src->src.as_ip4_address[src_i].as_u32);
+  _ (dst->dst.as_ip4_address[dst_i].as_u32, src->dst.as_ip4_address[src_i].as_u32);
+  _ (dst->ports.as_ports[dst_i].as_u32, src->ports.as_ports[src_i].as_u32);
+#undef _
+}
+
+always_inline void
+ip4_tcp_udp_address_x4_invalidate (ip4_tcp_udp_address_x4_t * a, u32 i)
+{
+  a->src.as_ip4_address[i].as_u32 = 0;
+  a->dst.as_ip4_address[i].as_u32 = 0;
+  a->ports.as_ports[i].as_u32 = 0;
+}
+
+always_inline uword
+ip4_tcp_udp_address_x4_match_helper (ip4_tcp_udp_address_x4_t * ax4,
+				     u32x4 src, u32x4 dst, u32x4 ports)
+{
+  u32x4 r;
+  u32 m;
+
+  r = u32x4_is_equal (src, ax4->src.as_u32x4);
+  r &= u32x4_is_equal (dst, ax4->dst.as_u32x4);
+  r &= u32x4_is_equal (ports, ax4->ports.as_u32x4);
+
+  /* At this point r will be either all zeros (if nothing matched)
+     or have 32 1s in the position that did match. */
+  m = u8x16_compare_byte_mask ((u8x16) r);
+
+  return m;
+}
+
+always_inline uword
+ip4_tcp_udp_address_x4_match (ip4_tcp_udp_address_x4_t * ax4,
+			      ip4_header_t * ip,
+			      tcp_header_t * tcp)
+{
+  u32x4 src = u32x4_splat (ip->src_address.as_u32);
+  u32x4 dst = u32x4_splat (ip->dst_address.as_u32);
+  u32x4 ports = u32x4_splat (tcp->ports.src_and_dst);
+  return my_first_set (ip4_tcp_udp_address_x4_match_helper (ax4, src, dst, ports));
+}
+
+always_inline uword
+ip4_tcp_udp_address_x4_first_empty (ip4_tcp_udp_address_x4_t * ax4)
+{
+  u32x4 zero = {0};
+  return my_first_set (ip4_tcp_udp_address_x4_match_helper (ax4, zero, zero, zero));
+}
+
+always_inline uword
+ip4_tcp_udp_address_x4_empty_mask (ip4_tcp_udp_address_x4_t * ax4)
+{
+  u32x4 zero = {0};
+  return my_zero_mask (ip4_tcp_udp_address_x4_match_helper (ax4, zero, zero, zero));
+}
 
 typedef struct {
-  /* Bitmap indicating which of 64 possibly local adjacencies
+  union {
+    u32x4 as_u32x4[4];
+    u32   as_u32[4][4];
+  } src, dst;
+  tcp_udp_ports_x4_t ports;
+} ip6_tcp_udp_address_x4_t;
+
+always_inline void
+ip6_tcp_udp_address_x4_set_from_headers (ip6_tcp_udp_address_x4_t * a,
+					 ip6_header_t * ip,
+					 tcp_header_t * tcp,
+					 u32 i)
+{
+  a->src.as_u32[0][i] = ip->src_address.as_u32[0];
+  a->src.as_u32[1][i] = ip->src_address.as_u32[1];
+  a->src.as_u32[2][i] = ip->src_address.as_u32[2];
+  a->src.as_u32[3][i] = ip->src_address.as_u32[3];
+  a->dst.as_u32[0][i] = ip->dst_address.as_u32[0];
+  a->dst.as_u32[1][i] = ip->dst_address.as_u32[1];
+  a->dst.as_u32[2][i] = ip->dst_address.as_u32[2];
+  a->dst.as_u32[3][i] = ip->dst_address.as_u32[3];
+  a->ports.as_ports[i].as_u32 = tcp->ports.src_and_dst;
+}
+
+always_inline void
+ip6_tcp_udp_address_x4_copy_and_invalidate (ip6_tcp_udp_address_x4_t * dst,
+					    ip6_tcp_udp_address_x4_t * src,
+					    u32 dst_i, u32 src_i)
+{
+#define _(d,s) d = s; s = 0;
+  _ (dst->src.as_u32[0][dst_i], src->src.as_u32[0][src_i]);
+  _ (dst->src.as_u32[1][dst_i], src->src.as_u32[1][src_i]);
+  _ (dst->src.as_u32[2][dst_i], src->src.as_u32[2][src_i]);
+  _ (dst->src.as_u32[3][dst_i], src->src.as_u32[3][src_i]);
+  _ (dst->dst.as_u32[0][dst_i], src->dst.as_u32[0][src_i]);
+  _ (dst->dst.as_u32[1][dst_i], src->dst.as_u32[1][src_i]);
+  _ (dst->dst.as_u32[2][dst_i], src->dst.as_u32[2][src_i]);
+  _ (dst->dst.as_u32[3][dst_i], src->dst.as_u32[3][src_i]);
+  _ (dst->ports.as_ports[dst_i].as_u32, src->ports.as_ports[src_i].as_u32);
+#undef _
+}
+
+always_inline void
+ip6_tcp_udp_address_x4_invalidate (ip6_tcp_udp_address_x4_t * a,
+				   u32 i)
+{
+  a->src.as_u32[0][i] = 0;
+  a->src.as_u32[1][i] = 0;
+  a->src.as_u32[2][i] = 0;
+  a->src.as_u32[3][i] = 0;
+  a->dst.as_u32[0][i] = 0;
+  a->dst.as_u32[1][i] = 0;
+  a->dst.as_u32[2][i] = 0;
+  a->dst.as_u32[3][i] = 0;
+  a->ports.as_ports[i].as_u32 = 0;
+}
+
+always_inline uword
+ip6_tcp_udp_address_x4_match_helper (ip6_tcp_udp_address_x4_t * ax4,
+				     u32x4 src0, u32x4 src1, u32x4 src2, u32x4 src3,
+				     u32x4 dst0, u32x4 dst1, u32x4 dst2, u32x4 dst3,
+				     u32x4 ports)
+{
+  u32x4 r;
+  u32 m;
+
+  r = u32x4_is_equal (src0, ax4->src.as_u32x4[0]);
+  r &= u32x4_is_equal (src1, ax4->src.as_u32x4[1]);
+  r &= u32x4_is_equal (src2, ax4->src.as_u32x4[2]);
+  r &= u32x4_is_equal (src3, ax4->src.as_u32x4[3]);
+  r &= u32x4_is_equal (dst0, ax4->dst.as_u32x4[0]);
+  r &= u32x4_is_equal (dst1, ax4->dst.as_u32x4[1]);
+  r &= u32x4_is_equal (dst2, ax4->dst.as_u32x4[2]);
+  r &= u32x4_is_equal (dst3, ax4->dst.as_u32x4[3]);
+  r &= u32x4_is_equal (ports, ax4->ports.as_u32x4);
+
+  /* At this point r will be either all zeros (if nothing matched)
+     or have 32 1s in the position that did match. */
+  m = u8x16_compare_byte_mask ((u8x16) r);
+
+  return m;
+}
+
+always_inline uword
+ip6_tcp_udp_address_x4_match (ip6_tcp_udp_address_x4_t * ax4,
+			      ip6_header_t * ip,
+			      tcp_header_t * tcp)
+{
+  u32x4 src0 = u32x4_splat (ip->src_address.as_u32[0]);
+  u32x4 src1 = u32x4_splat (ip->src_address.as_u32[1]);
+  u32x4 src2 = u32x4_splat (ip->src_address.as_u32[2]);
+  u32x4 src3 = u32x4_splat (ip->src_address.as_u32[3]);
+  u32x4 dst0 = u32x4_splat (ip->dst_address.as_u32[0]);
+  u32x4 dst1 = u32x4_splat (ip->dst_address.as_u32[1]);
+  u32x4 dst2 = u32x4_splat (ip->dst_address.as_u32[2]);
+  u32x4 dst3 = u32x4_splat (ip->dst_address.as_u32[3]);
+  u32x4 ports = u32x4_splat (tcp->ports.src_and_dst);
+  return my_first_set (ip6_tcp_udp_address_x4_match_helper (ax4,
+							    src0, src1, src2, src3,
+							    dst0, dst1, dst2, dst3,
+							    ports));
+}
+
+always_inline uword
+ip6_tcp_udp_address_x4_first_empty (ip6_tcp_udp_address_x4_t * ax4)
+{
+  u32x4 zero = {0};
+  return my_first_set (ip6_tcp_udp_address_x4_match_helper (ax4,
+							    zero, zero, zero, zero,
+							    zero, zero, zero, zero,
+							    zero));
+}
+
+always_inline uword
+ip6_tcp_udp_address_x4_empty_mask (ip6_tcp_udp_address_x4_t * ax4)
+{
+  u32x4 zero = {0};
+  return my_zero_mask (ip6_tcp_udp_address_x4_match_helper (ax4,
+							    zero, zero, zero, zero,
+							    zero, zero, zero, zero,
+							    zero));
+}
+
+#define foreach_tcp_timer			\
+  /* Used to rank mini connections. */		\
+  _ (mini_connection, 10e-3)			\
+  /* Used for timestamps. */			\
+  _ (timestamp, 1e-6)
+
+typedef enum {
+#define _(f,s) TCP_TIMER_##f,
+  foreach_tcp_timer
+#undef _
+  TCP_N_TIMER,
+} tcp_timer_type_t;
+
+always_inline u32
+find_oldest_timestamp_x4 (u32 * time_stamps)
+{
+  u32 i0, i1;
+  i0 = time_stamps[0] < time_stamps[1] ? 0 : 1;
+  i1 = time_stamps[2] < time_stamps[3] ? 2 : 3;
+  i0 = time_stamps[i0] < time_stamps[i1] ? i0 : i1;
+  return i0;
+}
+
+typedef struct {
+  ip4_tcp_udp_address_x4_t address_x4;
+  u32 time_stamps[4];
+} ip4_tcp_udp_address_x4_and_timestamps_t;
+
+typedef struct {
+  ip6_tcp_udp_address_x4_t address_x4;
+  u32 time_stamps[4];
+} ip6_tcp_udp_address_x4_and_timestamps_t;
+
+#define foreach_tcp_connection_state					\
+  /* unused */								\
+  _ (unused)								\
+  /* Sent SYN-ACK waiting for ACK if he ever feels like sending one. */	\
+  _ (listen_ack_wait)							\
+  /* Sent SYN waiting for ACK or RST. */				\
+  _ (connecting)							\
+  /* Sent FIN after he sent FIN waiting for final ACK. */		\
+  _ (closing)								\
+  /* Pseudo-type for established connections. */			\
+  _ (established)
+
+typedef enum {
+#define _(f) TCP_CONNECTION_STATE_##f,
+  foreach_tcp_connection_state
+#undef _
+  TCP_N_CONNECTION_STATE,
+} tcp_connection_state_t;
+
+typedef struct {
+  u32 his, ours;
+} tcp_sequence_pair_t;
+
+/* Kept small to fight off syn flood attacks. */
+typedef struct {
+  tcp_sequence_pair_t sequence_numbers;
+
+  /* Time stamps saved from options. */
+  u32 my_time_stamp, his_time_stamp;
+
+  /* segment size and window scale (saved from options
+     or set to defaults). */
+  u16 max_segment_size;
+
+  u8 window_scale;
+
+  tcp_connection_state_t state : 8;
+} tcp_mini_connection_t;
+
+typedef struct {
+  tcp_sequence_pair_t sequence_numbers;
+
+  u32 listener_opaque;
+
+  /* segment size and window scale (saved from options
+     or set to defaults). */
+  u16 max_segment_size;
+
+  u8 window_scale;
+
+  u8 unused;
+
+  u16 window;
+} tcp_established_connection_t;
+
+typedef struct {
+  u8 log2_n_mini_connection_hash_elts;
+  u8 log2_n_established_connection_hash_elts;
+  u8 is_ip6;
+
+  u32 mini_connection_hash_mask;
+  u32 established_connection_hash_mask;
+
+  uword * establed_connection_overflow_hash;
+
+  tcp_mini_connection_t * mini_connections;
+
+  tcp_established_connection_t * established_connections;
+
+  /* Default valid_local_adjacency_bitmap for listeners who want to listen
+     for a given port in on all interfaces. */
+  uword * default_valid_local_adjacency_bitmap;
+} ip46_tcp_main_t;
+
+typedef enum {
+  /* Received a SYN-ACK after sending a SYN to connect. */
+  TCP_LISTEN_CONNECTION_ESTABLISHED,
+  /* Received a reset (RST) after sending a SYN to connect. */
+  TCP_LISTEN_CONNECT_FAILED,
+  /* Received a end-of-file (FIN) from an established connection. */ 
+  TCP_LISTEN_EOF,
+  /* Received a reset RST from an established connection. */
+  TCP_LISTEN_RESET,
+} tcp_listen_event_type_t;
+
+typedef struct tcp_udp_listener_t {
+  /* Bitmap indicating which of local (interface) addresses
      we should listen on for this destination port. */
-  u64 valid_local_adjacency_bitmap;
-
-  u32 flags;
-#define IP4_TCP_UDP_LISTENER_IS_UDP (1 << 0)
+  uword * valid_local_adjacency_bitmap;
 
   /* Destination tcp/udp port to listen for connections. */
   u16 dst_port;
 
-  /* Next index relative to {tcp4,udp4}-lookup for packets
-     matching dst port but not yet having a connection. */
   u16 next_index;
 
-  /* User's per-listener data follows.
-     Should be aligned to 64 bytes. */
-  u8 user_data[64
-	       - 1*sizeof (u64)
-	       - 1*sizeof (u32)
-	       - 2*sizeof (u16)];
-} ip4_tcp_udp_listener_t;
+  u32 flags;
+#define TCP_LISTENER_FLAG_ENABLE_IP4 (1 << 0)
+#define TCP_LISTENER_FLAG_ENABLE_IP6 (1 << 1)
+
+  /* Buffers for which event in event_function applies to. */
+  u32 * event_buffers;
+
+  void (* event_function) (struct tcp_udp_listener_t * l,
+			   tcp_listen_event_type_t event_type);
+} tcp_listener_t;
 
 typedef struct {
-  vlib_main_t * vlib_main;
+  u8 next, error;
+} tcp_lookup_disposition_t;
 
-  /* Node index for lookup e.g. udp4-lookup. */
-  u32 node_index;
+typedef struct {
+  ip46_tcp_main_t ip4, ip6;
 
-  ip4_tcp_udp_connection_t * connection_pool;
+  /* Array of non-established connections, but soon-to be established connections. */
+  ip4_tcp_udp_address_x4_and_timestamps_t * ip4_mini_connection_address_hash;
+  ip6_tcp_udp_address_x4_and_timestamps_t * ip6_mini_connection_address_hash;
 
-  ip4_tcp_udp_listener_t * listener_pool;
+  /* Vector of size log2_n_established_connection_hash_elts plus overflow. */
+  ip4_tcp_udp_address_x4_t * ip4_established_connection_address_hash;
+  ip6_tcp_udp_address_x4_t * ip6_established_connection_address_hash;
+
+  /* Jenkins hash seeds for various hash tables. */
+  u32x4_union_t connection_hash_seeds[2][3];
+  u32x4_union_t connection_hash_masks[2];
+
+  /* Pool of listeners. */
+  tcp_listener_t * listener_pool;
 
   /* Table mapping destination port to listener index. */
   u16 * listener_index_by_dst_port;
 
-  /* Packet/byte counters for each live connection. */
-  vlib_combined_counter_main_t * connection_counters;
+  tcp_lookup_disposition_t disposition_by_state_and_flags[TCP_N_CONNECTION_STATE][64];
 
-  /* Jenkins hash seeds for connection hash lookup. */
-  u32 hash_seeds[3];
+  u8 log2_clocks_per_tick[TCP_N_TIMER];
 
-  /* Hash table mapping connection address to index into connection pool. */
-  uword * connection_index_by_address;
-} ip4_tcp_udp_lookup_main_t;
+  /* Holds pointers to default and per-packet TCP options while
+     parsing a TCP packet's options. */
+  tcp_mini_connection_t option_decode_mini_connection_template;
+} tcp_main_t;
+
+always_inline u32
+tcp_time_now (tcp_main_t * tm, tcp_timer_type_t t)
+{
+  ASSERT (t < ARRAY_LEN (tm->log2_clocks_per_tick));
+  return clib_cpu_time_now () >> tm->log2_clocks_per_tick[t];
+}
+
+static void
+tcp_time_init (vlib_main_t * vm, tcp_main_t * tm)
+{
+  int i;
+  f64 log2 = .69314718055994530941;
+
+  for (i = 0; i < ARRAY_LEN (tm->log2_clocks_per_tick); i++)
+    {
+      static f64 t[] = {
+#define _(f,r) r,
+	foreach_tcp_timer
+#undef _
+      };
+      tm->log2_clocks_per_tick[i] =
+	flt_round_nearest (log (t[i] / vm->clib_time.seconds_per_clock) / log2);
+    }
+}
+
+tcp_main_t tcp_main;
 
 typedef enum {
-  IP4_LOOKUP_TCP, IP4_LOOKUP_UDP,
-} ip4_lookup_tcp_or_udp_t;
-
-/* One for TCP; one for UDP. */
-static ip4_tcp_udp_lookup_main_t ip4_tcp_udp_lookup_mains[2];
-
-static inline ip4_tcp_udp_lookup_main_t *
-ip4_tcp_udp_main_for_connection (ip4_tcp_udp_connection_t * c)
-{
-  return ip4_tcp_udp_lookup_mains
-    + ((c->header.flags & IP4_TCP_UDP_CONNECTION_IS_UDP)
-       ? IP4_LOOKUP_UDP : IP4_LOOKUP_TCP);
-}
-
-static inline ip4_tcp_udp_lookup_main_t *
-ip4_tcp_udp_main_for_listener (ip4_tcp_udp_listener_t * l)
-{
-  return ip4_tcp_udp_lookup_mains
-    + ((l->flags & IP4_TCP_UDP_LISTENER_IS_UDP)
-       ? IP4_LOOKUP_UDP : IP4_LOOKUP_TCP);
-}
-
-static inline u32
-ip4_tcp_udp_new_connection (ip4_lookup_tcp_or_udp_t tu, ip4_header_t * ip)
-{
-  ip4_tcp_udp_lookup_main_t * lm = ip4_tcp_udp_lookup_mains + tu;
-  ip4_tcp_udp_connection_t * c;
-  u32 ci;
-
-  pool_get_aligned (lm->connection_pool, c, CLIB_CACHE_LINE_BYTES);
-  ci = c - lm->connection_pool;
-
-  ip4_tcp_udp_address_from_header (&c->address, ip);
-  hash_set (lm->connection_index_by_address, 1 + 2*ci, ci);
-
-  return ci;
-}
-
-static u8 * format_ip4_tcp_udp_connection (u8 * s, va_list * args)
-{
-  ip4_tcp_udp_lookup_main_t * lm;
-  ip4_tcp_udp_connection_t * c = va_arg (*args, ip4_tcp_udp_connection_t *);
-
-  lm = ip4_tcp_udp_main_for_connection (c);
-
-  s = format (s, "%U, next %U",
-	      format_ip4_tcp_udp_address, &c->address,
-	      format_vlib_node_name, lm->vlib_main, lm->node_index, c->header.next_index);
-	      
-  if (c->header.n_bytes_pending > 0)
-    /* FIXME */;
-
-  return s;
-}
-
-static u8 * format_ip4_tcp_udp_listener (u8 * s, va_list * args)
-{
-  ip4_tcp_udp_lookup_main_t * lm;
-  ip4_tcp_udp_listener_t * l = va_arg (*args, ip4_tcp_udp_listener_t *);
-
-  lm = ip4_tcp_udp_main_for_listener (l);
-
-  s = format (s, "port %d -> %U",
-	      l->dst_port,
-	      format_vlib_next_node_name,
-	        lm->vlib_main, lm->node_index, l->next_index);
-
-  return s;
-}
+  TCP_LOOKUP_NEXT_DROP,
+  TCP_LOOKUP_NEXT_PUNT,
+  TCP_LOOKUP_NEXT_LISTEN_SYN,
+  TCP_LOOKUP_NEXT_LISTEN_ACK,
+  TCP_LOOKUP_NEXT_CONNECT_SYN_ACK,
+  TCP_LOOKUP_NEXT_ESTABLISHED,
+  TCP_LOOKUP_N_NEXT,
+} tcp_lookup_next_t;
 
 typedef struct {
-  u32 connection_index;
-  u16 is_udp;
-  u16 listener_index;
-} ip4_tcp_udp_lookup_trace_t;
+  /* Adjacency from src address lookup.  We'll use this to avoid
+     having to perform lookup again for replies. */
+  u32 src_adj_index;
 
-static u8 * format_ip4_tcp_udp_lookup_trace (u8 * s, va_list * va)
-{
-  UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
-  UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
-  ip4_tcp_udp_lookup_trace_t * t = va_arg (*va, ip4_tcp_udp_lookup_trace_t *);
-  ip4_tcp_udp_lookup_main_t * lm;
-  ip4_tcp_udp_listener_t * l;
-  uword indent;
+  u32 listener_index;
 
-  lm = ip4_tcp_udp_lookup_mains + (t->is_udp
-				   ? IP4_LOOKUP_UDP : IP4_LOOKUP_TCP);
-  l = pool_elt_at_index (lm->listener_pool, t->listener_index);
+  u32 established_connection_index;
 
-  indent = format_get_indent (s);
+  u32 mini_connection_index;
+} tcp_udp_lookup_buffer_opaque_t;
 
-  if (t->listener_index != 0)
-    s = format (s, "listener: %U",
-		format_ip4_tcp_udp_listener, l,
-		format_white_space, indent);
-  else
-    s = format (s, "no listener");
-
-  if (t->connection_index != 0)
-    {
-      ip4_tcp_udp_connection_t * c;
-      c = pool_elt_at_index (lm->connection_pool, t->connection_index);
-      s = format (s, "\n%Uconnection: %U",
-		  format_white_space, indent,
-		  format_ip4_tcp_udp_connection, c);
-    }
-
-  return s;
-}
+#define foreach_tcp_error						\
+  _ (NONE, "no error")							\
+  _ (LOOKUP_DROPS, "lookup drops")					\
+  _ (LISTEN_RESPONSES, "listen responses sent")				\
+  _ (CONNECTS_SENT, "connects sent")					\
+  _ (LISTENS_ESTABLISHED, "listens connected")				\
+  _ (CONNECTS_ESTABLISHED, "connects established")			\
+  _ (NO_LISTENER_FOR_PORT, "no listener for port")			\
+  _ (WRONG_LOCAL_ADDRESS_FOR_PORT, "wrong local address for port")
 
 typedef enum {
-  TCP_UDP_LOOKUP_NEXT_ERROR,
-  TCP_UDP_LOOKUP_N_NEXT,
-} tcp_udp_lookup_next_t;
+#define _(sym,str) TCP_ERROR_##sym,
+  foreach_tcp_error
+#undef _
+  TCP_N_ERROR,
+} tcp_error_t;
+
+always_inline u32x4 u32x4_splat_x2 (u32 x)
+{
+  u32x4 r = u32x4_set0 (x);
+  return u32x4_interleave_lo (r, r);
+}
+
+always_inline u32x4 u32x4_set_x2 (u32 x, u32 y)
+{
+  u32x4 r0 = u32x4_set0 (x);
+  u32x4 r1 = u32x4_set0 (y);
+  return u32x4_interleave_lo (r0, r1);
+}
+
+#define u32x4_get(x,i)					\
+  __builtin_ia32_vec_ext_v4si ((i32x4) (x), (int) (i))
 
 /* Dispatching on tcp/udp listeners (by dst port)
    and tcp/udp connections (by src/dst address/port). */
-static uword
-ip4_tcp_udp_lookup (vlib_main_t * vm,
-		    vlib_node_runtime_t * node,
-		    vlib_frame_t * frame,
-		    int is_udp)
+always_inline uword
+ip46_tcp_lookup (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame,
+		 uword is_ip6)
 {
   ip_lookup_main_t * im = &ip4_main.lookup_main;
-  ip4_tcp_udp_lookup_main_t * lm;
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
   u32 n_left_from, n_left_to_next, next;
-  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip4_input_node.index);
-  vlib_error_t unknown_port_error;
-
-  lm = ip4_tcp_udp_lookup_mains + (is_udp ? IP4_LOOKUP_UDP : IP4_LOOKUP_TCP);
-
-  unknown_port_error = error_node->errors[is_udp ? IP4_ERROR_UNKNOWN_UDP_PORT : IP4_ERROR_UNKNOWN_TCP_PORT];
+  vlib_node_runtime_t * error_node = node;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
@@ -291,13 +673,18 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip_adjacency_t * adj0;
-	  ip_local_buffer_opaque_t * pi0;
-	  ip4_tcp_udp_connection_t * c0;
-	  ip4_tcp_udp_listener_t * l0;
-	  ip4_header_t * ip0;
+	  union {
+	    ip_buffer_opaque_t ip;
+	    tcp_udp_lookup_buffer_opaque_t tcp_udp;
+	  } * pi0;
+	  ip6_header_t * ip60;
+	  ip4_header_t * ip40;
 	  tcp_header_t * tcp0;
-	  u32 bi0, ci0, li0, i0, next0, listener_is_valid0;
-	  uword * pci0;
+	  u32 bi0, imin0, iest0, li0, tcp_data_length0;
+	  tcp_connection_state_t state0;
+	  u8 error0, next0;
+	  u8 min_match0, est_match0, is_min_match0, is_est_match0;
+	  u8 min_oldest0, est_first_empty0;
       
 	  bi0 = to_next[0] = from[0];
 
@@ -309,40 +696,140 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, bi0);
 	  pi0 = vlib_get_buffer_opaque (p0);
 
-	  adj0 = ip_get_adjacency (im, pi0->non_local.dst_adj_index);
+	  adj0 = ip_get_adjacency (im, pi0->ip.dst_adj_index);
 	  ASSERT (adj0->lookup_next_index == IP_LOOKUP_NEXT_LOCAL);
       
-	  ip0 = vlib_buffer_get_current (p0);
-	  tcp0 = ip4_next_header (ip0);
+	  {
+	    u32x4 a0, b0, c0;
 
-	  pci0 = hash_get (lm->connection_index_by_address,
-			   pointer_to_uword (ip0));
-	  ci0 = pci0 ? pci0[0] : 0;
-	  c0 = pool_elt_at_index (lm->connection_pool, ci0);
+	    a0 = tm->connection_hash_seeds[is_ip6][0].as_u32x4;
+	    b0 = tm->connection_hash_seeds[is_ip6][1].as_u32x4;
+	    c0 = tm->connection_hash_seeds[is_ip6][2].as_u32x4;
 
-	  li0 = lm->listener_index_by_dst_port[tcp0->ports.dst];
-	  l0 = pool_elt_at_index (lm->listener_pool, li0);
+	    if (is_ip6)
+	      {
+		ip60 = vlib_buffer_get_current (p0);
+		tcp0 = ip6_next_header (ip60);
 
-	  /* FIXME make it a clib bitmap. */
-	  listener_is_valid0 =
-	    (adj0->if_address_index < BITS (l0->valid_local_adjacency_bitmap)
-	     && ((l0->valid_local_adjacency_bitmap >> adj0->if_address_index) & 1));
+		a0 ^= u32x4_splat_x2 (ip60->src_address.as_u32[0]);
+		b0 ^= u32x4_splat_x2 (ip60->src_address.as_u32[1]);
+		c0 ^= u32x4_splat_x2 (ip60->src_address.as_u32[2]);
 
-	  i0 = ci0 ? ci0 : li0;
-	  i0 = listener_is_valid0 ? i0 : unknown_port_error;
+		hash_v3_mix_u32x (a0, b0, c0);
 
-	  next0 = ci0 ? c0->header.next_index : l0->next_index;
+		a0 ^= u32x4_splat_x2 (ip60->src_address.as_u32[3]);
+		b0 ^= u32x4_splat_x2 (ip60->dst_address.as_u32[0]);
+		c0 ^= u32x4_splat_x2 (ip60->dst_address.as_u32[1]);
 
-	  p0->error = i0;
+		hash_v3_mix_u32x (a0, b0, c0);
 
-	  if (PREDICT_FALSE (p0->flags & VLIB_BUFFER_IS_TRACED))
+		a0 ^= u32x4_splat_x2 (ip60->dst_address.as_u32[2]);
+		b0 ^= u32x4_splat_x2 (ip60->dst_address.as_u32[3]);
+		c0 ^= u32x4_splat_x2 (tcp0->ports.src_and_dst);
+	      }
+	    else
+	      {
+		ip40 = vlib_buffer_get_current (p0);
+		tcp0 = ip4_next_header (ip40);
+
+		a0 ^= u32x4_splat_x2 (ip40->src_address.as_u32);
+		b0 ^= u32x4_splat_x2 (ip40->dst_address.as_u32);
+		c0 ^= u32x4_splat_x2 (tcp0->ports.src_and_dst);
+	      }
+
+	    hash_v3_finalize_u32x (a0, b0, c0);
+
+	    c0 &= tm->connection_hash_masks[is_ip6].as_u32x4;
+
+	    imin0 = u32x4_get0 (c0);
+	    iest0 = u32x4_get (c0, 1);
+	  }
+
+	  if (is_ip6)
 	    {
-	      ip4_tcp_udp_lookup_trace_t * t;
-	      t = vlib_add_trace (vm, node, p0, sizeof (t[0]));
-	      t->listener_index = li0;
-	      t->connection_index = ci0;
-	      t->is_udp = is_udp;
+	      ASSERT (0);
 	    }
+	  else
+	    {
+	      ip4_tcp_udp_address_x4_and_timestamps_t * mina0;
+	      ip4_tcp_udp_address_x4_t * esta0;
+
+	      mina0 = vec_elt_at_index (tm->ip4_mini_connection_address_hash, imin0);
+	      esta0 = vec_elt_at_index (tm->ip4_established_connection_address_hash, iest0);
+
+	      min_match0 = ip4_tcp_udp_address_x4_match (&mina0->address_x4, ip40, tcp0);
+	      est_match0 = ip4_tcp_udp_address_x4_match (esta0, ip40, tcp0);
+
+	      min_oldest0 = find_oldest_timestamp_x4 (mina0->time_stamps);
+	      est_first_empty0 = ip4_tcp_udp_address_x4_first_empty (esta0);
+
+	      if (PREDICT_FALSE (est_first_empty0 >= 4))
+		{
+		  /* Lookup in overflow hash. */
+		  ASSERT (0);
+		}
+
+	      tcp_data_length0 = (clib_net_to_host_u16 (ip40->length)
+				  - ip4_header_bytes (ip40)
+				  - tcp_header_bytes (tcp0));
+	    }
+
+	  is_min_match0 = min_match0 < 4;
+	  is_est_match0 = est_match0 < 4;
+
+	  imin0 = 4 * imin0 + (is_min_match0 ? min_match0 : min_oldest0);
+	  iest0 = 4 * iest0 + (is_est_match0 ? est_match0 : est_first_empty0);
+
+	  /* Should simultaneously not match both in mini and established connection tables. */
+	  ASSERT (! (is_min_match0 && is_est_match0));
+
+	  {
+	    tcp_mini_connection_t * min0;
+	    tcp_established_connection_t * est0;
+	    tcp_sequence_pair_t * seq_pair0;
+	    u8 flags0, seq_ok_flag0, ack_ok_flag0;
+
+	    min0 = vec_elt_at_index (tm46->mini_connections, imin0);
+	    est0 = vec_elt_at_index (tm46->established_connections, iest0);
+
+	    if (min_match0 < 4)
+	      {
+		ASSERT (min0->state != TCP_CONNECTION_STATE_unused);
+		ASSERT (min0->state != TCP_CONNECTION_STATE_established);
+	      }
+
+	    seq_pair0 = is_min_match0 ? &min0->sequence_numbers : &est0->sequence_numbers;
+
+	    state0 = is_min_match0 ? min0->state : TCP_CONNECTION_STATE_unused;
+	    state0 = is_est_match0 ? TCP_CONNECTION_STATE_established : state0;
+
+	    pi0->tcp_udp.established_connection_index = iest0;
+	    pi0->tcp_udp.mini_connection_index = imin0;
+	    pi0->tcp_udp.listener_index = li0 = tm->listener_index_by_dst_port[tcp0->ports.dst];
+
+	    flags0 = tcp0->flags & (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
+
+#define TCP_LOOKUP_TCP_FLAG_SEQ_OK TCP_FLAG_PSH
+#define TCP_LOOKUP_TCP_FLAG_ACK_OK TCP_FLAG_URG
+#define TCP_LOOKUP_TCP_FLAG_SEQ_ACK_OK (TCP_LOOKUP_TCP_FLAG_SEQ_OK | TCP_LOOKUP_TCP_FLAG_ACK_OK)
+	    seq_ok_flag0 = (clib_net_to_host_u32 (tcp0->seq_number)
+			    == seq_pair0->his + tcp_data_length0
+			    ? TCP_LOOKUP_TCP_FLAG_SEQ_OK
+			    : 0);
+	    ack_ok_flag0 = (clib_net_to_host_u32 (tcp0->ack_number) == seq_pair0->ours
+			    ? TCP_LOOKUP_TCP_FLAG_ACK_OK
+			    : 0);
+
+	    flags0 |= seq_ok_flag0 | ack_ok_flag0;
+
+	    next0 = tm->disposition_by_state_and_flags[state0][flags0].next;
+	    error0 = tm->disposition_by_state_and_flags[state0][flags0].error;
+
+	    next0 = li0 != 0 ? next0 : TCP_LOOKUP_NEXT_PUNT;
+	    error0 = li0 != 0 ? error0 : TCP_ERROR_NO_LISTENER_FOR_PORT;
+	  }
+
+	  p0->error = error_node->errors[error0];
 
 	  if (PREDICT_FALSE (next0 != next))
 	    {
@@ -369,93 +856,1298 @@ ip4_tcp_udp_lookup (vlib_main_t * vm,
 }
 
 static uword
-tcp4_lookup (vlib_main_t * vm,
-	     vlib_node_runtime_t * node,
-	     vlib_frame_t * frame)
-{ return ip4_tcp_udp_lookup (vm, node, frame, /* is_udp */ 0); }
+ip4_tcp_lookup (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_lookup (vm, node, frame, /* is_ip6 */ 0); }
 
 static uword
-udp4_lookup (vlib_main_t * vm,
-	     vlib_node_runtime_t * node,
-	     vlib_frame_t * frame)
-{ return ip4_tcp_udp_lookup (vm, node, frame, /* is_udp */ 1); }
+ip6_tcp_lookup (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_lookup (vm, node, frame, /* is_ip6 */ 1); }
 
-static VLIB_REGISTER_NODE (tcp4_lookup_node) = {
-  .function = tcp4_lookup,
-  .name = "tcp4-lookup",
-
-  .vector_size = sizeof (u32),
-
-  .format_trace = format_ip4_tcp_udp_lookup_trace,
-
-  .n_next_nodes = TCP_UDP_LOOKUP_N_NEXT,
-  .next_nodes = {
-    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-punt",
-  },
-};
-
-static VLIB_REGISTER_NODE (udp4_lookup_node) = {
-  .function = udp4_lookup,
-  .name = "udp4-lookup",
-
-  .vector_size = sizeof (u32),
-
-  .format_trace = format_ip4_tcp_udp_lookup_trace,
-
-  .n_next_nodes = TCP_UDP_LOOKUP_N_NEXT,
-  .next_nodes = {
-    [TCP_UDP_LOOKUP_NEXT_ERROR] = "error-punt",
-  },
-};
-
-static inline ip4_tcp_udp_address_t *
-ip4_tcp_udp_key_to_address (ip4_tcp_udp_lookup_main_t * lm,
-			    ip4_tcp_udp_address_t * a,
-			    uword key)
+static void
+ip46_size_hash_tables (ip46_tcp_main_t * m)
 {
-  ip4_tcp_udp_connection_t * c;
+  m->mini_connection_hash_mask = pow2_mask (m->log2_n_mini_connection_hash_elts);
+  vec_validate_aligned (m->mini_connections,
+			m->mini_connection_hash_mask,
+			CLIB_CACHE_LINE_BYTES);
 
-  if (key & 1)
+  m->established_connection_hash_mask = pow2_mask (m->log2_n_established_connection_hash_elts);
+  vec_validate_aligned (m->established_connections,
+			m->established_connection_hash_mask,
+			CLIB_CACHE_LINE_BYTES);
+}
+
+static void
+ip46_tcp_lookup_init (vlib_main_t * vm, tcp_main_t * tm, int is_ip6)
+{
+  ip46_tcp_main_t * m = is_ip6 ? &tm->ip6 : &tm->ip4;
+
+  m->is_ip6 = is_ip6;
+
+  m->log2_n_mini_connection_hash_elts = 8;
+  m->log2_n_established_connection_hash_elts = 8;
+  ip46_size_hash_tables (m);
+
+  if (is_ip6)
     {
-      c = pool_elt_at_index (lm->connection_pool, key / 2);
-      a = &c->address;
+      vec_validate_aligned (tm->ip6_mini_connection_address_hash,
+			    m->mini_connection_hash_mask / 4,
+			    CLIB_CACHE_LINE_BYTES);
+      vec_validate_aligned (tm->ip6_established_connection_address_hash,
+			    m->established_connection_hash_mask / 4,
+			    CLIB_CACHE_LINE_BYTES);
     }
   else
-    {    
-      ip4_header_t * ip = uword_to_pointer (key, ip4_header_t *);
-      ip4_tcp_udp_address_from_header (a, ip);
-    }				     
-
-  return a;
+    {
+      vec_validate_aligned (tm->ip4_mini_connection_address_hash,
+			    m->mini_connection_hash_mask / 4,
+			    CLIB_CACHE_LINE_BYTES);
+      vec_validate_aligned (tm->ip4_established_connection_address_hash,
+			    m->established_connection_hash_mask / 4,
+			    CLIB_CACHE_LINE_BYTES);
+    }
+  tm->connection_hash_masks[is_ip6].as_u32x4 =
+    u32x4_set_x2 (m->mini_connection_hash_mask / 4,
+		  m->established_connection_hash_mask / 4);
 }
+
+static void
+tcp_lookup_init (vlib_main_t * vm, tcp_main_t * tm)
+{
+  int is_ip6;
+
+  /* Initialize hash seeds. */
+  for (is_ip6 = 0; is_ip6 < 2; is_ip6++)
+    {
+      u32 * r = clib_random_buffer_get_data (&vm->random_buffer, 3 * 2 * sizeof (r[0]));
+      tm->connection_hash_seeds[is_ip6][0].as_u32x4 = u32x4_set_x2 (r[0], r[1]);
+      tm->connection_hash_seeds[is_ip6][1].as_u32x4 = u32x4_set_x2 (r[2], r[3]);
+      tm->connection_hash_seeds[is_ip6][2].as_u32x4 = u32x4_set_x2 (r[4], r[5]);
+
+      ip46_tcp_lookup_init (vm, tm, is_ip6);
+    }
+
+  {
+    tcp_listener_t * l;
+
+    pool_get_aligned (tm->listener_pool, l, CLIB_CACHE_LINE_BYTES);
+
+    /* Null listener must always have zero index. */
+    ASSERT (l - tm->listener_pool == 0);
+
+    memset (l, 0xff, sizeof (l[0]));
+
+    /* No adjacencies are valid. */
+    l->valid_local_adjacency_bitmap = 0;
+
+    vec_validate_init_empty (tm->listener_index_by_dst_port,
+			     (1 << 16) - 1,
+			     l - tm->listener_pool);
+  }
+
+  /* Initialize disposition table. */
+  {
+    int i, j;
+    for (i = 0; i < ARRAY_LEN (tm->disposition_by_state_and_flags); i++)
+      for (j = 0; j < ARRAY_LEN (tm->disposition_by_state_and_flags[i]); j++)
+	{
+	  tm->disposition_by_state_and_flags[i][j].next = TCP_LOOKUP_NEXT_DROP;
+	  tm->disposition_by_state_and_flags[i][j].error = TCP_ERROR_LOOKUP_DROPS;
+	}
+
+#define _(t,f,n,e)							\
+do {									\
+    tm->disposition_by_state_and_flags[TCP_CONNECTION_STATE_##t][f].next = (n);	\
+    tm->disposition_by_state_and_flags[TCP_CONNECTION_STATE_##t][f].error = (e); \
+} while (0)
+
+    /* SYNs for new connections -> tcp-listen. */
+    _ (unused, TCP_FLAG_SYN | 0*TCP_LOOKUP_TCP_FLAG_SEQ_OK | 0*TCP_LOOKUP_TCP_FLAG_ACK_OK,
+       TCP_LOOKUP_NEXT_LISTEN_SYN, TCP_ERROR_NONE);
+    _ (unused, TCP_FLAG_SYN | 1*TCP_LOOKUP_TCP_FLAG_SEQ_OK | 0*TCP_LOOKUP_TCP_FLAG_ACK_OK,
+       TCP_LOOKUP_NEXT_LISTEN_SYN, TCP_ERROR_NONE);
+    _ (unused, TCP_FLAG_SYN | 0*TCP_LOOKUP_TCP_FLAG_SEQ_OK | 1*TCP_LOOKUP_TCP_FLAG_ACK_OK,
+       TCP_LOOKUP_NEXT_LISTEN_SYN, TCP_ERROR_NONE);
+    _ (unused, TCP_FLAG_SYN | 1*TCP_LOOKUP_TCP_FLAG_SEQ_OK | 1*TCP_LOOKUP_TCP_FLAG_ACK_OK,
+       TCP_LOOKUP_NEXT_LISTEN_SYN, TCP_ERROR_NONE);
+
+    _ (listen_ack_wait, TCP_FLAG_ACK | TCP_LOOKUP_TCP_FLAG_SEQ_ACK_OK,
+       TCP_LOOKUP_NEXT_LISTEN_ACK, TCP_ERROR_NONE);
+
+#undef _
+  }
+}
+
+static char * tcp_error_strings[] = {
+#define _(sym,string) string,
+  foreach_tcp_error
+#undef _
+};
+
+static VLIB_REGISTER_NODE (ip4_tcp_lookup_node) = {
+  .function = ip4_tcp_lookup,
+  .name = "ip4-tcp-lookup",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_LOOKUP_N_NEXT,
+  .next_nodes = {
+    [TCP_LOOKUP_NEXT_DROP] = "error-drop",
+    [TCP_LOOKUP_NEXT_PUNT] = "error-punt",
+    [TCP_LOOKUP_NEXT_LISTEN_SYN] = "ip4-tcp-listen",
+    [TCP_LOOKUP_NEXT_LISTEN_ACK] = "ip4-tcp-establish",
+    [TCP_LOOKUP_NEXT_CONNECT_SYN_ACK] = "ip4-tcp-connect",
+    [TCP_LOOKUP_NEXT_ESTABLISHED] = "ip4-tcp-established",
+  },
+
+  .n_errors = TCP_N_ERROR,
+  .error_strings = tcp_error_strings,
+};
+
+static VLIB_REGISTER_NODE (ip6_tcp_lookup_node) = {
+  .function = ip6_tcp_lookup,
+  .name = "ip6-tcp-lookup",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_LOOKUP_N_NEXT,
+  .next_nodes = {
+    [TCP_LOOKUP_NEXT_DROP] = "error-drop",
+    [TCP_LOOKUP_NEXT_PUNT] = "error-punt",
+    [TCP_LOOKUP_NEXT_LISTEN_SYN] = "ip6-tcp-listen",
+    [TCP_LOOKUP_NEXT_LISTEN_ACK] = "ip4-tcp-establish",
+    [TCP_LOOKUP_NEXT_CONNECT_SYN_ACK] = "ip6-tcp-connect",
+    [TCP_LOOKUP_NEXT_ESTABLISHED] = "ip6-tcp-established",
+  },
+
+  .n_errors = TCP_N_ERROR,
+  .error_strings = tcp_error_strings,
+};
+
+always_inline void
+tcp_options_decode (tcp_main_t * tm, tcp_mini_connection_t * m, tcp_header_t * tcp)
+{
+  u8 * o = (void *) (tcp + 1);
+  u32 n_bytes = (tcp->tcp_header_u32s_and_reserved >> 4) * sizeof (u32);
+  u8 * e = o + n_bytes;
+  tcp_mini_connection_t * tmpl = &tm->option_decode_mini_connection_template;
+  tcp_option_type_t t;
+  u8 i, l, * p;
+  u8 * option_decode[16];
+
+  /* Initialize defaults. */
+  option_decode[TCP_OPTION_MSS] = (u8 *) &tmpl->max_segment_size;
+  option_decode[TCP_OPTION_WINDOW_SCALE] = (u8 *) &tmpl->window_scale;
+  option_decode[TCP_OPTION_TIME_STAMP] = (u8 *) &tmpl->his_time_stamp;
+
+#define _							\
+do {								\
+  t = o[0];							\
+  i = t >= ARRAY_LEN (option_decode) ? TCP_OPTION_END : t;	\
+  option_decode[i] = o + 2;					\
+  /* Skip nop; don't skip end; else length from packet. */	\
+  l = t < 2 ? t : o[1];						\
+  p = o + l;							\
+  o = p < e ? p : o;						\
+} while (0)
+
+  _; _; _;
+  /* Fast path: NOP NOP TIMESTAMP. */
+  if (o >= e) goto done;
+  _; _;
+  if (o >= e) goto done;
+  _; _; _;
+ done:
+
+#undef _
+
+  m->max_segment_size =
+    clib_net_to_host_u16 (*(u16 *) option_decode[TCP_OPTION_MSS]);
+  m->window_scale = *option_decode[TCP_OPTION_WINDOW_SCALE];
+  m->his_time_stamp = clib_net_to_host_u32 (((u32 *) option_decode[TCP_OPTION_TIME_STAMP])[0]);
+}
+
+static void
+tcp_options_decode_init (tcp_main_t * tm)
+{
+  tcp_mini_connection_t * m = &tm->option_decode_mini_connection_template;
+
+  memset (m, 0, sizeof (m[0]));
+  m->max_segment_size = clib_host_to_net_u16 (576 - 40);
+  m->window_scale = 0;
+  m->his_time_stamp = 0;
+}
+
+typedef enum {
+  TCP_LISTEN_NEXT_DROP,
+  TCP_LISTEN_NEXT_REPLY,
+  TCP_LISTEN_N_NEXT,
+} tcp_listen_next_t;
+
+always_inline uword
+ip46_tcp_listen (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame,
+		 uword is_ip6)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next, * random_ack_numbers;
+  u32 n_left_from, n_left_to_next, next, mini_now, timestamp_now;
+  u16 * fid, * fragment_ids;
+  vlib_node_runtime_t * error_node;
+
+  error_node = vlib_node_get_runtime
+    (vm, is_ip6 ? ip6_tcp_lookup_node.index : ip4_tcp_lookup_node.index);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = TCP_LISTEN_NEXT_REPLY;
+  mini_now = tcp_time_now (tm, TCP_TIMER_mini_connection);
+  timestamp_now = tcp_time_now (tm, TCP_TIMER_timestamp);
+  
+  random_ack_numbers = clib_random_buffer_get_data (&vm->random_buffer,
+						    n_packets * sizeof (random_ack_numbers[0]));
+  /* Get random fragment IDs for replies. */
+  fid = fragment_ids = clib_random_buffer_get_data (&vm->random_buffer,
+						    n_packets * sizeof (fragment_ids[0]));
+
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  tcp_udp_lookup_buffer_opaque_t * pi0;
+	  ip6_header_t * ip60;
+	  ip4_header_t * ip40;
+	  tcp_header_t * tcp0;
+	  tcp_mini_connection_t * min0;
+	  ip_csum_t sum0;
+	  u32 bi0, imin0, my_seq_net0, his_seq_host0, his_seq_net0;
+	  u8 i0, new_flags0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  pi0 = vlib_get_buffer_opaque (p0);
+
+	  imin0 = pi0->mini_connection_index;
+	  i0 = imin0 % 4;
+
+	  if (is_ip6)
+	    {
+	      ip6_tcp_udp_address_x4_and_timestamps_t * mina0;
+
+	      ip60 = vlib_buffer_get_current (p0);
+	      tcp0 = ip6_next_header (ip60);
+
+	      mina0 = vec_elt_at_index (tm->ip6_mini_connection_address_hash, imin0 / 4);
+
+	      ip6_tcp_udp_address_x4_set_from_headers (&mina0->address_x4,
+						       ip60, tcp0, i0);
+	      mina0->time_stamps[i0] = mini_now;
+	    }
+	  else
+	    {
+	      ip4_tcp_udp_address_x4_and_timestamps_t * mina0;
+
+	      ip40 = vlib_buffer_get_current (p0);
+	      tcp0 = ip4_next_header (ip40);
+
+	      mina0 = vec_elt_at_index (tm->ip4_mini_connection_address_hash, imin0 / 4);
+
+	      ip4_tcp_udp_address_x4_set_from_headers (&mina0->address_x4,
+						       ip40, tcp0, i0);
+	      mina0->time_stamps[i0] = mini_now;
+	    }
+
+	  min0 = vec_elt_at_index (tm46->mini_connections, imin0);
+
+	  min0->state = TCP_CONNECTION_STATE_listen_ack_wait;
+	  min0->my_time_stamp = timestamp_now;
+	  tcp_options_decode (tm, min0, tcp0);
+
+	  my_seq_net0 = *random_ack_numbers++;
+	  his_seq_host0 = 1 + clib_net_to_host_u32 (tcp0->seq_number);
+
+	  min0->sequence_numbers.ours = 1 + clib_net_to_host_u32 (my_seq_net0);
+	  min0->sequence_numbers.his = his_seq_host0;
+
+	  if (is_ip6)
+	    {
+	      ASSERT (0);
+	    }
+	  else
+	    {
+	      /* Reply to TCP SYN with a SYN-ACK. */
+	      ip4_tcp_reply_x1 (ip40, tcp0);
+
+	      sum0 = ip40->checksum;
+
+	      sum0 = ip_csum_update (sum0, ip40->ttl, ip4_main.host_config.ttl,
+				 ip4_header_t, ttl);
+	      ip40->ttl = ip4_main.host_config.ttl;
+
+	      sum0 = ip_csum_update (sum0, ip40->fragment_id, fid[0],
+				     ip4_header_t, fragment_id);
+	      ip40->fragment_id = fid[0];
+	      fid += 1;
+
+	      ip40->checksum = ip_csum_fold (sum0);
+
+	      ASSERT (ip40->checksum == ip4_header_checksum (ip40));
+	    }
+
+	  sum0 = tcp0->checksum;
+
+	  new_flags0 = TCP_FLAG_SYN | TCP_FLAG_ACK;
+	  sum0 = ip_csum_update (sum0, tcp0->flags, new_flags0,
+				 tcp_header_t, flags);
+	  tcp0->flags = new_flags0;
+
+	  his_seq_net0 = clib_host_to_net_u32 (his_seq_host0);
+
+	  sum0 = ip_csum_update (sum0, tcp0->ack_number, his_seq_net0,
+				 tcp_header_t, ack_number);
+	  sum0 = ip_csum_update (sum0, tcp0->seq_number, my_seq_net0,
+				 tcp_header_t, seq_number);
+
+	  tcp0->ack_number = his_seq_net0;
+	  tcp0->seq_number = my_seq_net0;
+
+	  tcp0->checksum = ip_csum_fold (sum0);
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  vlib_error_count (vm, error_node->node_index,
+		    TCP_ERROR_LISTEN_RESPONSES,
+		    frame->n_vectors);
+
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    /* FIXME */ ;
+
+  return frame->n_vectors;
+}
+
+static uword
+ip4_tcp_listen (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_listen (vm, node, frame, /* is_ip6 */ 0); }
+
+static uword
+ip6_tcp_listen (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_listen (vm, node, frame, /* is_ip6 */ 1); }
+
+static VLIB_REGISTER_NODE (ip4_tcp_listen_node) = {
+  .function = ip4_tcp_listen,
+  .name = "ip4-tcp-listen",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_LISTEN_N_NEXT,
+  .next_nodes = {
+    [TCP_LISTEN_NEXT_DROP] = "error-drop",
+    [TCP_LISTEN_NEXT_REPLY] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_tcp_listen_node) = {
+  .function = ip6_tcp_listen,
+  .name = "ip6-tcp-listen",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_LISTEN_N_NEXT,
+  .next_nodes = {
+    [TCP_LISTEN_NEXT_DROP] = "error-drop",
+    [TCP_LISTEN_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+  },
+};
+
+typedef enum {
+  TCP_CONNECT_NEXT_DROP,
+  TCP_CONNECT_NEXT_REPLY,
+  TCP_CONNECT_N_NEXT,
+} tcp_connect_next_t;
+
+always_inline uword
+ip46_tcp_connect (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame,
+		 uword is_ip6)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  vlib_node_runtime_t * error_node;
+
+  error_node = vlib_node_get_runtime
+    (vm, is_ip6 ? ip6_tcp_lookup_node.index : ip4_tcp_lookup_node.index);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip6_header_t * ip60;
+	  ip4_header_t * ip40;
+	  tcp_header_t * tcp0;
+	  u32 bi0;
+	  u8 error0, next0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+
+	  if (is_ip6)
+	    {
+	      ip60 = vlib_buffer_get_current (p0);
+	      tcp0 = ip6_next_header (ip60);
+	    }
+	  else
+	    {
+	      ip40 = vlib_buffer_get_current (p0);
+	      tcp0 = ip4_next_header (ip40);
+	    }
+
+	  ASSERT (0);
+
+	  error0 = next0 = 0;
+	  p0->error = error_node->errors[error0];
+
+	  if (PREDICT_FALSE (next0 != next))
+	    {
+	      to_next -= 1;
+	      n_left_to_next += 1;
+
+	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+
+	      next = next0;
+	      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+	      to_next[0] = bi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	    }
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    /* FIXME */ ;
+
+  return frame->n_vectors;
+}
+
+static uword
+ip4_tcp_connect (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_connect (vm, node, frame, /* is_ip6 */ 0); }
+
+static uword
+ip6_tcp_connect (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_connect (vm, node, frame, /* is_ip6 */ 1); }
+
+static VLIB_REGISTER_NODE (ip4_tcp_connect_node) = {
+  .function = ip4_tcp_connect,
+  .name = "ip4-tcp-connect",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_CONNECT_N_NEXT,
+  .next_nodes = {
+    [TCP_CONNECT_NEXT_DROP] = "error-drop",
+    [TCP_CONNECT_NEXT_REPLY] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_tcp_connect_node) = {
+  .function = ip6_tcp_connect,
+  .name = "ip6-tcp-connect",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_CONNECT_N_NEXT,
+  .next_nodes = {
+    [TCP_CONNECT_NEXT_DROP] = "error-drop",
+    [TCP_CONNECT_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+  },
+};
+
+typedef enum {
+  TCP_ESTABLISH_NEXT_DROP,
+  TCP_ESTABLISH_NEXT_REPLY,
+  TCP_ESTABLISH_N_NEXT,
+} tcp_establish_next_t;
+
+always_inline uword
+ip46_tcp_establish (vlib_main_t * vm,
+		    vlib_node_runtime_t * node,
+		    vlib_frame_t * frame,
+		    uword is_ip6)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  vlib_node_runtime_t * error_node;
+
+  error_node = vlib_node_get_runtime
+    (vm, is_ip6 ? ip6_tcp_lookup_node.index : ip4_tcp_lookup_node.index);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  tcp_udp_lookup_buffer_opaque_t * pi0;
+	  ip6_header_t * ip60;
+	  ip4_header_t * ip40;
+	  tcp_header_t * tcp0;
+	  tcp_mini_connection_t * min0;
+	  tcp_established_connection_t * est0;
+	  u32 bi0, imin0, iest0;
+	  u8 error0, next0, i0, e0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  pi0 = vlib_get_buffer_opaque (p0);
+
+	  imin0 = pi0->mini_connection_index;
+	  iest0 = pi0->established_connection_index;
+
+	  i0 = imin0 % 4;
+	  e0 = iest0 % 4;
+
+	  min0 = vec_elt_at_index (tm46->mini_connections, imin0);
+	  est0 = vec_elt_at_index (tm46->established_connections, iest0);
+
+	  if (is_ip6)
+	    {
+	      ip6_tcp_udp_address_x4_and_timestamps_t * mina0;
+	      ip6_tcp_udp_address_x4_t * esta0;
+
+	      ip60 = vlib_buffer_get_current (p0);
+	      tcp0 = ip6_next_header (ip60);
+
+	      mina0 = vec_elt_at_index (tm->ip6_mini_connection_address_hash, imin0 / 4);
+	      esta0 = vec_elt_at_index (tm->ip6_established_connection_address_hash, iest0 / 4);
+
+	      ip6_tcp_udp_address_x4_copy_and_invalidate (esta0, &mina0->address_x4, e0, i0);
+	    }
+	  else
+	    {
+	      ip4_tcp_udp_address_x4_and_timestamps_t * mina0;
+	      ip4_tcp_udp_address_x4_t * esta0;
+
+	      ip40 = vlib_buffer_get_current (p0);
+	      tcp0 = ip4_next_header (ip40);
+
+	      mina0 = vec_elt_at_index (tm->ip4_mini_connection_address_hash, imin0 / 4);
+	      esta0 = vec_elt_at_index (tm->ip4_established_connection_address_hash, iest0 / 4);
+
+	      ip4_tcp_udp_address_x4_copy_and_invalidate (esta0, &mina0->address_x4, e0, i0);
+	    }
+
+	  min0->state = TCP_CONNECTION_STATE_unused;
+	  est0->sequence_numbers = min0->sequence_numbers;
+	  est0->max_segment_size = min0->max_segment_size;
+	  est0->window_scale = min0->window_scale;
+	  est0->window = clib_net_to_host_u16 (tcp0->window);
+
+	  next0 = TCP_ESTABLISH_NEXT_DROP;
+	  error0 = TCP_ERROR_LISTENS_ESTABLISHED;
+
+	  p0->error = error_node->errors[error0];
+
+	  /* FIXME */
+	  if (PREDICT_FALSE (next0 != next))
+	    {
+	      to_next -= 1;
+	      n_left_to_next += 1;
+
+	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+
+	      next = next0;
+	      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+	      to_next[0] = bi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	    }
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    /* FIXME */ ;
+
+  return frame->n_vectors;
+}
+
+static uword
+ip4_tcp_establish (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_establish (vm, node, frame, /* is_ip6 */ 0); }
+
+static uword
+ip6_tcp_establish (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_establish (vm, node, frame, /* is_ip6 */ 1); }
+
+static VLIB_REGISTER_NODE (ip4_tcp_establish_node) = {
+  .function = ip4_tcp_establish,
+  .name = "ip4-tcp-establish",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_ESTABLISH_N_NEXT,
+  .next_nodes = {
+    [TCP_ESTABLISH_NEXT_DROP] = "error-drop",
+    [TCP_ESTABLISH_NEXT_REPLY] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_tcp_establish_node) = {
+  .function = ip6_tcp_establish,
+  .name = "ip6-tcp-establish",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_ESTABLISH_N_NEXT,
+  .next_nodes = {
+    [TCP_ESTABLISH_NEXT_DROP] = "error-drop",
+    [TCP_ESTABLISH_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+  },
+};
+
+typedef enum {
+  TCP_ESTABLISHED_NEXT_DROP,
+  TCP_ESTABLISHED_NEXT_REPLY,
+  TCP_ESTABLISHED_N_NEXT,
+} tcp_established_next_t;
+
+always_inline uword
+ip46_tcp_established (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame,
+		 uword is_ip6)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  vlib_node_runtime_t * error_node;
+
+  error_node = vlib_node_get_runtime
+    (vm, is_ip6 ? ip6_tcp_lookup_node.index : ip4_tcp_lookup_node.index);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip6_header_t * ip60;
+	  ip4_header_t * ip40;
+	  tcp_header_t * tcp0;
+	  u32 bi0;
+	  u8 error0, next0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+
+	    if (is_ip6)
+	      {
+		ip60 = vlib_buffer_get_current (p0);
+		tcp0 = ip6_next_header (ip60);
+	      }
+	    else
+	      {
+		ip40 = vlib_buffer_get_current (p0);
+		tcp0 = ip4_next_header (ip40);
+	      }
+
+	  ASSERT (0);
+
+	  error0 = next0 = 0;
+	  p0->error = error_node->errors[error0];
+
+	  if (PREDICT_FALSE (next0 != next))
+	    {
+	      to_next -= 1;
+	      n_left_to_next += 1;
+
+	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+
+	      next = next0;
+	      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+	      to_next[0] = bi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	    }
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    /* FIXME */ ;
+
+  return frame->n_vectors;
+}
+
+static uword
+ip4_tcp_established (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_established (vm, node, frame, /* is_ip6 */ 0); }
+
+static uword
+ip6_tcp_established (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_established (vm, node, frame, /* is_ip6 */ 1); }
+
+static VLIB_REGISTER_NODE (ip4_tcp_established_node) = {
+  .function = ip4_tcp_established,
+  .name = "ip4-tcp-established",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_ESTABLISHED_N_NEXT,
+  .next_nodes = {
+    [TCP_ESTABLISHED_NEXT_DROP] = "error-drop",
+    [TCP_ESTABLISHED_NEXT_REPLY] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_tcp_established_node) = {
+  .function = ip6_tcp_established,
+  .name = "ip6-tcp-established",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_ESTABLISHED_N_NEXT,
+  .next_nodes = {
+    [TCP_ESTABLISHED_NEXT_DROP] = "error-drop",
+    [TCP_ESTABLISHED_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+  },
+};
+
+/* FIXME */
+static VLIB_REGISTER_NODE (ip4_udp_lookup_node) = {
+  .function = ip4_tcp_lookup,
+  .name = "ip4-udp-lookup",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = "error-drop",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_udp_lookup_node) = {
+  .function = ip6_tcp_lookup,
+  .name = "ip6-udp-lookup",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = "error-drop",
+  },
+};
+
+#if 0
+/* Kept small to fight off syn flood attacks. */
+typedef struct {
+  /* Sequence number from syn packet. */
+  u32 his_sequence_number;
+
+  /* Ack number we used in syn-ack packet. */
+  u32 my_sequence_number;
+
+  /* Time stamps saved from options. */
+  u32 time_stamps[2];
+
+  /* segment size and window scale (saved from options
+     or set to defaults). */
+  u16 max_segment_size;
+
+  u8 window_scale;
+
+  u8 flags;
+} ip46_tcp_connection_header_t;
+
+typedef struct {
+  /* src/dst address and ports are before. */
+  ip4_tcp_udp_address_t address;
+
+  ip46_tcp_connection_header_t header;
+} ip4_tcp_pre_connection_t;
+
+typedef struct {
+  /* src/dst address and ports are before. */
+  ip6_tcp_udp_address_t address;
+
+  ip46_tcp_connection_header_t header;
+} ip6_tcp_pre_connection_t;
+
+typedef struct {
+  /* ip4_tcp_udp_address_t/ip6_tcp_udp_address_t preceeds header. */
+  ip4_tcp_udp_address_t ip4_address[0];
+  ip6_tcp_udp_address_t ip6_address[0];
+
+  ip46_tcp_connection_header_t header;
+
+  /* Per-listener opaque fields follow. */
+  u8 per_listener_opaque[0];
+} ip46_tcp_connection_t;
+
+typedef struct {
+  /* Pre-connection hash size and mask. */
+  u32 log2_pre_connection_hash_size;
+  u32 pre_connection_hash_mask;
+
+  ip4_tcp_pre_connection_t * ip4_pre_connection_hash;
+  ip6_tcp_pre_connection_t * ip6_pre_connection_hash;
+
+  /* Template for specifying default option values. */
+  ip4_tcp_pre_connection_t ip4_pre_connection_template;
+  ip6_tcp_pre_connection_t ip6_pre_connection_template;
+
+  /* Holds pointers to default and per-packet TCP options while
+     parsing a TCP packet's options. */
+  u8 * option_decode[16];
+  u8 option_decode_lengths[16];
+  tcp_mini_connection_t option_decode_mini_connection_template;
+
+  u8 * connection_heap;
+} tcp_main_t;
+
+always_inline uword
+ip46_tcp_connection_is_ip6 (ip46_tcp_connection_t * c)
+{
+  uword a = pointer_to_uword (c) & 0x3f;
+  ASSERT (a == sizeof (ip4_tcp_udp_address_t)
+	  || a == sizeof (ip6_tcp_udp_address_t));
+  return a == sizeof (ip6_tcp_udp_address_t);
+}
+
+always_inline void *
+ip46_tcp_connection_address (ip46_tcp_connection_t * c)
+{
+  if (ip46_tcp_connection_is_ip6 (c))
+    return (void *) &c->ip6_address[-1];
+  else
+    return (void *) &c->ip4_address[-1];
+}
+
+always_inline ip46_tcp_connection_t *
+ip46_tcp_connection_get (tcp_main_t * tm, u32 c)
+{
+  /* C is a byte offset into connection heap of listener's opaque. */
+  c -= STRUCT_OFFSET_OF (ip46_tcp_connection_t, per_listener_opaque);
+
+  return (void *) heap_elt_at_index (tm->connection_heap, c);
+}
+
+static tcp_main_t tcp_main;
+
+typedef enum {
+  TCP_LISTEN_NEXT_ERROR,
+  TCP_LISTEN_NEXT_NEW_CONNECTION,
+  TCP_LISTEN_NEXT_PRE_CONNECTION,
+  TCP_LISTEN_N_NEXT,
+} tcp_listen_next_t;
+
+static uword
+ip4_tcp_listen (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{
+  ip4_tcp_main_t * tm = &ip4_tcp_main;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, tcp4_lookup_node.index);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  tcp_udp_lookup_buffer_opaque_t * pi0;
+	  ip4_header_t * ip0;
+	  tcp_header_t * tcp0;
+	  ip4_tcp_pre_connection_t * pre0;
+	  u32 bi0, next0, hash0, is_syn0, is_ack0, is_valid0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  pi0 = vlib_get_buffer_opaque (p0);
+
+	  ip0 = vlib_buffer_get_current (p0);
+	  tcp0 = ip4_next_header (ip0);
+
+	  hash0 = pi0->address_hash & tm->pre_connection_hash_mask;
+	  is_valid0 = clib_bitmap_get_no_check
+	    (tm->pre_connection_hash_is_valid, hash0);
+	  pre0 = vec_elt_at_index (tm->pre_connection_hash, hash0);
+
+	  is_syn0 = tcp0->flags == TCP_FLAG_SYN;
+	  is_ack0 = tcp0->flags == TCP_FLAG_ACK;
+
+	  next0 = TCP_LISTEN_NEXT_ERROR;
+
+	  next0 = is_valid0 && is_ack0 ? TCP_LISTEN_NEXT_NEW_CONNECTION : next0;
+	  next0 = ! is_valid0 && is_syn0 ? TCP_LISTEN_NEXT_PRE_CONNECTION : next0;
+
+	  p0->error = error_node->errors[TCP_ERROR_LISTEN_DROP];
+
+	  if (PREDICT_FALSE (next0 != next))
+	    {
+	      to_next -= 1;
+	      n_left_to_next += 1;
+
+	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+
+	      next = next0;
+	      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+	      to_next[0] = bi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	    }
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+static VLIB_REGISTER_NODE (ip4_tcp_listen_node) = {
+  .function = ip4_tcp_listen,
+  .name = "tcp4-listen",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = TCP_LISTEN_N_NEXT,
+  .next_nodes = {
+    [TCP_LISTEN_NEXT_ERROR] = "error-drop",
+    [TCP_LISTEN_NEXT_NEW_CONNECTION] = "tcp4-new-connection",
+    [TCP_LISTEN_NEXT_PRE_CONNECTION] = "tcp4-pre-connection",
+  },
+};
+
+static uword
+ip4_tcp_new_connection (vlib_main_t * vm,
+			vlib_node_runtime_t * node,
+			vlib_frame_t * frame)
+{
+  ip4_tcp_main_t * tm = &ip4_tcp_main;
+  ip4_tcp_udp_lookup_main_t * lm = ip4_tcp_udp_lookup_mains + IP4_LOOKUP_TCP;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, tcp4_lookup_node.index);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = 0;
+  
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  tcp_udp_lookup_buffer_opaque_t * pi0;
+	  ip4_header_t * ip0;
+	  tcp_header_t * tcp0;
+	  ip4_tcp_pre_connection_t * pre0;
+	  u32 bi0, error0, hash0, was_valid0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  pi0 = vlib_get_buffer_opaque (p0);
+
+	  ip0 = vlib_buffer_get_current (p0);
+	  tcp0 = ip4_next_header (ip0);
+
+	  ASSERT (0);
+
+	  hash0 = pi0->address_hash & tm->pre_connection_hash_mask;
+	  was_valid0 = clib_bitmap_set_no_check (tm->pre_connection_hash_is_valid, hash0, 0);
+	  pre0 = vec_elt_at_index (tm->pre_connection_hash, hash0);
+
+	  // l0 = pool_elt_at_index (lm->listener_pool, pi0->listener_index);
+
+	  p0->error = error_node->errors[was_valid0
+					 ? TCP_ERROR_CONNECTIONS_ESTABLISHED
+					 : TCP_ERROR_NEW_CONNECTION_DUPLICATE_ACK];
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+static VLIB_REGISTER_NODE (ip4_tcp_new_connection_node) = {
+  .function = ip4_tcp_new_connection,
+  .name = "tcp4-new-connection",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = "error-drop",
+  },
+};
+
+static uword
+ip4_tcp_pre_connection (vlib_main_t * vm,
+			vlib_node_runtime_t * node,
+			vlib_frame_t * frame)
+{
+  ip4_tcp_main_t * tm = &ip4_tcp_main;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+  u32 * random_ack_numbers;
+  u16 * fid, * fragment_ids;
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  random_ack_numbers = clib_random_buffer_get_data (&vm->random_buffer,
+						    n_packets * sizeof (random_ack_numbers[0]));
+  /* Get random fragment IDs for replies. */
+  fid = fragment_ids = clib_random_buffer_get_data (&vm->random_buffer,
+						    n_packets * sizeof (fragment_ids[0]));
+
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  tcp_udp_lookup_buffer_opaque_t * pi0;
+	  ip4_header_t * ip0;
+	  tcp_header_t * tcp0;
+	  ip4_tcp_pre_connection_t * pre0;
+	  ip_csum_t sum0;
+	  u32 bi0, hash0, my_seq_net0, his_seq_host0, his_seq_net0, new_flags0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  pi0 = vlib_get_buffer_opaque (p0);
+
+	  ip0 = vlib_buffer_get_current (p0);
+	  tcp0 = ip4_next_header (ip0);
+
+	  /* Get pre connection and set valid bit. */
+	  hash0 = pi0->address_hash & tm->pre_connection_hash_mask;
+	  pre0 = vec_elt_at_index (tm->pre_connection_hash, hash0);
+	  clib_bitmap_set_no_check (tm->pre_connection_hash_is_valid, hash0, 1);
+
+	  ip4_tcp_udp_address_from_header2 (&pre0->address, ip0, tcp0);
+
+	  my_seq_net0 = random_ack_numbers[0];
+	  random_ack_numbers += 1;
+	  pre0->my_sequence_number = clib_net_to_host_u32 (my_seq_net0);
+	  his_seq_host0 = 1 + clib_net_to_host_u32 (tcp0->seq_number);
+	  pre0->his_sequence_number = his_seq_host0;
+
+	  ip4_tcp_options_decode (tm, pre0, tcp0);
+
+	  /* Reply to TCP SYN with a SYN-ACK. */
+	  ip4_tcp_reply_x1 (ip0, tcp0);
+
+	  sum0 = ip0->checksum;
+
+	  sum0 = ip_csum_update (sum0, ip0->ttl, ip4_main.host_config.ttl,
+				 ip4_header_t, ttl);
+	  ip0->ttl = ip4_main.host_config.ttl;
+
+	  sum0 = ip_csum_update (sum0, ip0->fragment_id, fid[0],
+				 ip4_header_t, fragment_id);
+	  ip0->fragment_id = fid[0];
+	  fid += 1;
+
+	  ip0->checksum = ip_csum_fold (sum0);
+
+	  ASSERT (ip0->checksum == ip4_header_checksum (ip0));
+
+	  sum0 = tcp0->checksum;
+
+	  new_flags0 = TCP_FLAG_SYN | TCP_FLAG_ACK;
+	  sum0 = ip_csum_update (sum0, tcp0->flags, new_flags0,
+				 tcp_header_t, flags);
+	  tcp0->flags = new_flags0;
+
+	  his_seq_net0 = clib_host_to_net_u32 (his_seq_host0);
+
+	  sum0 = ip_csum_update (sum0, tcp0->ack_number, his_seq_net0,
+				 tcp_header_t, ack_number);
+	  sum0 = ip_csum_update (sum0, tcp0->seq_number, my_seq_net0,
+				 tcp_header_t, seq_number);
+
+	  tcp0->ack_number = his_seq_net0;
+	  tcp0->seq_number = my_seq_net0;
+
+	  tcp0->checksum = ip_csum_fold (sum0);
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  vlib_error_count (vm, tcp4_lookup_node.index,
+		    TCP_ERROR_LISTEN_ACKS_SENT,
+		    frame->n_vectors);
+
+  return frame->n_vectors;
+}
+
+static VLIB_REGISTER_NODE (ip4_tcp_pre_connection_node) = {
+  .function = ip4_tcp_pre_connection,
+  .name = "tcp4-pre-connection",
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+  },
+
+  .vector_size = sizeof (u32),
+};
 
 static uword ip4_tcp_udp_address_key_sum (hash_t * h, uword key)
 {
   ip4_tcp_udp_lookup_main_t * lm = ip4_tcp_udp_lookup_mains + h->user;
-  ip4_tcp_udp_address_t _a, * a;
-  u32 x0, x1, x2;
 
-  a = ip4_tcp_udp_key_to_address (lm, &_a, key);
-
-  x0 = lm->hash_seeds[0] ^ a->src_address32;
-  x1 = lm->hash_seeds[1] ^ a->dst_address32;
-  x2 = lm->hash_seeds[2] ^ a->src_dst_port32;
-
-  hash_mix32 (x0, x1, x2);
-
-  return x2;
+  if (key & 1)
+    {
+      ip4_tcp_udp_connection_t * c = pool_elt_at_index (lm->connection_pool, key / 2);
+      return c->header.address_hash;
+    }
+  else
+    {    
+      vlib_buffer_t * b = uword_to_pointer (key, vlib_buffer_t *);
+      tcp_udp_lookup_buffer_opaque_t * o = vlib_get_buffer_opaque (b);
+      o = uword_to_pointer (key, tcp_udp_lookup_buffer_opaque_t *);
+      return o->address_hash;
+    }				     
 }
 
 static uword ip4_tcp_udp_address_key_equal (hash_t * h, uword key1, uword key2)
 {
   ip4_tcp_udp_lookup_main_t * lm = ip4_tcp_udp_lookup_mains + h->user;
-  ip4_tcp_udp_address_t _a[2], * a1, * a2;
+  ip4_tcp_udp_connection_t * c;
+  vlib_buffer_t * b;
+  ip4_header_t * ip;
+  tcp_header_t * tcp;
 
-  a1 = ip4_tcp_udp_key_to_address (lm, &_a[0], key1);
-  a2 = ip4_tcp_udp_key_to_address (lm, &_a[1], key2);
+  ASSERT ((key1 & 1) == 1);
+  ASSERT ((key2 & 1) == 0);
 
-  return (a1->src_dst_address64 == a2->src_dst_address64
-	  && a1->src_dst_port32 == a2->src_dst_port32);
+  c = pool_elt_at_index (lm->connection_pool, key1 / 2);
+
+  b = uword_to_pointer (key2, vlib_buffer_t *);
+  ip = vlib_buffer_get_current (b);
+  tcp = ip4_next_header (ip);
+
+  return (c->address.addresses.as_u64 == clib_mem_unaligned (&ip->src_address, u64)
+	  && c->address.ports.as_u32 == clib_mem_unaligned (&tcp->ports.src_and_dst, u32));
 }
 
 static void
@@ -498,7 +2190,6 @@ ip4_tcp_udp_lookup_main_init (vlib_main_t * vm,
   ASSERT (l - lm->listener_pool == 0);
 
   memset (l, 0xff, sizeof (l[0]));
-  l->flags = 0;
   l->next_index = TCP_UDP_LOOKUP_NEXT_ERROR;
 
   /* No adjacencies are valid. */
@@ -532,10 +2223,9 @@ ip4_tcp_udp_register_listener (vlib_main_t * vm,
 
   node = is_udp ? &udp4_lookup_node : &tcp4_lookup_node;
 
-  l->flags = is_udp ? IP4_TCP_UDP_LISTENER_IS_UDP : 0;
   l->dst_port = dst_port;
   l->next_index = vlib_node_add_next (vm, node->index, next_node_index);
-  l->valid_local_adjacency_bitmap = ~0ULL;
+  l->valid_local_adjacency_bitmap = 0; /* fixme */
 
   lm->listener_index_by_dst_port[clib_host_to_net_u16 (dst_port)] = l - lm->listener_pool;
 
@@ -560,6 +2250,37 @@ ip4_udp_register_listener (vlib_main_t * vm,
   return ip4_tcp_udp_register_listener (vm, dst_port, next_node_index,
 					ip4_tcp_udp_lookup_mains + IP4_LOOKUP_UDP,
 					IP4_LOOKUP_UDP);
+}
+
+static void
+tcp_udp_lookup_ip4_add_del_interface_address (ip4_main_t * im,
+					      uword opaque,
+					      u32 sw_if_index,
+					      ip4_address_t * address,
+					      u32 address_length,
+					      u32 if_address_index,
+					      u32 is_delete)
+{
+  int i;
+  for (i = 0; i < ARRAY_LEN (ip4_tcp_udp_lookup_mains); i++)
+    {
+      ip4_tcp_udp_lookup_main_t * lm = ip4_tcp_udp_lookup_mains + i;
+      lm->valid_local_adjacency_bitmap
+	= clib_bitmap_set (lm->valid_local_adjacency_bitmap, if_address_index,
+			   is_delete ? 0 : 1);
+    }
+}
+
+static void
+tcp_udp_lookup_ip6_add_del_interface_address (ip6_main_t * im,
+					      uword opaque,
+					      u32 sw_if_index,
+					      ip6_address_t * address,
+					      u32 address_length,
+					      u32 if_address_index,
+					      u32 is_delete)
+{
+  ASSERT (0);
 }
 
 static clib_error_t *
@@ -603,7 +2324,172 @@ tcp_udp_lookup_init (vlib_main_t * vm)
   for (i = 0; i < ARRAY_LEN (ip4_tcp_udp_lookup_mains); i++)
     ip4_tcp_udp_lookup_main_init (vm, ip4_tcp_udp_lookup_mains + i, i);
 
+  {
+    ip4_add_del_interface_address_callback_t cb;
+
+    cb.function = tcp_udp_lookup_ip4_add_del_interface_address;
+    cb.function_opaque = 0;
+    vec_add1 (im4->add_del_interface_address_callbacks, cb);
+  }
+
+  {
+    ip6_add_del_interface_address_callback_t cb;
+
+    cb.function = tcp_udp_lookup_ip6_add_del_interface_address;
+    cb.function_opaque = 0;
+    vec_add1 (im6->add_del_interface_address_callbacks, cb);
+  }
+
+  /* Allocate pre connection hash. */
+  {
+    ip4_tcp_main_t * tm = &ip4_tcp_main;
+    ip4_tcp_pre_connection_t * p;
+
+    tm->log2_pre_connection_hash_size = 8;
+    tm->pre_connection_hash_mask = pow2_mask (tm->log2_pre_connection_hash_size);
+    vec_validate_aligned (tm->pre_connection_hash,
+			  tm->pre_connection_hash_mask,
+			  CLIB_CACHE_LINE_BYTES);
+    clib_bitmap_validate (tm->pre_connection_hash_is_valid,
+			  tm->pre_connection_hash_mask);
+
+    p = &tm->pre_connection_template;
+
+    memset (p, 0, sizeof (p[0]));
+    p->max_segment_size = clib_host_to_net_u16 (1500 - 40);
+    p->window_scale = 7;
+    p->time_stamps[0] = p->time_stamps[1] = ~0;
+  }
+
   return 0;
 }
+
+#else
+uword
+ip4_tcp_register_listener (vlib_main_t * vm,
+			   u16 dst_port,
+			   u32 next_node_index)
+{
+  tcp_main_t * tm = &tcp_main;
+  tcp_listener_t * l;
+
+  pool_get_aligned (tm->listener_pool, l, CLIB_CACHE_LINE_BYTES);
+
+  memset (l, 0, sizeof (l[0]));
+
+  l->dst_port = dst_port;
+  l->next_index = vlib_node_add_next (vm, ip4_tcp_lookup_node.index, next_node_index);
+  l->valid_local_adjacency_bitmap = 0;
+
+  tm->listener_index_by_dst_port[clib_host_to_net_u16 (dst_port)] = l - tm->listener_pool;
+
+  return l - tm->listener_pool;
+}
+
+uword
+ip4_udp_register_listener (vlib_main_t * vm,
+			   u16 dst_port,
+			   u32 next_node_index)
+{
+  return 0;
+}
+
+static void
+tcp_udp_lookup_ip4_add_del_interface_address (ip4_main_t * im,
+					      uword opaque,
+					      u32 sw_if_index,
+					      ip4_address_t * address,
+					      u32 address_length,
+					      u32 if_address_index,
+					      u32 is_delete)
+{
+  tcp_main_t * tm = &tcp_main;
+
+  tm->ip4.default_valid_local_adjacency_bitmap
+    = clib_bitmap_set (tm->ip4.default_valid_local_adjacency_bitmap,
+		       if_address_index,
+		       is_delete ? 0 : 1);
+}
+
+static void
+tcp_udp_lookup_ip6_add_del_interface_address (ip6_main_t * im,
+					      uword opaque,
+					      u32 sw_if_index,
+					      ip6_address_t * address,
+					      u32 address_length,
+					      u32 if_address_index,
+					      u32 is_delete)
+{
+  tcp_main_t * tm = &tcp_main;
+
+  tm->ip6.default_valid_local_adjacency_bitmap
+    = clib_bitmap_set (tm->ip6.default_valid_local_adjacency_bitmap,
+		       if_address_index,
+		       is_delete ? 0 : 1);
+}
+
+static clib_error_t *
+tcp_udp_lookup_init (vlib_main_t * vm)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip4_main_t * im4 = &ip4_main;
+  ip6_main_t * im6 = &ip6_main;
+  ip_lookup_main_t * lm4 = &im4->lookup_main;
+  ip_lookup_main_t * lm6 = &im6->lookup_main;
+  clib_error_t * error;
+  int i;
+
+  if ((error = vlib_call_init_function (vm, ip4_lookup_init)))
+    return error;
+  if ((error = vlib_call_init_function (vm, ip6_lookup_init)))
+    return error;
+
+  tcp_time_init (vm, tm);
+
+  /* Setup all IP protocols to be punted and builtin-unknown. */
+  for (i = 0; i < 256; i++)
+    {
+      lm4->local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
+      lm6->local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
+      lm4->builtin_protocol_by_ip_protocol[i] = IP_BUILTIN_PROTOCOL_UNKNOWN;
+      lm6->builtin_protocol_by_ip_protocol[i] = IP_BUILTIN_PROTOCOL_UNKNOWN;
+    }
+
+  lm4->local_next_by_ip_protocol[IP_PROTOCOL_TCP] = IP_LOCAL_NEXT_TCP_LOOKUP;
+  lm4->local_next_by_ip_protocol[IP_PROTOCOL_UDP] = IP_LOCAL_NEXT_UDP_LOOKUP;
+  lm4->local_next_by_ip_protocol[IP_PROTOCOL_ICMP] = IP_LOCAL_NEXT_ICMP;
+  lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_TCP] = IP_BUILTIN_PROTOCOL_TCP;
+  lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_UDP] = IP_BUILTIN_PROTOCOL_UDP;
+  lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_ICMP] = IP_BUILTIN_PROTOCOL_ICMP;
+
+  lm6->local_next_by_ip_protocol[IP_PROTOCOL_TCP] = IP_LOCAL_NEXT_TCP_LOOKUP;
+  lm6->local_next_by_ip_protocol[IP_PROTOCOL_UDP] = IP_LOCAL_NEXT_UDP_LOOKUP;
+  lm6->local_next_by_ip_protocol[IP_PROTOCOL_ICMP6] = IP_LOCAL_NEXT_ICMP;
+  lm6->builtin_protocol_by_ip_protocol[IP_PROTOCOL_TCP] = IP_BUILTIN_PROTOCOL_TCP;
+  lm6->builtin_protocol_by_ip_protocol[IP_PROTOCOL_UDP] = IP_BUILTIN_PROTOCOL_UDP;
+  lm6->builtin_protocol_by_ip_protocol[IP_PROTOCOL_ICMP6] = IP_BUILTIN_PROTOCOL_ICMP;
+
+  {
+    ip4_add_del_interface_address_callback_t cb;
+
+    cb.function = tcp_udp_lookup_ip4_add_del_interface_address;
+    cb.function_opaque = 0;
+    vec_add1 (im4->add_del_interface_address_callbacks, cb);
+  }
+
+  {
+    ip6_add_del_interface_address_callback_t cb;
+
+    cb.function = tcp_udp_lookup_ip6_add_del_interface_address;
+    cb.function_opaque = 0;
+    vec_add1 (im6->add_del_interface_address_callbacks, cb);
+  }
+
+  tcp_lookup_init (vm, tm);
+  tcp_options_decode_init (tm);
+
+  return 0;
+}
+#endif
 
 VLIB_INIT_FUNCTION (tcp_udp_lookup_init);

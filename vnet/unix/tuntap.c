@@ -491,6 +491,7 @@ tuntap_ip4_add_del_interface_address (ip4_main_t * im,
 				      u32 sw_if_index,
 				      ip4_address_t * address,
 				      u32 address_length,
+				      u32 if_address_index,
 				      u32 is_delete)
 {
   tuntap_main_t * tm = &tuntap_main;

@@ -67,6 +67,7 @@ typedef void (ip4_add_del_interface_address_function_t)
    u32 sw_if_index,
    ip4_address_t * address,
    u32 address_length,
+   u32 if_address_index,
    u32 is_del);
 
 typedef struct {

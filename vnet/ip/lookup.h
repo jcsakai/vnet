@@ -162,11 +162,6 @@ typedef struct {
   u32 current_config_index;
 } ip_buffer_opaque_t;
 
-typedef struct {
-  /* Must be first. */
-  ip_buffer_opaque_t non_local;
-} ip_local_buffer_opaque_t;
-
 typedef enum {
   IP_LOCAL_NEXT_DROP,
   IP_LOCAL_NEXT_PUNT,

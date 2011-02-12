@@ -127,6 +127,14 @@ ip6_address_mask (ip6_address_t * a, ip6_address_t * mask)
     a->as_uword[i] &= mask->as_uword[i];
 }
 
+always_inline void
+ip6_address_set_zero (ip6_address_t * a)
+{
+  int i;
+  for (i = 0; i < ARRAY_LEN (a->as_uword); i++)
+    a->as_uword[i] = 0;
+}
+
 always_inline uword
 ip6_address_is_zero (ip6_address_t * a)
 {
@@ -178,7 +186,8 @@ typedef struct {
   /* 4 bit version, 8 bit traffic class and 20 bit flow label. */
   u32 ip_version_traffic_class_and_flow_label;
 
-  /* Total packet length not including this header. */
+  /* Total packet length not including this header (but including
+     any extension headers if present). */
   u16 payload_length;
 
   /* Protocol for next header. */
@@ -194,5 +203,58 @@ typedef struct {
 always_inline void *
 ip6_next_header (ip6_header_t * i)
 { return (void *) (i + 1); }
+
+always_inline void
+ip6_tcp_reply_x1 (ip6_header_t * ip0, tcp_header_t * tcp0)
+{
+  {
+    ip6_address_t src0, dst0;
+
+    src0 = ip0->src_address;
+    dst0 = ip0->dst_address;
+    ip0->src_address = dst0;
+    ip0->dst_address = src0;
+  }
+
+  {
+    u16 src0, dst0;
+
+    src0 = tcp0->ports.src;
+    dst0 = tcp0->ports.dst;
+    tcp0->ports.src = dst0;
+    tcp0->ports.dst = src0;
+  }
+}
+
+always_inline void
+ip6_tcp_reply_x2 (ip6_header_t * ip0, ip6_header_t * ip1,
+		  tcp_header_t * tcp0, tcp_header_t * tcp1)
+{
+  {
+    ip6_address_t src0, dst0, src1, dst1;
+
+    src0 = ip0->src_address;
+    src1 = ip1->src_address;
+    dst0 = ip0->dst_address;
+    dst1 = ip1->dst_address;
+    ip0->src_address = dst0;
+    ip1->src_address = dst1;
+    ip0->dst_address = src0;
+    ip1->dst_address = src1;
+  }
+
+  {
+    u16 src0, dst0, src1, dst1;
+
+    src0 = tcp0->ports.src;
+    src1 = tcp1->ports.src;
+    dst0 = tcp0->ports.dst;
+    dst1 = tcp1->ports.dst;
+    tcp0->ports.src = dst0;
+    tcp1->ports.src = dst1;
+    tcp0->ports.dst = src0;
+    tcp1->ports.dst = src1;
+  }
+}
 
 #endif /* included_ip6_packet_h */
