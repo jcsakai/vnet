@@ -122,6 +122,22 @@ typedef struct {
 #define IXGE_TX_DESCRIPTOR_STATUS1_N_BYTES_IN_PACKET(l) ((l) << 14)
 } ixge_tx_descriptor_t;
 
+typedef struct {
+  struct {
+    u8 checksum_start_offset;
+    u8 checksum_insert_offset;
+    u16 checksum_end_offset;
+  } ip, tcp;
+  u32 status0;
+
+  u8 status1;
+
+  /* Byte offset after UDP/TCP header. */
+  u8 payload_offset;
+
+  u16 max_tcp_segment_size;
+} __attribute__ ((packed)) ixge_tx_context_descriptor_t;
+
 typedef union {
   ixge_rx_to_hw_descriptor_t rx_to_hw;
   ixge_rx_from_hw_descriptor_t rx_from_hw;
