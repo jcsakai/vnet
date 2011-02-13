@@ -50,12 +50,80 @@ int main (int argc, char * argv[])
   return vlib_unix_main (argc, argv);
 }
 
+#define foreach_tcp_test_error			\
+  _ (SEGMENTS_RECEIVED, "segments received")
+
+typedef enum {
+#define _(sym,str) TCP_TEST_ERROR_##sym,
+  foreach_tcp_test_error
+#undef _
+  TCP_TEST_N_ERROR,
+} tcp_test_error_t;
+
+static char * tcp_test_error_strings[] = {
+#define _(sym,string) string,
+  foreach_tcp_test_error
+#undef _
+};
+
 static uword
 tcp_test (vlib_main_t * vm,
 	  vlib_node_runtime_t * node,
 	  vlib_frame_t * frame)
 {
-  ASSERT (0);
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_next;
+  u32 n_left_from, n_left_to_next, next;
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  next = node->cached_next_index;
+  
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  u32 bi0;
+	  u8 error0, next0;
+      
+	  bi0 = to_next[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+
+	  clib_warning ("got '%U'",
+			format_hex_bytes,
+			vlib_buffer_get_current (p0),
+			p0->current_length);
+
+	  error0 = next0 = 0;
+	  p0->error = node->errors[error0];
+
+	  if (PREDICT_FALSE (next0 != next))
+	    {
+	      to_next -= 1;
+	      n_left_to_next += 1;
+
+	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+
+	      next = next0;
+	      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+	      to_next[0] = bi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	    }
+	}
+  
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
   return frame->n_vectors;
 }
 
@@ -69,6 +137,9 @@ VLIB_REGISTER_NODE (tcp_test_node) = {
   .next_nodes = {
     [0] = "error-drop",
   },
+
+  .n_errors = TCP_TEST_N_ERROR,
+  .error_strings = tcp_test_error_strings,
 };
 
 static clib_error_t *

@@ -118,10 +118,10 @@ libvnet_la_SOURCES +=				\
  vnet/ip/ip.h					\
  vnet/ip/ip_init.c				\
  vnet/ip/lookup.c				\
+ vnet/ip/tcp.c					\
  vnet/ip/tcp_format.c				\
  vnet/ip/tcp_init.c				\
  vnet/ip/tcp_pg.c				\
- vnet/ip/tcp_udp_lookup.c			\
  vnet/ip/udp_format.c				\
  vnet/ip/udp_init.c				\
  vnet/ip/udp_pg.c

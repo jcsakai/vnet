@@ -92,15 +92,15 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/ip/ip6_forward.lo vnet/ip/ip6_input.lo \
 	vnet/ip/ip6_neighbor.lo vnet/ip/ip6_pg.lo \
 	vnet/ip/ip_checksum.lo vnet/ip/ip_init.lo vnet/ip/lookup.lo \
-	vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo vnet/ip/tcp_pg.lo \
-	vnet/ip/tcp_udp_lookup.lo vnet/ip/udp_format.lo \
-	vnet/ip/udp_init.lo vnet/ip/udp_pg.lo vnet/osi/node.lo \
-	vnet/osi/osi.lo vnet/osi/pg.lo vnet/pg/cli.lo vnet/pg/edit.lo \
-	vnet/pg/init.lo vnet/pg/input.lo vnet/pg/output.lo \
-	vnet/pg/stream.lo vnet/devices/ethernet_phy_bcm.lo \
-	vnet/devices/i2c/i2c.lo vnet/devices/pci/ige.lo \
-	vnet/devices/pci/ixge.lo vnet/devices/optics/sfp.lo \
-	vnet/devices/xge/xge.lo vnet/unix/pcap.lo vnet/unix/tuntap.lo
+	vnet/ip/tcp.lo vnet/ip/tcp_format.lo vnet/ip/tcp_init.lo \
+	vnet/ip/tcp_pg.lo vnet/ip/udp_format.lo vnet/ip/udp_init.lo \
+	vnet/ip/udp_pg.lo vnet/osi/node.lo vnet/osi/osi.lo \
+	vnet/osi/pg.lo vnet/pg/cli.lo vnet/pg/edit.lo vnet/pg/init.lo \
+	vnet/pg/input.lo vnet/pg/output.lo vnet/pg/stream.lo \
+	vnet/devices/ethernet_phy_bcm.lo vnet/devices/i2c/i2c.lo \
+	vnet/devices/pci/ige.lo vnet/devices/pci/ixge.lo \
+	vnet/devices/optics/sfp.lo vnet/devices/xge/xge.lo \
+	vnet/unix/pcap.lo vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
@@ -188,7 +188,6 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
-PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -316,12 +315,11 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/ip/ip4_source_check.c vnet/ip/ip6_format.c \
 	vnet/ip/ip6_forward.c vnet/ip/ip6_input.c \
 	vnet/ip/ip6_neighbor.c vnet/ip/ip6_pg.c vnet/ip/ip_checksum.c \
-	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c \
+	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c vnet/ip/tcp.c \
 	vnet/ip/tcp_format.c vnet/ip/tcp_init.c vnet/ip/tcp_pg.c \
-	vnet/ip/tcp_udp_lookup.c vnet/ip/udp_format.c \
-	vnet/ip/udp_init.c vnet/ip/udp_pg.c vnet/osi/node.c \
-	vnet/osi/osi.c vnet/osi/pg.c vnet/pg/cli.c vnet/pg/edit.c \
-	vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
+	vnet/ip/udp_format.c vnet/ip/udp_init.c vnet/ip/udp_pg.c \
+	vnet/osi/node.c vnet/osi/osi.c vnet/osi/pg.c vnet/pg/cli.c \
+	vnet/pg/edit.c vnet/pg/init.c vnet/pg/input.c vnet/pg/output.c \
 	vnet/pg/stream.c vnet/devices/ethernet_phy_bcm.c \
 	vnet/devices/i2c/i2c.c vnet/devices/pci/ige.c \
 	vnet/devices/pci/ixge.c vnet/devices/optics/sfp.c \
@@ -537,13 +535,13 @@ vnet/ip/ip_init.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/lookup.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
+vnet/ip/tcp.lo: vnet/ip/$(am__dirstamp) \
+	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/tcp_format.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/tcp_init.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/tcp_pg.lo: vnet/ip/$(am__dirstamp) \
-	vnet/ip/$(DEPDIR)/$(am__dirstamp)
-vnet/ip/tcp_udp_lookup.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/udp_format.lo: vnet/ip/$(am__dirstamp) \
 	vnet/ip/$(DEPDIR)/$(am__dirstamp)
@@ -727,14 +725,14 @@ mostlyclean-compile:
 	-rm -f vnet/ip/ip_init.lo
 	-rm -f vnet/ip/lookup.$(OBJEXT)
 	-rm -f vnet/ip/lookup.lo
+	-rm -f vnet/ip/tcp.$(OBJEXT)
+	-rm -f vnet/ip/tcp.lo
 	-rm -f vnet/ip/tcp_format.$(OBJEXT)
 	-rm -f vnet/ip/tcp_format.lo
 	-rm -f vnet/ip/tcp_init.$(OBJEXT)
 	-rm -f vnet/ip/tcp_init.lo
 	-rm -f vnet/ip/tcp_pg.$(OBJEXT)
 	-rm -f vnet/ip/tcp_pg.lo
-	-rm -f vnet/ip/tcp_udp_lookup.$(OBJEXT)
-	-rm -f vnet/ip/tcp_udp_lookup.lo
 	-rm -f vnet/ip/udp_format.$(OBJEXT)
 	-rm -f vnet/ip/udp_format.lo
 	-rm -f vnet/ip/udp_init.$(OBJEXT)
@@ -824,10 +822,10 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip_checksum.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/ip_init.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/lookup.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_init.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_pg.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/tcp_udp_lookup.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/udp_format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/udp_init.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ip/$(DEPDIR)/udp_pg.Plo@am__quote@
