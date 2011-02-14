@@ -189,6 +189,9 @@ ethernet_register_interface (vlib_main_t * vm,
   hi->per_packet_overhead_bytes =
     /* preamble */ 8 + /* inter frame gap */ 12;
 
+  /* Standard default ethernet MTU. */
+  hi->max_packet_bytes[VLIB_RX] = hi->max_packet_bytes[VLIB_TX] = 1514;
+
   ethernet_interface_update_media (ei, hi);
 
   memcpy (ei->address, address, sizeof (ei->address));
