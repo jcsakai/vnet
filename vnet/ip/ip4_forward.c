@@ -1625,7 +1625,7 @@ ip4_tcp_udp_compute_checksum (vlib_main_t * vm, vlib_buffer_t * p0,
   u16 sum16;
   void * data_this_buffer;
   
-  /* Initialize checksum with ip6 header. */
+  /* Initialize checksum with ip header. */
   ip_header_length = ip4_header_bytes (ip0);
   payload_length_host_byte_order = clib_net_to_host_u16 (ip0->length) - ip_header_length;
   sum0 = clib_host_to_net_u32 (payload_length_host_byte_order + (ip0->protocol << 16));
