@@ -125,7 +125,10 @@ typedef struct ip4_main_t {
     /* TTL to use for host generated packets. */
     u8 ttl;
 
-    u8 pad[3];
+    /* TOS byte to use for host generated packets. */
+    u8 tos;
+
+    u8 pad[2];
   } host_config;
 } ip4_main_t;
 
