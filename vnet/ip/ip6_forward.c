@@ -1593,7 +1593,7 @@ u16 ip6_tcp_udp_icmp_compute_checksum (vlib_main_t * vm, vlib_buffer_t * p0, ip6
   u32 i, n_this_buffer, n_bytes_left;
   void * data_this_buffer;
 
-  /* Initialize checksum with ip6 header. */
+  /* Initialize checksum with ip header. */
   sum0 = ip0->payload_length + clib_host_to_net_u16 (ip0->protocol);
   payload_length_host_byte_order = clib_net_to_host_u16 (ip0->payload_length);
 
