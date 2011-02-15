@@ -190,7 +190,7 @@ ethernet_register_interface (vlib_main_t * vm,
     /* preamble */ 8 + /* inter frame gap */ 12;
 
   /* Standard default ethernet MTU. */
-  hi->max_packet_bytes[VLIB_RX] = hi->max_packet_bytes[VLIB_TX] = 1514;
+  hi->max_l3_packet_bytes[VLIB_RX] = hi->max_l3_packet_bytes[VLIB_TX] = 1500;
 
   ethernet_interface_update_media (ei, hi);
 

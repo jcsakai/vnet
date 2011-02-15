@@ -103,7 +103,7 @@ uword unformat_vnet_rewrite (unformat_input_t * input, va_list * args)
 	  hi = vlib_get_hw_interface (vm, si->hw_if_index);
 
 	  next_index = hi->output_node_index;
-	  max_packet_bytes = hi->max_packet_bytes[VLIB_RX];
+	  max_packet_bytes = hi->max_l3_packet_bytes[VLIB_RX];
 	}
       else
 	ASSERT (0);
@@ -137,13 +137,13 @@ uword unformat_vnet_rewrite (unformat_input_t * input, va_list * args)
     u32 tmp;
 
     if (unformat (input, "mtu %d", &tmp)
-	&& tmp < (1 << BITS (rw->max_packet_bytes)))
+	&& tmp < (1 << BITS (rw->max_l3_packet_bytes)))
       max_packet_bytes = tmp;
   }
 
   error = 0;
   rw->sw_if_index = sw_if_index;
-  rw->max_packet_bytes = max_packet_bytes;
+  rw->max_l3_packet_bytes = max_packet_bytes;
   rw->next_index = vlib_node_add_next (vm, rw->node_index, next_index);
   vnet_rewrite_set_data_internal (rw, max_data_bytes, rw_data, vec_len (rw_data));
 
@@ -165,7 +165,7 @@ void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
   rw->sw_if_index = sw_if_index;
   rw->node_index = node_index;
   rw->next_index = vlib_node_add_next (vm, node_index, hw->output_node_index);
-  rw->max_packet_bytes = hw->max_packet_bytes[VLIB_TX];
+  rw->max_l3_packet_bytes = hw->max_l3_packet_bytes[VLIB_TX];
 
   if (max_rewrite_bytes)
     {
@@ -191,7 +191,7 @@ void serialize_vnet_rewrite (serialize_main_t * m, va_list * va)
 
   serialize_integer (m, rw->sw_if_index, sizeof (rw->sw_if_index));
   serialize_integer (m, rw->data_bytes, sizeof (rw->data_bytes));
-  serialize_integer (m, rw->max_packet_bytes, sizeof (rw->max_packet_bytes));
+  serialize_integer (m, rw->max_l3_packet_bytes, sizeof (rw->max_l3_packet_bytes));
   p = serialize_get (m, rw->data_bytes);
   memcpy (p, vnet_rewrite_get_data_internal (rw, max_data_bytes), rw->data_bytes);
 }
@@ -208,7 +208,7 @@ void unserialize_vnet_rewrite (serialize_main_t * m, va_list * va)
 
   unserialize_integer (m, &rw->sw_if_index, sizeof (rw->sw_if_index));
   unserialize_integer (m, &rw->data_bytes, sizeof (rw->data_bytes));
-  unserialize_integer (m, &rw->max_packet_bytes, sizeof (rw->max_packet_bytes));
+  unserialize_integer (m, &rw->max_l3_packet_bytes, sizeof (rw->max_l3_packet_bytes));
   p = unserialize_get (m, rw->data_bytes);
   memcpy (vnet_rewrite_get_data_internal (rw, max_data_bytes), p, rw->data_bytes);
 }

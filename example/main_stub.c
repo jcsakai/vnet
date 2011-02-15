@@ -98,10 +98,7 @@ tcp_test (vlib_main_t * vm,
       
 	  p0 = vlib_get_buffer (vm, bi0);
 
-	  clib_warning ("got '%U'",
-			format_hex_bytes,
-			vlib_buffer_get_current (p0),
-			p0->current_length);
+	  clib_warning ("got '%U'", format_vlib_buffer_contents, vm, p0);
 
 	  error0 = next0 = 0;
 	  p0->error = node->errors[error0];

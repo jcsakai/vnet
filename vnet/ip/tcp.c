@@ -807,7 +807,6 @@ ip46_tcp_lookup (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  ip_adjacency_t * adj0;
 	  union {
 	    ip_buffer_opaque_t ip;
 	    tcp_udp_lookup_buffer_opaque_t tcp_udp;
@@ -831,9 +830,6 @@ ip46_tcp_lookup (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, bi0);
 	  pi0 = vlib_get_buffer_opaque (p0);
 
-	  adj0 = ip_get_adjacency (im, pi0->ip.dst_adj_index);
-	  ASSERT (adj0->lookup_next_index == IP_LOOKUP_NEXT_LOCAL);
-      
 	  {
 	    u32x4 a0, b0, c0;
 
@@ -934,6 +930,7 @@ ip46_tcp_lookup (vlib_main_t * vm,
 	    state0 = is_min_match0 ? min0->state : TCP_CONNECTION_STATE_unused;
 	    state0 = is_est_match0 ? TCP_CONNECTION_STATE_established : state0;
 
+	    pi0->tcp_udp.src_adj_index = pi0->ip.src_adj_index;
 	    pi0->tcp_udp.established_connection_index = iest0;
 	    pi0->tcp_udp.mini_connection_index = imin0;
 	    pi0->tcp_udp.listener_index = li0 = tm->listener_index_by_dst_port[tcp0->ports.dst];
@@ -1532,8 +1529,19 @@ ip46_tcp_listen (vlib_main_t * vm,
 	  tcp_reply0->header.ack_number = his_seq_net0;
 	  tcp_sum0 = ip_csum_add_even (tcp_sum0, his_seq_net0);
 
-	  tcp_reply0->options.mss.value = clib_host_to_net_u16 (1460);
-	  tcp_sum0 = ip_csum_add_even (tcp_sum0, tcp_reply0->options.mss.value);
+	  {
+	    ip_adjacency_t * adj0 = ip_get_adjacency (&ip4_main.lookup_main, pi0->src_adj_index);
+	    u16 my_mss =
+	      (adj0->rewrite_header.max_l3_packet_bytes
+	       - (is_ip6 ? sizeof (ip60[0]) : sizeof (ip40[0]))
+	       - sizeof (tcp0[0]));
+
+	    my_mss = clib_min (my_mss, min0->max_segment_size);
+	    min0->max_segment_size = my_mss;
+
+	    tcp_reply0->options.mss.value = clib_host_to_net_u16 (my_mss);
+	    tcp_sum0 = ip_csum_add_even (tcp_sum0, tcp_reply0->options.mss.value);
+	  }
 
 	  tcp_reply0->options.time_stamp.my_time_stamp = clib_host_to_net_u32 (timestamp_now);
 	  tcp_sum0 = ip_csum_add_even (tcp_sum0, tcp_reply0->options.time_stamp.my_time_stamp);

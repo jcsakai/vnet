@@ -942,6 +942,7 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
   ip_adjacency_t * adj;
   ip6_address_t * address = ip_interface_address_get_address (lm, a);
   ip6_add_del_route_args_t x;
+  vlib_hw_interface_t * hw_if = vlib_get_sup_hw_interface (vm, sw_if_index);
 
   /* Add e.g. 1.0.0.0/8 as interface route (arp for Ethernet). */
   x.table_index_or_table_id = fib_index;
@@ -968,6 +969,7 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
   adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
   adj->if_address_index = a - lm->if_address_pool;
   adj->rewrite_header.sw_if_index = sw_if_index;
+  adj->rewrite_header.max_l3_packet_bytes = hw_if->max_l3_packet_bytes[VLIB_RX];
   ip_call_add_del_adjacency_callbacks (lm, x.adj_index, /* is_del */ 0);
   x.dst_address_length = 128;
   ip6_add_del_route (im, &x);
@@ -2220,6 +2222,14 @@ ip6_rewrite (vlib_main_t * vm,
 					   /* packet increment */ 0,
 					   /* byte increment */ rw_len1);
 
+	  /* Check MTU of outgoing interface. */
+	  error0 = (vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_l3_packet_bytes
+		    ? IP6_ERROR_MTU_EXCEEDED
+		    : error0);
+	  error1 = (vlib_buffer_length_in_chain (vm, p1) > adj1[0].rewrite_header.max_l3_packet_bytes
+		    ? IP6_ERROR_MTU_EXCEEDED
+		    : error1);
+
 	  p0->current_data -= rw_len0;
 	  p1->current_data -= rw_len1;
 
@@ -2231,14 +2241,6 @@ ip6_rewrite (vlib_main_t * vm,
       
 	  next0 = adj0[0].rewrite_header.next_index;
 	  next1 = adj1[0].rewrite_header.next_index;
-
-	  /* Check MTU of outgoing interface. */
-	  error0 = (vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes
-		    ? IP6_ERROR_MTU_EXCEEDED
-		    : error0);
-	  error1 = (vlib_buffer_length_in_chain (vm, p1) > adj1[0].rewrite_header.max_packet_bytes
-		    ? IP6_ERROR_MTU_EXCEEDED
-		    : error1);
 
 	  /* Guess we are only writing on simple Ethernet header. */
 	  vnet_rewrite_two_headers (adj0[0], adj1[0],
@@ -2295,16 +2297,16 @@ ip6_rewrite (vlib_main_t * vm,
 					   /* packet increment */ 0,
 					   /* byte increment */ rw_len0);
 
+	  /* Check MTU of outgoing interface. */
+	  error0 = (vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_l3_packet_bytes
+		    ? IP6_ERROR_MTU_EXCEEDED
+		    : error0);
+
 	  p0->current_data -= rw_len0;
 	  p0->current_length += rw_len0;
 	  p0->sw_if_index[VLIB_TX] = adj0[0].rewrite_header.sw_if_index;
       
 	  next0 = adj0[0].rewrite_header.next_index;
-
-	  /* Check MTU of outgoing interface. */
-	  error0 = (vlib_buffer_length_in_chain (vm, p0) > adj0[0].rewrite_header.max_packet_bytes
-		    ? IP6_ERROR_MTU_EXCEEDED
-		    : error0);
 
 	  next0 = error0 != IP6_ERROR_NONE ? IP6_REWRITE_NEXT_DROP : next0;
 	  p0->error = error_node->errors[error0];

@@ -45,9 +45,9 @@ typedef PACKED (struct {
   /* Number of bytes in rewrite data. */
   u16 data_bytes;
 
-  /* Max packet size layer 2 (MTU) for output interface.
+  /* Max packet size layer 3 (MTU) for output interface.
      Used for MTU check after packet rewrite. */
-  u16 max_packet_bytes;
+  u16 max_l3_packet_bytes;
 
   /* Rewrite string starting at end and going backwards. */
   u8 data[0];
