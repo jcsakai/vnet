@@ -492,7 +492,8 @@ typedef struct {
   /* ip4/ip6 tos/ttl to use for packets we send. */
   u8 tos, ttl;
 
-  u8 unused[2];
+  u16 flags;
+#define TCP_CONNECTION_FLAG_ACK_PENDING (1 << 0)
 
   /* Number of un-acknowledged bytes we've sent. */
   u32 n_tx_unacked_bytes;
@@ -501,7 +502,7 @@ typedef struct {
 
   u32 tx_tail_buffer_index;
 
-  u32 his_time_stamp, my_time_stamp;
+  u32 his_time_stamp_net_byte_order, my_time_stamp_host_byte_order;
 
   struct {
     f64 sum, sum2;
@@ -524,6 +525,9 @@ typedef struct {
   tcp_mini_connection_t * mini_connections;
 
   tcp_established_connection_t * established_connections;
+
+  /* Vector of established connection indices which need ACKs sent. */
+  u32 * connections_pending_acks;
 
   /* Default valid_local_adjacency_bitmap for listeners who want to listen
      for a given port in on all interfaces. */
@@ -749,6 +753,7 @@ typedef struct {
   _ (CONNECTS_ESTABLISHED, "connects established")			\
   _ (NO_LISTENER_FOR_PORT, "no listener for port")			\
   _ (WRONG_LOCAL_ADDRESS_FOR_PORT, "wrong local address for port")	\
+  _ (ACKS_SENT, "acks sent for established connections")		\
   _ (NO_DATA, "valid packets with no data")
 
 typedef enum {
@@ -1182,32 +1187,32 @@ do {									\
 			       &tm->ip4_packet_templates.syn,
 			       /* data */ &ip4_syn,
 			       sizeof (ip4_syn),
-			       /* alloc chunk size */ 64);
+			       /* alloc chunk size */ VLIB_FRAME_SIZE);
     vlib_packet_template_init (vm,
 			       &tm->ip4_packet_templates.syn_ack,
 			       /* data */ &ip4_syn_ack,
 			       sizeof (ip4_syn_ack),
-			       /* alloc chunk size */ 64);
+			       /* alloc chunk size */ VLIB_FRAME_SIZE);
     vlib_packet_template_init (vm,
 			       &tm->ip4_packet_templates.ack,
 			       /* data */ &ip4_ack,
 			       sizeof (ip4_ack),
-			       /* alloc chunk size */ 64);
+			       /* alloc chunk size */ VLIB_FRAME_SIZE);
     vlib_packet_template_init (vm,
 			       &tm->ip6_packet_templates.syn,
 			       /* data */ &ip6_syn,
 			       sizeof (ip6_syn),
-			       /* alloc chunk size */ 64);
+			       /* alloc chunk size */ VLIB_FRAME_SIZE);
     vlib_packet_template_init (vm,
 			       &tm->ip6_packet_templates.syn_ack,
 			       /* data */ &ip6_syn_ack,
 			       sizeof (ip6_syn_ack),
-			       /* alloc chunk size */ 64);
+			       /* alloc chunk size */ VLIB_FRAME_SIZE);
     vlib_packet_template_init (vm,
 			       &tm->ip6_packet_templates.ack,
 			       /* data */ &ip6_ack,
 			       sizeof (ip6_ack),
-			       /* alloc chunk size */ 64);
+			       /* alloc chunk size */ VLIB_FRAME_SIZE);
   }
 }
 
@@ -1345,7 +1350,7 @@ do {								\
     }
 
   if (his_time_stamp)
-    his_time_stamp[0] = clib_net_to_host_u32 (((u32 *) option_decode[TCP_OPTION_TIME_STAMP])[0]);
+    his_time_stamp[0] = ((u32 *) option_decode[TCP_OPTION_TIME_STAMP])[0];
 
   return clib_net_to_host_u32 (((u32 *) option_decode[TCP_OPTION_TIME_STAMP])[1]);
 }
@@ -1483,10 +1488,10 @@ ip46_tcp_listen (vlib_main_t * vm,
 	      for (i = 0; i < ARRAY_LEN (ip60->dst_address.as_uword); i++)
 		{
 		  tmp0 = r0->ip6.src_address.as_uword[i] = ip60->dst_address.as_uword[i];
-		  tcp_sum0 = ip_csum_with_carry (tcp_sum0, tmp0);
+		  tcp_sum0 = ip_csum_add_even (tcp_sum0, tmp0);
 
 		  tmp0 = r0->ip6.dst_address.as_uword[i] = ip60->src_address.as_uword[i];
-		  tcp_sum0 = ip_csum_with_carry (tcp_sum0, tmp0);
+		  tcp_sum0 = ip_csum_add_even (tcp_sum0, tmp0);
 		}
 	    }
 	  else
@@ -1834,14 +1839,25 @@ ip46_tcp_establish (vlib_main_t * vm,
 	  est0->max_segment_size = min0->max_segment_size;
 	  est0->his_window_scale = min0->window_scale;
 	  est0->his_window = clib_net_to_host_u16 (tcp0->window);
+	  est0->my_time_stamp_host_byte_order = min0->my_time_stamp_host_byte_order;
 
 	  /* Compute first measurement of round trip time. */
 	  {
-	    u32 t = tcp_options_decode_for_ack (tm, tcp0, 0);
+	    u32 t = tcp_options_decode_for_ack (tm, tcp0, &est0->his_time_stamp_net_byte_order);
 	    f64 dt = (timestamp_now - t) * tm->secs_per_tick[TCP_TIMER_timestamp];
 	    est0->round_trip_time_stats.sum = dt;
 	    est0->round_trip_time_stats.sum2 = dt*dt;
 	    est0->round_trip_time_stats.count = 1;
+
+	    {
+	      ELOG_TYPE_DECLARE (e) = {
+		.format = "establish ack rtt: %.4e",
+		.format_args = "f8",
+	      };
+	      struct { f64 dt; } * ed;
+	      ed = ELOG_DATA (&vm->elog_main, e);
+	      ed->dt = dt;
+	    }
 	  }
 
 	  est0->my_window_scale = 7;
@@ -1946,16 +1962,187 @@ static VLIB_REGISTER_NODE (ip6_tcp_establish_node) = {
   },
 };
 
-typedef enum {
-  TCP_ESTABLISHED_NEXT_DROP,
-  TCP_ESTABLISHED_N_NEXT,
-} tcp_established_next_t;
-
 always_inline void
 tcp_ack (tcp_main_t * tm, tcp_established_connection_t * c, u32 n_bytes)
 {
   ASSERT (n_bytes == 0);
 }
+
+always_inline uword
+ip46_tcp_output (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame,
+		 uword is_ip6)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  u32 * cis, * to_next, n_left_to_next, n_connections_left;
+  u32 timestamp_now_host_byte_order, timestamp_now_net_byte_order;
+  vlib_node_runtime_t * error_node;
+  const u32 next = 0;
+  uword n_acks;
+
+  n_acks = 0;
+  cis = tm46->connections_pending_acks;
+  n_connections_left = vec_len (cis);
+  if (n_connections_left == 0)
+    return n_acks;
+  _vec_len (tm46->connections_pending_acks) = 0;
+  error_node = vlib_node_get_runtime
+    (vm, is_ip6 ? ip6_tcp_lookup_node.index : ip4_tcp_lookup_node.index);
+
+  timestamp_now_host_byte_order = tcp_time_now (tm, TCP_TIMER_timestamp);
+  timestamp_now_net_byte_order = clib_host_to_net_u32 (timestamp_now_host_byte_order);
+
+  while (n_connections_left > 0)
+    {
+      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+
+      while (n_connections_left > 0 && n_left_to_next > 0)
+	{
+	  tcp_established_connection_t * est0;
+	  tcp_ack_packet_t * tcp0;
+	  u32 bi0, iest0, iest_div0, iest_mod0, my_seq_net0, his_seq_net0;
+	  tcp_udp_ports_t * ports0;
+	  ip_csum_t tcp_sum0;
+
+	  iest0 = cis[0];
+	  iest_div0 = iest0 / 4;
+	  iest_mod0 = iest0 % 4;
+	  est0 = vec_elt_at_index (tm46->established_connections, iest0);
+
+	  if (is_ip6)
+	    {
+	      ip6_tcp_ack_packet_t * r0;
+	      ip6_tcp_udp_address_x4_t * esta0;
+	      uword tmp0, i;
+
+	      esta0 = vec_elt_at_index (tm->ip6_established_connection_address_hash, iest_div0);
+	      r0 = vlib_packet_template_get_packet (vm, &tm->ip6_packet_templates.ack, &bi0);
+	      tcp0 = &r0->tcp;
+
+	      tcp_sum0 = r0->tcp.header.checksum;
+
+	      for (i = 0; i < ARRAY_LEN (r0->ip6.src_address.as_u32); i++)
+		{
+		  tmp0 = r0->ip6.src_address.as_u32[i] = esta0->dst.as_u32[i][iest_mod0];
+		  tcp_sum0 = ip_csum_add_even (tcp_sum0, tmp0);
+
+		  tmp0 = r0->ip6.dst_address.as_u32[i] = esta0->src.as_u32[i][iest_mod0];
+		  tcp_sum0 = ip_csum_add_even (tcp_sum0, tmp0);
+		}
+
+	      ports0 = &esta0->ports.as_ports[iest_mod0];
+	    }
+	  else
+	    {
+	      ip4_tcp_ack_packet_t * r0;
+	      ip4_tcp_udp_address_x4_t * esta0;
+	      ip_csum_t ip_sum0;
+	      u32 src0, dst0;
+
+	      esta0 = vec_elt_at_index (tm->ip4_established_connection_address_hash, iest_div0);
+	      r0 = vlib_packet_template_get_packet (vm, &tm->ip4_packet_templates.ack, &bi0);
+	      tcp0 = &r0->tcp;
+
+	      ip_sum0 = r0->ip4.checksum;
+	      tcp_sum0 = r0->tcp.header.checksum;
+
+	      src0 = r0->ip4.src_address.as_u32 = esta0->dst.as_ip4_address[iest_mod0].as_u32;
+	      dst0 = r0->ip4.dst_address.as_u32 = esta0->src.as_ip4_address[iest_mod0].as_u32;
+
+	      ip_sum0 = ip_csum_add_even (ip_sum0, src0);
+	      tcp_sum0 = ip_csum_add_even (tcp_sum0, src0);
+
+	      ip_sum0 = ip_csum_add_even (ip_sum0, dst0);
+	      tcp_sum0 = ip_csum_add_even (tcp_sum0, dst0);
+
+	      r0->ip4.checksum = ip_csum_fold (ip_sum0);
+
+	      ASSERT (r0->ip4.checksum == ip4_header_checksum (&r0->ip4));
+	      ports0 = &esta0->ports.as_ports[iest_mod0];
+	    }
+
+	  tcp_sum0 = ip_csum_add_even (tcp_sum0, ports0->as_u32);
+	  tcp0->header.ports.src = ports0->dst;
+	  tcp0->header.ports.dst = ports0->src;
+
+	  my_seq_net0 = clib_host_to_net_u32 (est0->sequence_numbers.ours);
+	  his_seq_net0 = clib_host_to_net_u32 (est0->sequence_numbers.his);
+
+	  tcp0->header.seq_number = my_seq_net0;
+	  tcp_sum0 = ip_csum_add_even (tcp_sum0, my_seq_net0);
+
+	  tcp0->header.ack_number = his_seq_net0;
+	  tcp_sum0 = ip_csum_add_even (tcp_sum0, his_seq_net0);
+
+	  est0->my_time_stamp_host_byte_order = timestamp_now_host_byte_order;
+	  tcp0->options.time_stamp.my_time_stamp = timestamp_now_net_byte_order;
+	  tcp_sum0 = ip_csum_add_even (tcp_sum0, timestamp_now_net_byte_order);
+
+	  tcp0->options.time_stamp.his_time_stamp = est0->his_time_stamp_net_byte_order;
+	  tcp_sum0 = ip_csum_add_even (tcp_sum0, est0->his_time_stamp_net_byte_order);
+
+	  tcp0->header.checksum = ip_csum_fold (tcp_sum0);
+
+	  est0->flags &= ~TCP_CONNECTION_FLAG_ACK_PENDING;
+
+	  to_next[0] = bi0;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+	  n_connections_left -= 1;
+	  n_acks += 1;
+	}
+
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  vlib_error_count (vm, error_node->node_index, TCP_ERROR_ACKS_SENT, n_acks);
+
+  return n_acks;
+}
+
+static uword
+ip4_tcp_output (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_output (vm, node, frame, /* is_ip6 */ 0); }
+
+static uword
+ip6_tcp_output (vlib_main_t * vm,
+		vlib_node_runtime_t * node,
+		vlib_frame_t * frame)
+{ return ip46_tcp_output (vm, node, frame, /* is_ip6 */ 1); }
+
+static VLIB_REGISTER_NODE (ip4_tcp_output_node) = {
+  .function = ip4_tcp_output,
+  .type = VLIB_NODE_TYPE_INPUT,
+  .name = "ip4-tcp-output",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_tcp_output_node) = {
+  .function = ip6_tcp_output,
+  .name = "ip6-tcp-output",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+  },
+};
+
+typedef enum {
+  TCP_ESTABLISHED_NEXT_DROP,
+  TCP_ESTABLISHED_N_NEXT,
+} tcp_established_next_t;
 
 always_inline uword
 ip46_tcp_established (vlib_main_t * vm,
@@ -1967,7 +2154,7 @@ ip46_tcp_established (vlib_main_t * vm,
   ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
   uword n_packets = frame->n_vectors;
   u32 * from, * to_next;
-  u32 n_left_from, n_left_to_next, next;
+  u32 n_left_from, n_left_to_next, next, timestamp_now;
   vlib_node_runtime_t * error_node;
 
   error_node = vlib_node_get_runtime
@@ -1976,6 +2163,7 @@ ip46_tcp_established (vlib_main_t * vm,
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
   next = node->cached_next_index;
+  timestamp_now = tcp_time_now (tm, TCP_TIMER_timestamp);
   
   while (n_left_from > 0)
     {
@@ -2046,6 +2234,33 @@ ip46_tcp_established (vlib_main_t * vm,
 	  n_ack0 = his_ack_host0 - est0->sequence_numbers.ours;
 	  tcp_ack (tm, est0, n_ack0);
 	  est0->sequence_numbers.ours = his_ack_host0;
+
+	  {
+	    u32 t = tcp_options_decode_for_ack (tm, tcp0, &est0->his_time_stamp_net_byte_order);
+	    if (t != est0->my_time_stamp_host_byte_order)
+	      {
+		f64 dt = (timestamp_now - t) * tm->secs_per_tick[TCP_TIMER_timestamp];
+		est0->round_trip_time_stats.sum += dt;
+		est0->round_trip_time_stats.sum2 += dt*dt;
+		est0->round_trip_time_stats.count += 1;
+		est0->my_time_stamp_host_byte_order = t;
+
+		{
+		  ELOG_TYPE_DECLARE (e) = {
+		    .format = "ack rtt: %.4e",
+		    .format_args = "f8",
+		  };
+		  struct { f64 dt; } * ed;
+		  ed = ELOG_DATA (&vm->elog_main, e);
+		  ed->dt = dt;
+		}
+	      }
+	  }
+
+	  vec_add1 (tm46->connections_pending_acks, pi0->established_connection_index);
+	  _vec_len (tm46->connections_pending_acks) -=
+	    (est0->flags & TCP_CONNECTION_FLAG_ACK_PENDING) != 0;
+	  est0->flags |= TCP_CONNECTION_FLAG_ACK_PENDING;
 
 	  next0 = n_data_bytes0 > 0 ? l0->next_index : next0;
 
