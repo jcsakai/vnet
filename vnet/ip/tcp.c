@@ -512,6 +512,15 @@ typedef struct {
   u32 listener_opaque;
 } tcp_established_connection_t;
 
+typedef enum {
+  TCP_PACKET_TEMPLATE_SYN,
+  TCP_PACKET_TEMPLATE_SYN_ACK,
+  TCP_PACKET_TEMPLATE_ACK,
+  TCP_PACKET_TEMPLATE_FIN_ACK,
+  TCP_PACKET_TEMPLATE_RST_ACK,
+  TCP_N_PACKET_TEMPLATE,
+} tcp_packet_template_type_t;
+
 typedef struct {
   u8 log2_n_mini_connection_hash_elts;
   u8 log2_n_established_connection_hash_elts;
@@ -532,6 +541,8 @@ typedef struct {
   /* Default valid_local_adjacency_bitmap for listeners who want to listen
      for a given port in on all interfaces. */
   uword * default_valid_local_adjacency_bitmap;
+
+  vlib_packet_template_t packet_templates[TCP_N_PACKET_TEMPLATE];
 } ip46_tcp_main_t;
 
 typedef enum {
@@ -679,10 +690,6 @@ typedef struct {
 
   tcp_lookup_disposition_t disposition_by_state_and_flags[TCP_N_CONNECTION_STATE][64];
 
-  struct {
-    vlib_packet_template_t syn, syn_ack, ack;
-  } ip4_packet_templates, ip6_packet_templates;
-
   u8 log2_clocks_per_tick[TCP_N_TIMER];
 
   f64 secs_per_tick[TCP_N_TIMER];
@@ -787,7 +794,6 @@ ip46_tcp_lookup (vlib_main_t * vm,
 		 vlib_frame_t * frame,
 		 uword is_ip6)
 {
-  ip_lookup_main_t * im = &ip4_main.lookup_main;
   tcp_main_t * tm = &tcp_main;
   ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
   uword n_packets = frame->n_vectors;
@@ -1091,23 +1097,32 @@ do {									\
   /* IP4 packet templates. */
   {
     ip4_tcp_syn_packet_t ip4_syn, ip4_syn_ack;
-    ip4_tcp_ack_packet_t ip4_ack;
+    ip4_tcp_ack_packet_t ip4_ack, ip4_fin_ack, ip4_rst_ack;
     ip6_tcp_syn_packet_t ip6_syn, ip6_syn_ack;
-    ip6_tcp_ack_packet_t ip6_ack;
+    ip6_tcp_ack_packet_t ip6_ack, ip6_fin_ack, ip6_rst_ack;
 
     memset (&ip4_syn, 0, sizeof (ip4_syn));
     memset (&ip4_syn_ack, 0, sizeof (ip4_syn_ack));
     memset (&ip4_ack, 0, sizeof (ip4_ack));
+    memset (&ip4_fin_ack, 0, sizeof (ip4_fin_ack));
+    memset (&ip4_rst_ack, 0, sizeof (ip4_rst_ack));
     memset (&ip6_syn, 0, sizeof (ip6_syn));
     memset (&ip6_syn_ack, 0, sizeof (ip6_syn_ack));
     memset (&ip6_ack, 0, sizeof (ip6_ack));
+    memset (&ip6_fin_ack, 0, sizeof (ip6_fin_ack));
+    memset (&ip6_rst_ack, 0, sizeof (ip6_rst_ack));
 
     ip4_tcp_packet_init (&ip4_syn.ip4, sizeof (ip4_syn));
     ip4_tcp_packet_init (&ip4_syn_ack.ip4, sizeof (ip4_syn_ack));
     ip4_tcp_packet_init (&ip4_ack.ip4, sizeof (ip4_ack));
+    ip4_tcp_packet_init (&ip4_fin_ack.ip4, sizeof (ip4_fin_ack));
+    ip4_tcp_packet_init (&ip4_rst_ack.ip4, sizeof (ip4_rst_ack));
+
     ip6_tcp_packet_init (&ip6_syn.ip6, sizeof (ip6_syn));
     ip6_tcp_packet_init (&ip6_syn_ack.ip6, sizeof (ip6_syn_ack));
     ip6_tcp_packet_init (&ip6_ack.ip6, sizeof (ip6_ack));
+    ip6_tcp_packet_init (&ip6_fin_ack.ip6, sizeof (ip6_fin_ack));
+    ip6_tcp_packet_init (&ip6_rst_ack.ip6, sizeof (ip6_rst_ack));
 
     /* TCP header. */
     {
@@ -1115,6 +1130,8 @@ do {									\
       tcp_syn_packet_t * s = &ip4_syn.tcp;
       tcp_syn_packet_t * sa = &ip4_syn_ack.tcp;
       tcp_ack_packet_t * a = &ip4_ack.tcp;
+      tcp_ack_packet_t * fa = &ip4_fin_ack.tcp;
+      tcp_ack_packet_t * ra = &ip4_rst_ack.tcp;
 
       s->header.tcp_header_u32s_and_reserved = (sizeof (s[0]) / sizeof (u32)) << 4;
       a->header.tcp_header_u32s_and_reserved = (sizeof (a[0]) / sizeof (u32)) << 4;
@@ -1145,10 +1162,18 @@ do {									\
       a->options.time_stamp.length = 10;
       memset (&a->options.nops, TCP_OPTION_NOP, sizeof (a->options.nops));
 
+      /* {FIN,RST}-ACK are same as ACK but with {FIN,RST} flag set. */
+      fa[0] = a[0];
+      fa->header.flags |= TCP_FLAG_FIN;
+      ra[0] = a[0];
+      ra->header.flags |= TCP_FLAG_RST;
+
       /* IP6 TCP headers are identical. */
       ip6_syn.tcp = s[0];
       ip6_syn_ack.tcp = sa[0];
       ip6_ack.tcp = a[0];
+      ip6_fin_ack.tcp = fa[0];
+      ip6_rst_ack.tcp = ra[0];
 
       /* TCP checksums. */
       {
@@ -1157,6 +1182,14 @@ do {									\
 	sum = clib_host_to_net_u32 (sizeof (ip4_ack.tcp) + (ip4_ack.ip4.protocol << 16));
 	sum = ip_incremental_checksum (sum, &ip4_ack.tcp, sizeof (ip4_ack.tcp));
 	ip4_ack.tcp.header.checksum = ~ ip_csum_fold (sum);
+
+	sum = clib_host_to_net_u32 (sizeof (ip4_fin_ack.tcp) + (ip4_fin_ack.ip4.protocol << 16));
+	sum = ip_incremental_checksum (sum, &ip4_fin_ack.tcp, sizeof (ip4_fin_ack.tcp));
+	ip4_fin_ack.tcp.header.checksum = ~ ip_csum_fold (sum);
+
+	sum = clib_host_to_net_u32 (sizeof (ip4_rst_ack.tcp) + (ip4_rst_ack.ip4.protocol << 16));
+	sum = ip_incremental_checksum (sum, &ip4_rst_ack.tcp, sizeof (ip4_rst_ack.tcp));
+	ip4_rst_ack.tcp.header.checksum = ~ ip_csum_fold (sum);
 
 	sum = clib_host_to_net_u32 (sizeof (ip4_syn.tcp) + (ip4_syn.ip4.protocol << 16));
 	sum = ip_incremental_checksum (sum, &ip4_syn.tcp, sizeof (ip4_syn.tcp));
@@ -1170,6 +1203,14 @@ do {									\
 	sum = ip_incremental_checksum (sum, &ip6_ack.tcp, sizeof (ip6_ack.tcp));
 	ip6_ack.tcp.header.checksum = ~ ip_csum_fold (sum);
 
+	sum = clib_host_to_net_u32 (sizeof (ip6_fin_ack.tcp)) + ip6_fin_ack.ip6.protocol;
+	sum = ip_incremental_checksum (sum, &ip6_fin_ack.tcp, sizeof (ip6_fin_ack.tcp));
+	ip6_fin_ack.tcp.header.checksum = ~ ip_csum_fold (sum);
+
+	sum = clib_host_to_net_u32 (sizeof (ip6_rst_ack.tcp)) + ip6_rst_ack.ip6.protocol;
+	sum = ip_incremental_checksum (sum, &ip6_rst_ack.tcp, sizeof (ip6_rst_ack.tcp));
+	ip6_rst_ack.tcp.header.checksum = ~ ip_csum_fold (sum);
+
 	sum = clib_host_to_net_u32 (sizeof (ip6_syn.tcp)) + ip6_syn.ip6.protocol;
 	sum = ip_incremental_checksum (sum, &ip6_syn.tcp, sizeof (ip6_syn.tcp));
 	ip6_syn.tcp.header.checksum = ~ ip_csum_fold (sum);
@@ -1180,36 +1221,23 @@ do {									\
       }
     }
 
-    vlib_packet_template_init (vm,
-			       &tm->ip4_packet_templates.syn,
-			       /* data */ &ip4_syn,
-			       sizeof (ip4_syn),
-			       /* alloc chunk size */ VLIB_FRAME_SIZE);
-    vlib_packet_template_init (vm,
-			       &tm->ip4_packet_templates.syn_ack,
-			       /* data */ &ip4_syn_ack,
-			       sizeof (ip4_syn_ack),
-			       /* alloc chunk size */ VLIB_FRAME_SIZE);
-    vlib_packet_template_init (vm,
-			       &tm->ip4_packet_templates.ack,
-			       /* data */ &ip4_ack,
-			       sizeof (ip4_ack),
-			       /* alloc chunk size */ VLIB_FRAME_SIZE);
-    vlib_packet_template_init (vm,
-			       &tm->ip6_packet_templates.syn,
-			       /* data */ &ip6_syn,
-			       sizeof (ip6_syn),
-			       /* alloc chunk size */ VLIB_FRAME_SIZE);
-    vlib_packet_template_init (vm,
-			       &tm->ip6_packet_templates.syn_ack,
-			       /* data */ &ip6_syn_ack,
-			       sizeof (ip6_syn_ack),
-			       /* alloc chunk size */ VLIB_FRAME_SIZE);
-    vlib_packet_template_init (vm,
-			       &tm->ip6_packet_templates.ack,
-			       /* data */ &ip6_ack,
-			       sizeof (ip6_ack),
-			       /* alloc chunk size */ VLIB_FRAME_SIZE);
+#define _(v,t,x)							\
+    vlib_packet_template_init (vm, &tm->v.packet_templates[t], &x, sizeof (x), \
+      /* alloc chunk size */ VLIB_FRAME_SIZE)
+
+    _ (ip4, TCP_PACKET_TEMPLATE_SYN, ip4_syn);
+    _ (ip4, TCP_PACKET_TEMPLATE_SYN_ACK, ip4_syn_ack);
+    _ (ip4, TCP_PACKET_TEMPLATE_ACK, ip4_ack);
+    _ (ip4, TCP_PACKET_TEMPLATE_FIN_ACK, ip4_fin_ack);
+    _ (ip4, TCP_PACKET_TEMPLATE_RST_ACK, ip4_rst_ack);
+
+    _ (ip6, TCP_PACKET_TEMPLATE_SYN, ip6_syn);
+    _ (ip6, TCP_PACKET_TEMPLATE_SYN_ACK, ip6_syn_ack);
+    _ (ip6, TCP_PACKET_TEMPLATE_ACK, ip6_ack);
+    _ (ip6, TCP_PACKET_TEMPLATE_FIN_ACK, ip6_fin_ack);
+    _ (ip6, TCP_PACKET_TEMPLATE_RST_ACK, ip6_rst_ack);
+
+#undef _
   }
 }
 
@@ -1476,8 +1504,10 @@ ip46_tcp_listen (vlib_main_t * vm,
 	      ip6_tcp_syn_packet_t * r0;
 	      uword tmp0, i;
 
-	      r0 = vlib_packet_template_get_packet (vm, &tm->ip6_packet_templates.syn_ack,
-						    &bi_reply0);
+	      r0 = vlib_packet_template_get_packet
+		(vm,
+		 &tm->ip6.packet_templates[TCP_PACKET_TEMPLATE_SYN_ACK],
+		 &bi_reply0);
 	      tcp_reply0 = &r0->tcp;
 
 	      tcp_sum0 = r0->tcp.header.checksum;
@@ -1497,8 +1527,10 @@ ip46_tcp_listen (vlib_main_t * vm,
 	      ip_csum_t ip_sum0;
 	      u32 src0, dst0;
 
-	      r0 = vlib_packet_template_get_packet (vm, &tm->ip4_packet_templates.syn_ack,
-						    &bi_reply0);
+	      r0 = vlib_packet_template_get_packet
+		(vm,
+		 &tm->ip4.packet_templates[TCP_PACKET_TEMPLATE_SYN_ACK],
+		 &bi_reply0);
 	      tcp_reply0 = &r0->tcp;
 
 	      ip_sum0 = r0->ip4.checksum;
@@ -2026,7 +2058,8 @@ ip46_tcp_output (vlib_main_t * vm,
 	      uword tmp0, i;
 
 	      esta0 = vec_elt_at_index (tm->ip6_established_connection_address_hash, iest_div0);
-	      r0 = vlib_packet_template_get_packet (vm, &tm->ip6_packet_templates.ack, &bi0);
+	      r0 = vlib_packet_template_get_packet
+		(vm, &tm->ip6.packet_templates[TCP_PACKET_TEMPLATE_SYN_ACK], &bi0);
 	      tcp0 = &r0->tcp;
 
 	      tcp_sum0 = r0->tcp.header.checksum;
@@ -2050,7 +2083,8 @@ ip46_tcp_output (vlib_main_t * vm,
 	      u32 src0, dst0;
 
 	      esta0 = vec_elt_at_index (tm->ip4_established_connection_address_hash, iest_div0);
-	      r0 = vlib_packet_template_get_packet (vm, &tm->ip4_packet_templates.ack, &bi0);
+	      r0 = vlib_packet_template_get_packet
+		(vm, &tm->ip4.packet_templates[TCP_PACKET_TEMPLATE_SYN_ACK], &bi0);
 	      tcp0 = &r0->tcp;
 
 	      ip_sum0 = r0->ip4.checksum;
