@@ -569,6 +569,8 @@ typedef struct {
      for a given port in on all interfaces. */
   uword * default_valid_local_adjacency_bitmap;
 
+  u32 output_node_index;
+
   tcp_packet_template_t packet_templates[TCP_N_PACKET_TEMPLATE];
 } ip46_tcp_main_t;
 
@@ -589,6 +591,12 @@ typedef enum {
 #undef _
 } tcp_event_type_t;
 
+typedef enum {
+  TCP_IP4,
+  TCP_IP6,
+  TCP_N_IP46,
+} tcp_ip_4_or_6_t;
+
 typedef struct tcp_udp_listener_t {
   /* Bitmap indicating which of local (interface) addresses
      we should listen on for this destination port. */
@@ -604,9 +612,9 @@ typedef struct tcp_udp_listener_t {
 #define TCP_LISTENER_FLAG_ENABLE_IP6 (1 << 1)
 
   /* Connection indices for which event in event_function applies to. */
-  u32 * event_connections[2];
-  u32 * eof_connections[2];
-  u32 * close_connections[2];
+  u32 * event_connections[TCP_N_IP46];
+  u32 * eof_connections[TCP_N_IP46];
+  u32 * close_connections[TCP_N_IP46];
 
   void (* event_function) (struct tcp_udp_listener_t * l,
 			   u32 * connections,
@@ -715,7 +723,7 @@ typedef struct {
   ip4_tcp_udp_address_x4_t * ip4_established_connection_address_hash;
   ip6_tcp_udp_address_x4_t * ip6_established_connection_address_hash;
 
-  /* Jenkins hash seeds for various hash tables. */
+  /* Jenkins hash seeds for established and mini hash tables. */
   u32x4_union_t connection_hash_seeds[2][3];
   u32x4_union_t connection_hash_masks[2];
 
@@ -734,6 +742,9 @@ typedef struct {
   /* Holds pointers to default and per-packet TCP options while
      parsing a TCP packet's options. */
   tcp_mini_connection_t option_decode_mini_connection_template;
+
+  /* Count of currently established connections. */
+  u32 n_established_connections[TCP_N_IP46];
 } tcp_main_t;
 
 always_inline u32
@@ -2028,13 +2039,17 @@ ip46_tcp_establish (vlib_main_t * vm,
   /* Inform listeners of new connections. */
   {
     tcp_listener_t * l;
+    uword n;
     pool_foreach (l, tm->listener_pool, ({
-      if (vec_len (l->event_connections[is_ip6]) > 0)
+      if ((n = vec_len (l->event_connections[is_ip6])) > 0)
 	{
 	  if (l->event_function)
 	    l->event_function (l, l->event_connections[is_ip6],
 			       is_ip6,
 			       TCP_EVENT_connection_established);
+	  if (tm->n_established_connections[is_ip6] == 0)
+	    vlib_node_set_state (vm, tm46->output_node_index, VLIB_NODE_STATE_POLLING);
+	  tm->n_established_connections[is_ip6] += n;
 	  _vec_len (l->event_connections[is_ip6]) = 0;
 	}
     }));
@@ -2083,7 +2098,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_establish_node) = {
 
 always_inline void
 tcp_free_connection_x1 (vlib_main_t * vm, tcp_main_t * tm,
-			u32 is_ip6,
+			tcp_ip_4_or_6_t is_ip6,
 			u32 iest0)
 {
   ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
@@ -2113,7 +2128,7 @@ tcp_free_connection_x1 (vlib_main_t * vm, tcp_main_t * tm,
 
 always_inline void
 tcp_free_connection_x2 (vlib_main_t * vm, tcp_main_t * tm,
-			u32 is_ip6,
+			tcp_ip_4_or_6_t is_ip6,
 			u32 iest0, u32 iest1)
 {
   tcp_free_connection_x1 (vm, tm, is_ip6, iest0);
@@ -2124,7 +2139,7 @@ always_inline uword
 ip46_tcp_output (vlib_main_t * vm,
 		 vlib_node_runtime_t * node,
 		 vlib_frame_t * frame,
-		 u32 is_ip6)
+		 tcp_ip_4_or_6_t is_ip6)
 {
   tcp_main_t * tm = &tcp_main;
   ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
@@ -2166,6 +2181,10 @@ ip46_tcp_output (vlib_main_t * vm,
 
 	  cis = l->close_connections[is_ip6];
 	  n_left = vec_len (cis);
+	  ASSERT (tm->n_established_connections[is_ip6] >= n_left);
+	  tm->n_established_connections[is_ip6] -= n_left;
+	  if (tm->n_established_connections[is_ip6] == 0)
+	    vlib_node_set_state (vm, tm46->output_node_index, VLIB_NODE_STATE_DISABLED);
 	  while (n_left >= 2)
 	    {
 	      tcp_free_connection_x2 (vm, tm, is_ip6, cis[0], cis[1]);
@@ -2345,8 +2364,9 @@ ip6_tcp_output (vlib_main_t * vm,
 
 static VLIB_REGISTER_NODE (ip4_tcp_output_node) = {
   .function = ip4_tcp_output,
-  .type = VLIB_NODE_TYPE_INPUT,
   .name = "ip4-tcp-output",
+  .state = VLIB_NODE_STATE_DISABLED,
+  .type = VLIB_NODE_TYPE_INPUT,
 
   .vector_size = sizeof (u32),
 
@@ -2359,6 +2379,8 @@ static VLIB_REGISTER_NODE (ip4_tcp_output_node) = {
 static VLIB_REGISTER_NODE (ip6_tcp_output_node) = {
   .function = ip6_tcp_output,
   .name = "ip6-tcp-output",
+  .state = VLIB_NODE_STATE_DISABLED,
+  .type = VLIB_NODE_TYPE_INPUT,
 
   .vector_size = sizeof (u32),
 
@@ -2383,7 +2405,7 @@ always_inline uword
 ip46_tcp_established (vlib_main_t * vm,
 		      vlib_node_runtime_t * node,
 		      vlib_frame_t * frame,
-		      u32 is_ip6)
+		      tcp_ip_4_or_6_t is_ip6)
 {
   tcp_main_t * tm = &tcp_main;
   ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
@@ -2738,6 +2760,9 @@ tcp_udp_lookup_init (vlib_main_t * vm)
     cb.function_opaque = 0;
     vec_add1 (im6->add_del_interface_address_callbacks, cb);
   }
+
+  tm->ip4.output_node_index = ip4_tcp_output_node.index;
+  tm->ip6.output_node_index = ip6_tcp_output_node.index;
 
   tcp_lookup_init (vm, tm);
   tcp_options_decode_init (tm);
