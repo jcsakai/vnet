@@ -161,9 +161,9 @@ static u8 * format_ip4_tcp_udp_address_x4 (u8 * s, va_list * va)
   ASSERT (ai < 4);
 
   s = format (s, "%U:%d -> %U:%d",
-	      format_ip4_address, a->src.as_ip4_address[ai],
+	      format_ip4_address, &a->src.as_ip4_address[ai],
 	      clib_net_to_host_u16 (a->ports.as_ports[ai].src),
-	      format_ip4_address, a->dst.as_ip4_address[ai],
+	      format_ip4_address, &a->dst.as_ip4_address[ai],
 	      clib_net_to_host_u16 (a->ports.as_ports[ai].dst));
 
   return s;
@@ -414,6 +414,30 @@ typedef struct {
 } tcp_mini_connection_t;
 
 typedef struct {
+  /* Sum and sum^2 of measurements.
+     Used to compute average and RMS. */
+  f64 sum, sum2;
+
+  /* Number of measurements. */
+  f64 count;
+} tcp_round_trip_time_stats_t;
+
+always_inline uword
+tcp_round_trip_time_stats_is_valid (tcp_round_trip_time_stats_t * s)
+{ return s->count > 0; }
+
+always_inline void
+tcp_round_trip_time_stats_compute (tcp_round_trip_time_stats_t * s, f64 * r)
+{
+  f64 ave, rms;
+  ASSERT (s->count > 0);
+  ave = s->sum / s->count;
+  rms = sqrt (s->sum2 / s->count - ave*ave);
+  r[0] = ave;
+  r[1] = rms;
+}
+
+typedef struct {
   tcp_sequence_pair_t sequence_numbers;
 
   tcp_time_stamp_pair_t time_stamps;
@@ -448,10 +472,7 @@ typedef struct {
 
   u32 tx_tail_buffer_index;
 
-  struct {
-    f64 sum, sum2;
-    f64 count;
-  } round_trip_time_stats;
+  tcp_round_trip_time_stats_t round_trip_time_stats;
 
   u32 listener_opaque;
 } tcp_established_connection_t;
@@ -2733,6 +2754,7 @@ static u8 * format_tcp_connection_state (u8 * s, va_list * va)
     {
 #define _(f) case TCP_CONNECTION_STATE_##f: t = #f; break;
       foreach_tcp_connection_state
+#undef _
     default: break;
     }
   if (t)
@@ -2808,6 +2830,71 @@ static u8 * format_ip6_tcp_mini_connection (u8 * s, va_list * va)
   return s;
 }
 
+static u8 * format_tcp_established_connection (u8 * s, va_list * va)
+{
+  tcp_established_connection_t * c = va_arg (*va, tcp_established_connection_t *);
+
+  if (c->flags != 0)
+    {
+      s = format (s, ", flags: ");
+#define _(f) if (c->flags & TCP_CONNECTION_FLAG_##f) s = format (s, "%s, ", #f);
+      foreach_tcp_connection_flag;
+#undef _
+    }
+
+  if (tcp_round_trip_time_stats_is_valid (&c->round_trip_time_stats))
+    {
+      f64 r[2];
+      tcp_round_trip_time_stats_compute (&c->round_trip_time_stats, r);
+      s = format (s, ", rtt %.4e +- %.4e",
+		  r[0], r[1]);
+    }
+
+  return s;
+}
+
+static u8 * format_ip4_tcp_established_connection (u8 * s, va_list * va)
+{
+  u32 iest = va_arg (*va, u32);
+  u32 iest_div, iest_mod;
+  tcp_main_t * tm = &tcp_main;
+  tcp_established_connection_t * est;
+  ip4_tcp_udp_address_x4_t * esta;
+  
+  iest_div = iest / 4;
+  iest_mod = iest % 4;
+
+  esta = vec_elt_at_index (tm->ip4_established_connection_address_hash, iest_div);
+  est = vec_elt_at_index (tm->ip4.established_connections, iest);
+
+  s = format (s, "%U%U",
+	      format_ip4_tcp_udp_address_x4, esta, iest_mod,
+	      format_tcp_established_connection, est);
+
+  return s;
+}
+
+static u8 * format_ip6_tcp_established_connection (u8 * s, va_list * va)
+{
+  u32 iest = va_arg (*va, u32);
+  u32 iest_div, iest_mod;
+  tcp_main_t * tm = &tcp_main;
+  tcp_established_connection_t * est;
+  ip6_tcp_udp_address_x4_t * esta;
+  
+  iest_div = iest / 4;
+  iest_mod = iest % 4;
+
+  esta = vec_elt_at_index (tm->ip6_established_connection_address_hash, iest_div);
+  est = vec_elt_at_index (tm->ip6.established_connections, iest);
+
+  s = format (s, "%U%U",
+	      format_ip6_tcp_udp_address_x4, esta, iest_mod,
+	      format_tcp_established_connection, est);
+
+  return s;
+}
+
 VLIB_CLI_COMMAND (vlib_cli_show_tcp_command) = {
   .name = "tcp",
   .short_help = "Transmission control protocol (TCP) show commands",
@@ -2860,7 +2947,7 @@ show_mini_connections (vlib_main_t * vm, unformat_input_t * input, vlib_cli_comm
     }
 
   if (n_valid == 0)
-    vlib_cli_output (vm, "no %U mini connections", format_tcp_ip_4_or_6, is_ip6);
+    vlib_cli_output (vm, "no %U mini tcp connections", format_tcp_ip_4_or_6, is_ip6);
 
   return error;
 }
@@ -2870,4 +2957,62 @@ VLIB_CLI_COMMAND (vlib_cli_show_tcp_mini_connections_command) = {
   .short_help = "Show not-yet established TCP connections",
   .parent = &vlib_cli_show_tcp_command,
   .function = show_mini_connections,
+};
+
+static clib_error_t *
+show_established_connections (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46;
+  tcp_ip_4_or_6_t is_ip6 = TCP_IP4;
+  tcp_established_connection_t * est;
+  ip6_tcp_udp_address_x4_t * esta6;
+  ip4_tcp_udp_address_x4_t * esta4;
+  clib_error_t * error = 0;
+  uword i, i0, i1, n_valid;
+
+  if (unformat (input, "4"))
+    is_ip6 = TCP_IP4;
+  if (unformat (input, "6"))
+    is_ip6 = TCP_IP6;
+
+  n_valid = 0;
+  tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  for (i = 0; i < vec_len (tm46->established_connections); i++)
+    {
+      i0 = i / 4;
+      i1 = i % 4;
+
+      est = vec_elt_at_index (tm46->established_connections, i);
+      if (is_ip6)
+	{
+	  esta6 = vec_elt_at_index (tm->ip6_established_connection_address_hash, i0);
+	  if (ip6_tcp_udp_address_x4_is_valid (esta6, i1))
+	    {
+	      vlib_cli_output (vm, "%U", format_ip6_tcp_established_connection, i);
+	      n_valid += 1;
+	    }
+	}
+      else
+	{
+	  esta4 = vec_elt_at_index (tm->ip4_established_connection_address_hash, i0);
+	  if (ip4_tcp_udp_address_x4_is_valid (esta4, i1))
+	    {
+	      vlib_cli_output (vm, "%U", format_ip4_tcp_established_connection, i);
+	      n_valid += 1;
+	    }
+	}
+    }
+
+  if (n_valid == 0)
+    vlib_cli_output (vm, "no %U established tcp connections", format_tcp_ip_4_or_6, is_ip6);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (vlib_cli_show_tcp_established_connections_command) = {
+  .name = "connections",
+  .short_help = "Show established TCP connections",
+  .parent = &vlib_cli_show_tcp_command,
+  .function = show_established_connections,
 };
