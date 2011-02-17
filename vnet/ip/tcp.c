@@ -26,133 +26,6 @@
 #include <vnet/ip/ip.h>
 #include <math.h>
 
-typedef union {
-  struct {
-    u16 src, dst;
-  };
-  u32 as_u32;
-} tcp_udp_ports_t;
-
-typedef struct {
-  union {
-    struct {
-      ip4_address_t src, dst;
-    };
-    u64 as_u64;
-  } addresses;
-  tcp_udp_ports_t ports;
-} ip4_tcp_udp_address_t;
-
-always_inline void
-ip4_tcp_udp_address_from_header2 (ip4_tcp_udp_address_t * a,
-				  ip4_header_t * ip,
-				  tcp_header_t * tcp)
-{
-  a->addresses.as_u64 = clib_mem_unaligned (&ip->src_address, u64);
-  a->ports.as_u32 = clib_mem_unaligned (&tcp->ports.src_and_dst, u32);
-}
-
-always_inline void
-ip4_tcp_udp_address_from_header (ip4_tcp_udp_address_t * a,
-				 ip4_header_t * ip)
-{
-  tcp_header_t * tcp = ip4_next_header (ip);
-  ip4_tcp_udp_address_from_header2 (a, ip, tcp);
-}
-
-always_inline uword
-ip4_tcp_udp_address_is_equal (ip4_tcp_udp_address_t * a0,
-			      ip4_tcp_udp_address_t * a1)
-{
-  return (a0->addresses.as_u64 == a1->addresses.as_u64
-	  && a0->ports.as_u32 == a1->ports.as_u32);
-}
-
-always_inline uword
-ip4_tcp_udp_address_is_equal_to_header (ip4_tcp_udp_address_t * a,
-					ip4_header_t * ip,
-					tcp_header_t * tcp)
-{
-  return (a->addresses.as_u64 == clib_mem_unaligned (&ip->src_address, u64)
-	  && a->ports.as_u32 == clib_mem_unaligned (&tcp->ports.src_and_dst, u32));
-}
-
-static u8 * format_ip4_tcp_udp_address (u8 * s, va_list * args)
-{
-  ip4_tcp_udp_address_t * a = va_arg (*args, ip4_tcp_udp_address_t *);
-
-  s = format (s, "%U:%d -> %U:%d",
-	      format_ip4_address, a->addresses.src,
-	      clib_net_to_host_u16 (a->ports.src),
-	      format_ip4_address, a->addresses.dst,
-	      clib_net_to_host_u16 (a->ports.dst));
-
-  return s;
-}
-
-typedef struct {
-  union {
-    struct {
-      ip6_address_t src, dst;
-    };
-    u64 as_u64[4];
-  } addresses;
-  tcp_udp_ports_t ports;
-} ip6_tcp_udp_address_t;
-
-always_inline void
-ip6_tcp_udp_address_from_header2 (ip6_tcp_udp_address_t * a,
-				  ip6_header_t * ip,
-				  tcp_header_t * tcp)
-{
-  a->addresses.as_u64[0] = clib_mem_unaligned (&ip->src_address.as_u64[0], u64);
-  a->addresses.as_u64[1] = clib_mem_unaligned (&ip->src_address.as_u64[1], u64);
-  a->addresses.as_u64[2] = clib_mem_unaligned (&ip->src_address.as_u64[2], u64);
-  a->addresses.as_u64[3] = clib_mem_unaligned (&ip->src_address.as_u64[3], u64);
-  a->ports.as_u32 = clib_mem_unaligned (&tcp->ports.src_and_dst, u32);
-}
-
-always_inline void
-ip6_tcp_udp_address_from_header (ip6_tcp_udp_address_t * a,
-				 ip6_header_t * ip)
-{
-  tcp_header_t * tcp = ip6_next_header (ip);
-  ip6_tcp_udp_address_from_header2 (a, ip, tcp);
-}
-
-always_inline uword
-ip6_tcp_udp_address_is_equal (ip6_tcp_udp_address_t * a0,
-			      ip6_tcp_udp_address_t * a1)
-{
-  return (a0->addresses.as_u64 == a1->addresses.as_u64
-	  && a0->ports.as_u32 == a1->ports.as_u32);
-}
-
-always_inline uword
-ip6_tcp_udp_address_is_equal_to_header (ip6_tcp_udp_address_t * a,
-					ip6_header_t * ip,
-					tcp_header_t * tcp)
-{
-  return (a->addresses.as_u64[0] == clib_mem_unaligned (&ip->src_address.as_u64[0], u64)
-	  && a->addresses.as_u64[1] == clib_mem_unaligned (&ip->src_address.as_u64[1], u64)
-	  && a->addresses.as_u64[2] == clib_mem_unaligned (&ip->src_address.as_u64[2], u64)
-	  && a->addresses.as_u64[3] == clib_mem_unaligned (&ip->src_address.as_u64[3], u64)
-	  && a->ports.as_u32 == clib_mem_unaligned (&tcp->ports.src_and_dst, u32));
-}
-
-static u8 * format_ip6_tcp_udp_address (u8 * s, va_list * args)
-{
-  ip6_tcp_udp_address_t * a = va_arg (*args, ip6_tcp_udp_address_t *);
-
-  s = format (s, "%U:%d -> %U:%d",
-	      format_ip6_address, &a->addresses.src,
-	      clib_net_to_host_u16 (a->ports.src),
-	      format_ip6_address, &a->addresses.dst,
-	      clib_net_to_host_u16 (a->ports.dst));
-
-  return s;
-}
-
 static u8 my_zero_mask_table[256] = {
   [0xf0] = (1 << 1),
   [0x0f] = (1 << 0),
@@ -178,6 +51,13 @@ always_inline u32 my_first_set (u32 zero_mask)
   u8 r1 = 2 + my_first_set_table[(zero_mask >> 8) & 0xff];
   return r0 != 4 ? r0 : r1;
 }
+
+typedef union {
+  struct {
+    u16 src, dst;
+  };
+  u32 as_u32;
+} tcp_udp_ports_t;
 
 typedef union {
   u32x4 as_u32x4;
@@ -224,6 +104,14 @@ ip4_tcp_udp_address_x4_invalidate (ip4_tcp_udp_address_x4_t * a, u32 i)
 }
 
 always_inline uword
+ip4_tcp_udp_address_x4_is_valid (ip4_tcp_udp_address_x4_t * a, u32 i)
+{
+  return !(a->src.as_ip4_address[i].as_u32 == 0
+	   && a->dst.as_ip4_address[i].as_u32 == 0
+	   && a->ports.as_ports[i].as_u32 == 0);
+}
+
+always_inline uword
 ip4_tcp_udp_address_x4_match_helper (ip4_tcp_udp_address_x4_t * ax4,
 				     u32x4 src, u32x4 dst, u32x4 ports)
 {
@@ -264,6 +152,21 @@ ip4_tcp_udp_address_x4_empty_mask (ip4_tcp_udp_address_x4_t * ax4)
 {
   u32x4 zero = {0};
   return my_zero_mask (ip4_tcp_udp_address_x4_match_helper (ax4, zero, zero, zero));
+}
+
+static u8 * format_ip4_tcp_udp_address_x4 (u8 * s, va_list * va)
+{
+  ip4_tcp_udp_address_x4_t * a = va_arg (*va, ip4_tcp_udp_address_x4_t *);  
+  u32 ai = va_arg (*va, u32);
+  ASSERT (ai < 4);
+
+  s = format (s, "%U:%d -> %U:%d",
+	      format_ip4_address, a->src.as_ip4_address[ai],
+	      clib_net_to_host_u16 (a->ports.as_ports[ai].src),
+	      format_ip4_address, a->dst.as_ip4_address[ai],
+	      clib_net_to_host_u16 (a->ports.as_ports[ai].dst));
+
+  return s;
 }
 
 typedef struct {
@@ -310,8 +213,7 @@ ip6_tcp_udp_address_x4_copy_and_invalidate (ip6_tcp_udp_address_x4_t * dst,
 }
 
 always_inline void
-ip6_tcp_udp_address_x4_invalidate (ip6_tcp_udp_address_x4_t * a,
-				   u32 i)
+ip6_tcp_udp_address_x4_invalidate (ip6_tcp_udp_address_x4_t * a, u32 i)
 {
   a->src.as_u32[0][i] = 0;
   a->src.as_u32[1][i] = 0;
@@ -322,6 +224,20 @@ ip6_tcp_udp_address_x4_invalidate (ip6_tcp_udp_address_x4_t * a,
   a->dst.as_u32[2][i] = 0;
   a->dst.as_u32[3][i] = 0;
   a->ports.as_ports[i].as_u32 = 0;
+}
+
+always_inline uword
+ip6_tcp_udp_address_x4_is_valid (ip6_tcp_udp_address_x4_t * a, u32 i)
+{
+  return !(a->src.as_u32[0][i] == 0
+	   && a->src.as_u32[1][i] == 0
+	   && a->src.as_u32[2][i] == 0
+	   && a->src.as_u32[3][i] == 0
+	   && a->dst.as_u32[0][i] == 0
+	   && a->dst.as_u32[1][i] == 0
+	   && a->dst.as_u32[2][i] == 0
+	   && a->dst.as_u32[3][i] == 0
+	   && a->ports.as_ports[i].as_u32 == 0);
 }
 
 always_inline uword
@@ -388,6 +304,28 @@ ip6_tcp_udp_address_x4_empty_mask (ip6_tcp_udp_address_x4_t * ax4)
 							    zero, zero, zero, zero,
 							    zero, zero, zero, zero,
 							    zero));
+}
+
+static u8 * format_ip6_tcp_udp_address_x4 (u8 * s, va_list * va)
+{
+  ip6_tcp_udp_address_x4_t * a = va_arg (*va, ip6_tcp_udp_address_x4_t *);  
+  u32 i, ai = va_arg (*va, u32);
+  ip6_address_t src, dst;
+
+  ASSERT (ai < 4);
+  for (i = 0; i < 4; i++)
+    {
+      src.as_u32[i] = a->src.as_u32[i][ai];
+      dst.as_u32[i] = a->dst.as_u32[i][ai];
+    }
+
+  s = format (s, "%U:%d -> %U:%d",
+	      format_ip6_address, &src,
+	      clib_net_to_host_u16 (a->ports.as_ports[ai].src),
+	      format_ip6_address, &dst,
+	      clib_net_to_host_u16 (a->ports.as_ports[ai].dst));
+
+  return s;
 }
 
 #define foreach_tcp_timer			\
@@ -834,6 +772,7 @@ always_inline u32x4 u32x4_set_x2 (u32 x, u32 y)
   return u32x4_interleave_lo (r0, r1);
 }
 
+/* FIXME */
 #define u32x4_get(x,i)					\
   __builtin_ia32_vec_ext_v4si ((i32x4) (x), (int) (i))
 
@@ -2519,7 +2458,7 @@ ip46_tcp_established (vlib_main_t * vm,
 	  }
 	  
 	  send_ack0 = ((est0->flags & TCP_CONNECTION_FLAG_ack_pending) == 0
-		       && n_data_bytes0 > 0);
+		       && (n_data_bytes0 > 0 || is_fin0));
 	  vec_add1 (tm46->connections_pending_acks, pi0->established_connection_index);
 	  _vec_len (tm46->connections_pending_acks) -= ! send_ack0;
 	  est0->flags |= send_ack0 << LOG2_TCP_CONNECTION_FLAG_ack_pending;
@@ -2771,3 +2710,164 @@ tcp_udp_lookup_init (vlib_main_t * vm)
 }
 
 VLIB_INIT_FUNCTION (tcp_udp_lookup_init);
+
+static u8 * format_tcp_time_stamp (u8 * s, va_list * va)
+{
+  tcp_timer_type_t type = va_arg (*va, tcp_timer_type_t);
+  u32 value = va_arg (*va, u32);
+  vlib_main_t * vm = &vlib_global_main;
+  tcp_main_t * tm = &tcp_main;
+  u64 now;
+  f64 dt;
+
+  now = clib_cpu_time_now ();
+  dt = vm->clib_time.seconds_per_clock * (now - (value << tm->log2_clocks_per_tick[type]));
+  return format (s, "%.4e sec", dt);
+}
+
+static u8 * format_tcp_connection_state (u8 * s, va_list * va)
+{
+  tcp_connection_state_t st = va_arg (*va, tcp_connection_state_t);
+  char * t = 0;
+  switch (st)
+    {
+#define _(f) case TCP_CONNECTION_STATE_##f: t = #f; break;
+      foreach_tcp_connection_state
+    default: break;
+    }
+  if (t)
+    s = format (s, "%s", t);
+  else
+    s = format (s, "unknown 0x%x", st);
+
+  return s;
+}
+
+static u8 * format_tcp_ip_4_or_6 (u8 * s, va_list * va)
+{
+  tcp_ip_4_or_6_t is_ip6 = va_arg (*va, tcp_ip_4_or_6_t);
+  return format (s, "%s", is_ip6 ? "ip6" : "ip4");
+}
+
+static u8 * format_tcp_mini_connection (u8 * s, va_list * va)
+{
+  tcp_mini_connection_t * c = va_arg (*va, tcp_mini_connection_t *);
+
+  s = format (s, "state %U, window scale %d, mss %d",
+	      format_tcp_connection_state, c->state,
+	      c->window_scale, c->max_segment_size);
+
+  return s;
+}
+
+static u8 * format_ip4_tcp_mini_connection (u8 * s, va_list * va)
+{
+  u32 imin = va_arg (*va, u32);
+  u32 imin_div, imin_mod;
+  tcp_main_t * tm = &tcp_main;
+  tcp_mini_connection_t * min;
+  ip4_tcp_udp_address_x4_and_timestamps_t * mina;
+  
+  imin_div = imin / 4;
+  imin_mod = imin % 4;
+
+  mina = vec_elt_at_index (tm->ip4_mini_connection_address_hash, imin_div);
+
+  s = format (s, "%U, age %U",
+	      format_ip4_tcp_udp_address_x4, &mina->address_x4, imin_div,
+	      format_tcp_time_stamp, TCP_TIMER_mini_connection, mina->time_stamps[imin_div]);
+
+  min = vec_elt_at_index (tm->ip4.mini_connections, imin);
+
+  s = format (s, "%U", format_tcp_mini_connection, min);
+
+  return s;
+}
+
+static u8 * format_ip6_tcp_mini_connection (u8 * s, va_list * va)
+{
+  u32 imin = va_arg (*va, u32);
+  u32 imin_div, imin_mod;
+  tcp_main_t * tm = &tcp_main;
+  tcp_mini_connection_t * min;
+  ip6_tcp_udp_address_x4_and_timestamps_t * mina;
+  
+  imin_div = imin / 4;
+  imin_mod = imin % 4;
+
+  mina = vec_elt_at_index (tm->ip6_mini_connection_address_hash, imin_div);
+
+  s = format (s, "%U, age %U",
+	      format_ip6_tcp_udp_address_x4, &mina->address_x4, imin_div,
+	      format_tcp_time_stamp, TCP_TIMER_mini_connection, mina->time_stamps[imin_div]);
+
+  min = vec_elt_at_index (tm->ip6.mini_connections, imin);
+
+  s = format (s, "%U", format_tcp_mini_connection, min);
+
+  return s;
+}
+
+VLIB_CLI_COMMAND (vlib_cli_show_tcp_command) = {
+  .name = "tcp",
+  .short_help = "Transmission control protocol (TCP) show commands",
+  .parent = &vlib_cli_show_command,
+};
+
+static clib_error_t *
+show_mini_connections (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  tcp_main_t * tm = &tcp_main;
+  ip46_tcp_main_t * tm46;
+  tcp_ip_4_or_6_t is_ip6 = TCP_IP4;
+  tcp_mini_connection_t * min;
+  ip6_tcp_udp_address_x4_and_timestamps_t * mina6;
+  ip4_tcp_udp_address_x4_and_timestamps_t * mina4;
+  clib_error_t * error = 0;
+  uword i, i0, i1, n_valid;
+
+  if (unformat (input, "4"))
+    is_ip6 = TCP_IP4;
+  if (unformat (input, "6"))
+    is_ip6 = TCP_IP6;
+
+  n_valid = 0;
+  tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  for (i = 0; i <= tm46->mini_connection_hash_mask; i++)
+    {
+      i0 = i / 4;
+      i1 = i % 4;
+
+      min = vec_elt_at_index (tm46->mini_connections, i);
+      if (is_ip6)
+	{
+	  mina6 = vec_elt_at_index (tm->ip6_mini_connection_address_hash, i0);
+	  if (ip6_tcp_udp_address_x4_is_valid (&mina6->address_x4, i1))
+	    {
+	      vlib_cli_output (vm, "%U", format_ip4_tcp_mini_connection, i);
+	      n_valid += 1;
+	    }
+	}
+      else
+	{
+	  mina4 = vec_elt_at_index (tm->ip4_mini_connection_address_hash, i0);
+	  if (ip4_tcp_udp_address_x4_is_valid (&mina4->address_x4, i1))
+	    {
+	      vlib_cli_output (vm, "%U", format_ip6_tcp_mini_connection, i);
+	      n_valid += 1;
+	    }
+	}
+    }
+
+  if (n_valid == 0)
+    vlib_cli_output (vm, "no %U mini connections", format_tcp_ip_4_or_6, is_ip6);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (vlib_cli_show_tcp_mini_connections_command) = {
+  .name = "mini-connections",
+  .short_help = "Show not-yet established TCP connections",
+  .parent = &vlib_cli_show_tcp_command,
+  .function = show_mini_connections,
+};
