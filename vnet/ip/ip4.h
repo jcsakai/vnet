@@ -273,15 +273,6 @@ void ip4_adjacency_set_interface_route (vlib_main_t * vm,
 					u32 sw_if_index,
 					u32 if_address_index);
 
-uword
-ip4_tcp_register_listener (vlib_main_t * vm,
-			   u16 dst_port,
-			   u32 next_node_index);
-uword
-ip4_udp_register_listener (vlib_main_t * vm,
-			   u16 dst_port,
-			   u32 next_node_index);
-
 u16 ip4_tcp_udp_compute_checksum (vlib_main_t * vm, vlib_buffer_t * p0, ip4_header_t * ip0);
 
 serialize_function_t serialize_vnet_ip4_main, unserialize_vnet_ip4_main;

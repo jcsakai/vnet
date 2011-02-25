@@ -24,6 +24,7 @@
  */
 
 #include <vnet/ip/ip.h>
+#include <vnet/ip/tcp.h>
 #include <math.h>
 
 static u8 my_zero_mask_table[256] = {
@@ -51,26 +52,6 @@ always_inline u32 my_first_set (u32 zero_mask)
   u8 r1 = 2 + my_first_set_table[(zero_mask >> 8) & 0xff];
   return r0 != 4 ? r0 : r1;
 }
-
-typedef union {
-  struct {
-    u16 src, dst;
-  };
-  u32 as_u32;
-} tcp_udp_ports_t;
-
-typedef union {
-  u32x4 as_u32x4;
-  tcp_udp_ports_t as_ports[4];
-} tcp_udp_ports_x4_t;
-
-typedef struct {
-  union {
-    u32x4 as_u32x4;
-    ip4_address_t as_ip4_address[4];
-  } src, dst;
-  tcp_udp_ports_x4_t ports;
-} ip4_tcp_udp_address_x4_t;
 
 always_inline void
 ip4_tcp_udp_address_x4_set_from_headers (ip4_tcp_udp_address_x4_t * a,
@@ -168,14 +149,6 @@ static u8 * format_ip4_tcp_udp_address_x4 (u8 * s, va_list * va)
 
   return s;
 }
-
-typedef struct {
-  union {
-    u32x4 as_u32x4[4];
-    u32   as_u32[4][4];
-  } src, dst;
-  tcp_udp_ports_x4_t ports;
-} ip6_tcp_udp_address_x4_t;
 
 always_inline void
 ip6_tcp_udp_address_x4_set_from_headers (ip6_tcp_udp_address_x4_t * a,
@@ -328,19 +301,6 @@ static u8 * format_ip6_tcp_udp_address_x4 (u8 * s, va_list * va)
   return s;
 }
 
-#define foreach_tcp_timer			\
-  /* Used to rank mini connections. */		\
-  _ (mini_connection, 10e-3)			\
-  /* Used for timestamps. */			\
-  _ (timestamp, 1e-6)
-
-typedef enum {
-#define _(f,s) TCP_TIMER_##f,
-  foreach_tcp_timer
-#undef _
-  TCP_N_TIMER,
-} tcp_timer_type_t;
-
 always_inline u32
 find_oldest_timestamp_x4 (u32 * time_stamps, u32 now)
 {
@@ -362,66 +322,6 @@ find_oldest_timestamp_x4 (u32 * time_stamps, u32 now)
   return dt_min0 > dt_min1 ? i_min0 : (2 + i_min1);
 }
 
-typedef struct {
-  ip4_tcp_udp_address_x4_t address_x4;
-  u32 time_stamps[4];
-} ip4_tcp_udp_address_x4_and_timestamps_t;
-
-typedef struct {
-  ip6_tcp_udp_address_x4_t address_x4;
-  u32 time_stamps[4];
-} ip6_tcp_udp_address_x4_and_timestamps_t;
-
-#define foreach_tcp_connection_state					\
-  /* unused */								\
-  _ (unused)								\
-  /* Sent SYN-ACK waiting for ACK if he ever feels like sending one. */	\
-  _ (listen_ack_wait)							\
-  /* Sent SYN waiting for ACK or RST. */				\
-  _ (connecting)							\
-  /* Pseudo-type for established connections. */			\
-  _ (established)
-
-typedef enum {
-#define _(f) TCP_CONNECTION_STATE_##f,
-  foreach_tcp_connection_state
-#undef _
-  TCP_N_CONNECTION_STATE,
-} tcp_connection_state_t;
-
-typedef struct {
-  u32 his, ours;
-} tcp_sequence_pair_t;
-
-/* Time stamps saved from options. */
-typedef struct {
-  u32 ours_host_byte_order, his_net_byte_order;
-} tcp_time_stamp_pair_t;
-
-/* Kept small to fight off syn flood attacks. */
-typedef struct {
-  tcp_sequence_pair_t sequence_numbers;
-
-  tcp_time_stamp_pair_t time_stamps;
-
-  /* segment size and window scale (saved from options
-     or set to defaults). */
-  u16 max_segment_size;
-
-  u8 window_scale;
-
-  tcp_connection_state_t state : 8;
-} tcp_mini_connection_t;
-
-typedef struct {
-  /* Sum and sum^2 of measurements.
-     Used to compute average and RMS. */
-  f64 sum, sum2;
-
-  /* Number of measurements. */
-  f64 count;
-} tcp_round_trip_time_stats_t;
-
 always_inline uword
 tcp_round_trip_time_stats_is_valid (tcp_round_trip_time_stats_t * s)
 { return s->count > 0; }
@@ -436,154 +336,6 @@ tcp_round_trip_time_stats_compute (tcp_round_trip_time_stats_t * s, f64 * r)
   r[0] = ave;
   r[1] = rms;
 }
-
-typedef struct {
-  tcp_sequence_pair_t sequence_numbers;
-
-  tcp_time_stamp_pair_t time_stamps;
-
-  /* segment size and window scale (saved from options
-     or set to defaults). */
-  u16 max_segment_size;
-
-  /* Window from latest received packet. */
-  u16 his_window;
-
-  u16 my_window;
-
-  u8 his_window_scale;
-
-  u8 my_window_scale;
-
-  /* ip4/ip6 tos/ttl to use for packets we send. */
-  u8 tos, ttl;
-
-  u16 flags;
-#define foreach_tcp_connection_flag		\
-  _ (ack_pending)				\
-  _ (fin_received)				\
-  _ (fin_sent)					\
-  _ (application_requested_close)
-
-  /* Number of un-acknowledged bytes we've sent. */
-  u32 n_tx_unacked_bytes;
-
-  u32 tx_head_buffer_index;
-
-  u32 tx_tail_buffer_index;
-
-  tcp_round_trip_time_stats_t round_trip_time_stats;
-
-  u32 listener_opaque;
-} tcp_established_connection_t;
-
-typedef enum {
-#define _(f) LOG2_TCP_CONNECTION_FLAG_##f,
-  foreach_tcp_connection_flag
-#undef _
-  N_TCP_CONNECTION_FLAG,
-#define _(f) TCP_CONNECTION_FLAG_##f = 1 << LOG2_TCP_CONNECTION_FLAG_##f,
-  foreach_tcp_connection_flag
-#undef _
-} tcp_connection_flag_t;
-
-typedef enum {
-  TCP_PACKET_TEMPLATE_SYN,
-  TCP_PACKET_TEMPLATE_SYN_ACK,
-  TCP_PACKET_TEMPLATE_ACK,
-  TCP_PACKET_TEMPLATE_FIN_ACK,
-  TCP_PACKET_TEMPLATE_RST_ACK,
-  TCP_N_PACKET_TEMPLATE,
-} tcp_packet_template_type_t;
-
-typedef struct {
-  vlib_packet_template_t vlib;
-
-  /* TCP checksum of template with zeros for all
-     variable fields.  Network byte order. */
-  u16 tcp_checksum_net_byte_order;
-
-  /* IP4 checksum. */
-  u16 ip4_checksum_net_byte_order;
-} tcp_packet_template_t;
-
-typedef struct {
-  u8 log2_n_mini_connection_hash_elts;
-  u8 log2_n_established_connection_hash_elts;
-  u8 is_ip6;
-
-  u32 mini_connection_hash_mask;
-  u32 established_connection_hash_mask;
-
-  uword * established_connection_overflow_hash;
-
-  tcp_mini_connection_t * mini_connections;
-
-  tcp_established_connection_t * established_connections;
-
-  /* Vector of established connection indices which need ACKs sent. */
-  u32 * connections_pending_acks;
-
-  /* Default valid_local_adjacency_bitmap for listeners who want to listen
-     for a given port in on all interfaces. */
-  uword * default_valid_local_adjacency_bitmap;
-
-  u32 output_node_index;
-
-  tcp_packet_template_t packet_templates[TCP_N_PACKET_TEMPLATE];
-} ip46_tcp_main_t;
-
-#define foreach_tcp_event					\
-  /* Received a SYN-ACK after sending a SYN to connect. */	\
-  _ (connection_established)					\
-  /* Received a reset (RST) after sending a SYN to connect. */	\
-  _ (connect_failed)						\
-  /* Received a FIN from an established connection. */		\
-  _ (fin_received)						\
-  _ (connection_closed)						\
-  /* Received a reset RST from an established connection. */	\
-  _ (reset_received)
-
-typedef enum {
-#define _(f) TCP_EVENT_##f,
-  foreach_tcp_event
-#undef _
-} tcp_event_type_t;
-
-typedef enum {
-  TCP_IP4,
-  TCP_IP6,
-  TCP_N_IP46,
-} tcp_ip_4_or_6_t;
-
-typedef struct tcp_udp_listener_t {
-  /* Bitmap indicating which of local (interface) addresses
-     we should listen on for this destination port. */
-  uword * valid_local_adjacency_bitmap;
-
-  /* Destination tcp/udp port to listen for connections. */
-  u16 dst_port;
-
-  u16 next_index;
-
-  u32 flags;
-#define TCP_LISTENER_FLAG_ENABLE_IP4 (1 << 0)
-#define TCP_LISTENER_FLAG_ENABLE_IP6 (1 << 1)
-
-  /* Connection indices for which event in event_function applies to. */
-  u32 * event_connections[TCP_N_IP46];
-  u32 * eof_connections[TCP_N_IP46];
-  u32 * close_connections[TCP_N_IP46];
-
-  void (* event_function) (struct tcp_udp_listener_t * l,
-			   u32 * connections,
-			   uword is_ip6,
-			   tcp_event_type_t event_type);
-} tcp_listener_t;
-
-typedef struct {
-  u8 next, error;
-} tcp_lookup_disposition_t;
 
 typedef struct {
   tcp_option_type_t type : 8;
@@ -670,41 +422,6 @@ ip6_tcp_packet_init (ip6_header_t * ip, u32 n_bytes)
 
   ip->hop_limit = ip6_main.host_config.ttl;
 }
-
-typedef struct {
-  ip46_tcp_main_t ip4, ip6;
-
-  /* Array of non-established connections, but soon-to be established connections. */
-  ip4_tcp_udp_address_x4_and_timestamps_t * ip4_mini_connection_address_hash;
-  ip6_tcp_udp_address_x4_and_timestamps_t * ip6_mini_connection_address_hash;
-
-  /* Vector of size log2_n_established_connection_hash_elts plus overflow. */
-  ip4_tcp_udp_address_x4_t * ip4_established_connection_address_hash;
-  ip6_tcp_udp_address_x4_t * ip6_established_connection_address_hash;
-
-  /* Jenkins hash seeds for established and mini hash tables. */
-  u32x4_union_t connection_hash_seeds[2][3];
-  u32x4_union_t connection_hash_masks[2];
-
-  /* Pool of listeners. */
-  tcp_listener_t * listener_pool;
-
-  /* Table mapping destination port to listener index. */
-  u16 * listener_index_by_dst_port;
-
-  tcp_lookup_disposition_t disposition_by_state_and_flags[TCP_N_CONNECTION_STATE][64];
-
-  u8 log2_clocks_per_tick[TCP_N_TIMER];
-
-  f64 secs_per_tick[TCP_N_TIMER];
-
-  /* Holds pointers to default and per-packet TCP options while
-     parsing a TCP packet's options. */
-  tcp_mini_connection_t option_decode_mini_connection_template;
-
-  /* Count of currently established connections. */
-  u32 n_established_connections[TCP_N_IP46];
-} tcp_main_t;
 
 always_inline u32
 tcp_time_now (tcp_main_t * tm, tcp_timer_type_t t)
@@ -929,7 +646,7 @@ ip46_tcp_lookup (vlib_main_t * vm,
 
 	  {
 	    tcp_mini_connection_t * min0;
-	    tcp_established_connection_t * est0;
+	    tcp_connection_t * est0;
 	    tcp_sequence_pair_t * seq_pair0;
 	    u8 flags0;
 
@@ -1852,7 +1569,7 @@ ip46_tcp_establish (vlib_main_t * vm,
 	  ip4_header_t * ip40;
 	  tcp_header_t * tcp0;
 	  tcp_mini_connection_t * min0;
-	  tcp_established_connection_t * est0;
+	  tcp_connection_t * est0;
 	  tcp_listener_t * l0;
 	  u32 bi0, imin0, iest0;
 	  u8 error0, next0, i0, e0;
@@ -1924,7 +1641,8 @@ ip46_tcp_establish (vlib_main_t * vm,
 	  est0 = vec_elt_at_index (tm46->established_connections, iest0);
 
 	  est0->sequence_numbers = min0->sequence_numbers;
-	  est0->max_segment_size = min0->max_segment_size;
+	  est0->max_segment_size = (min0->max_segment_size
+				    - STRUCT_SIZE_OF (tcp_ack_packet_t, options));
 	  est0->his_window_scale = min0->window_scale;
 	  est0->his_window = clib_net_to_host_u16 (tcp0->window);
 	  est0->time_stamps.ours_host_byte_order = min0->time_stamps.ours_host_byte_order;
@@ -1952,7 +1670,7 @@ ip46_tcp_establish (vlib_main_t * vm,
 	  est0->my_window = 256;
 
 	  l0 = pool_elt_at_index (tm->listener_pool, pi0->listener_index);
-	  vec_add1 (l0->event_connections[is_ip6], iest0);
+	  vec_add1 (l0->event_connections[is_ip6], tcp_connection_handle_set (iest0, is_ip6));
 
 	  next0 = TCP_ESTABLISH_NEXT_DROP;
 	  error0 = TCP_ERROR_LISTENS_ESTABLISHED;
@@ -2004,8 +1722,7 @@ ip46_tcp_establish (vlib_main_t * vm,
       if ((n = vec_len (l->event_connections[is_ip6])) > 0)
 	{
 	  if (l->event_function)
-	    l->event_function (l, l->event_connections[is_ip6],
-			       is_ip6,
+	    l->event_function (l->event_connections[is_ip6],
 			       TCP_EVENT_connection_established);
 	  if (tm->n_established_connections[is_ip6] == 0)
 	    vlib_node_set_state (vm, tm46->output_node_index, VLIB_NODE_STATE_POLLING);
@@ -2062,7 +1779,7 @@ tcp_free_connection_x1 (vlib_main_t * vm, tcp_main_t * tm,
 			u32 iest0)
 {
   ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
-  tcp_established_connection_t * est0;
+  tcp_connection_t * est0;
   u32 iest_div0, iest_mod0;
   
   iest_div0 = iest0 / 4;
@@ -2082,8 +1799,6 @@ tcp_free_connection_x1 (vlib_main_t * vm, tcp_main_t * tm,
     }
 
   est0 = vec_elt_at_index (tm46->established_connections, iest0);
-  ASSERT (est0->tx_head_buffer_index == 0);
-  ASSERT (est0->tx_tail_buffer_index == 0);
 }
 
 always_inline void
@@ -2113,18 +1828,16 @@ ip46_tcp_output (vlib_main_t * vm,
   {
     tcp_listener_t * l;
     pool_foreach (l, tm->listener_pool, ({
-      if (vec_len (l->eof_connections[is_ip6]) > 0)
+      if (vec_len (l->eof_connections) > 0)
 	{
 	  if (l->event_function)
-	    l->event_function (l, l->eof_connections[is_ip6], is_ip6, TCP_EVENT_fin_received);
+	    l->event_function (l->eof_connections[is_ip6], TCP_EVENT_fin_received);
 	  else
 	    {
 	      uword i;
 	      for (i = 0; i < vec_len (l->eof_connections[is_ip6]); i++)
 		{
-		  tcp_established_connection_t * c;
-		  c = vec_elt_at_index (tm46->established_connections,
-					l->eof_connections[is_ip6][i]);
+		  tcp_connection_t * c = tcp_get_connection (l->eof_connections[is_ip6][i]);
 		  c->flags |= TCP_CONNECTION_FLAG_application_requested_close;
 		}
 	    }
@@ -2137,7 +1850,7 @@ ip46_tcp_output (vlib_main_t * vm,
 	  u32 * cis;
 
 	  if (l->event_function)
-	    l->event_function (l, l->close_connections[is_ip6], is_ip6, TCP_EVENT_connection_closed);
+	    l->event_function (l->close_connections[is_ip6], TCP_EVENT_connection_closed);
 
 	  cis = l->close_connections[is_ip6];
 	  n_left = vec_len (cis);
@@ -2182,7 +1895,7 @@ ip46_tcp_output (vlib_main_t * vm,
 
       while (n_connections_left > 0 && n_left_to_next > 0)
 	{
-	  tcp_established_connection_t * est0;
+	  tcp_connection_t * est0;
 	  tcp_ack_packet_t * tcp0;
 	  tcp_udp_ports_t * ports0;
 	  ip_csum_t tcp_sum0;
@@ -2351,7 +2064,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_output_node) = {
 };
 
 always_inline void
-tcp_ack (tcp_main_t * tm, tcp_established_connection_t * c, u32 n_bytes)
+tcp_ack (tcp_main_t * tm, tcp_connection_t * c, u32 n_bytes)
 {
   ASSERT (n_bytes == 0);
 }
@@ -2393,7 +2106,7 @@ ip46_tcp_established (vlib_main_t * vm,
 	  ip6_header_t * ip60;
 	  ip4_header_t * ip40;
 	  tcp_header_t * tcp0;
-	  tcp_established_connection_t * est0;
+	  tcp_connection_t * est0;
 	  tcp_listener_t * l0;
 	  u32 bi0, iest0, n_data_bytes0, his_ack_host0, n_ack0;
 	  u8 error0, next0, n_advance_bytes0, is_fin0, send_ack0;
@@ -2488,11 +2201,15 @@ ip46_tcp_established (vlib_main_t * vm,
 
 	  l0 = pool_elt_at_index (tm->listener_pool, pi0->listener_index);
 
-	  vec_add1 (l0->eof_connections[is_ip6], iest0);
-	  _vec_len (l0->eof_connections[is_ip6]) -= ! is_fin0;
+	  {
+	    u32 ch0 = tcp_connection_handle_set (iest0, is_ip6);
 
-	  vec_add1 (l0->close_connections[is_ip6], iest0);
-	  _vec_len (l0->close_connections[is_ip6]) -= !(est0->flags & TCP_CONNECTION_FLAG_fin_sent);
+	    vec_add1 (l0->eof_connections[is_ip6], ch0);
+	    _vec_len (l0->eof_connections[is_ip6]) -= ! is_fin0;
+
+	    vec_add1 (l0->close_connections[is_ip6], ch0);
+	    _vec_len (l0->close_connections[is_ip6]) -= !(est0->flags & TCP_CONNECTION_FLAG_fin_sent);
+	  }
 
 	  next0 = n_data_bytes0 > 0 ? l0->next_index : next0;
 
@@ -2602,9 +2319,8 @@ static VLIB_REGISTER_NODE (ip6_udp_lookup_node) = {
 };
 
 uword
-ip4_tcp_register_listener (vlib_main_t * vm,
-			   u16 dst_port,
-			   u32 next_node_index)
+tcp_register_listener (vlib_main_t * vm,
+		       tcp_listener_registration_t * r)
 {
   tcp_main_t * tm = &tcp_main;
   tcp_listener_t * l;
@@ -2613,21 +2329,14 @@ ip4_tcp_register_listener (vlib_main_t * vm,
 
   memset (l, 0, sizeof (l[0]));
 
-  l->dst_port = dst_port;
-  l->next_index = vlib_node_add_next (vm, ip4_tcp_established_node.index, next_node_index);
+  l->dst_port = r->port;
+  l->next_index = vlib_node_add_next (vm, ip4_tcp_established_node.index, r->data_node_index);
   l->valid_local_adjacency_bitmap = 0;
+  l->flags = r->flags & (TCP_LISTENER_IP4 | TCP_LISTENER_IP6);
 
-  tm->listener_index_by_dst_port[clib_host_to_net_u16 (dst_port)] = l - tm->listener_pool;
+  tm->listener_index_by_dst_port[clib_host_to_net_u16 (l->dst_port)] = l - tm->listener_pool;
 
   return l - tm->listener_pool;
-}
-
-uword
-ip4_udp_register_listener (vlib_main_t * vm,
-			   u16 dst_port,
-			   u32 next_node_index)
-{
-  return 0;
 }
 
 static void
@@ -2726,6 +2435,9 @@ tcp_udp_lookup_init (vlib_main_t * vm)
 
   tcp_lookup_init (vm, tm);
   tcp_options_decode_init (tm);
+
+  tm->tx_buffer_free_list = VLIB_BUFFER_DEFAULT_FREE_LIST_INDEX;
+  tm->tx_buffer_free_list_n_buffer_bytes = VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
 
   return 0;
 }
@@ -2832,7 +2544,7 @@ static u8 * format_ip6_tcp_mini_connection (u8 * s, va_list * va)
 
 static u8 * format_tcp_established_connection (u8 * s, va_list * va)
 {
-  tcp_established_connection_t * c = va_arg (*va, tcp_established_connection_t *);
+  tcp_connection_t * c = va_arg (*va, tcp_connection_t *);
 
   if (c->flags != 0)
     {
@@ -2858,7 +2570,7 @@ static u8 * format_ip4_tcp_established_connection (u8 * s, va_list * va)
   u32 iest = va_arg (*va, u32);
   u32 iest_div, iest_mod;
   tcp_main_t * tm = &tcp_main;
-  tcp_established_connection_t * est;
+  tcp_connection_t * est;
   ip4_tcp_udp_address_x4_t * esta;
   
   iest_div = iest / 4;
@@ -2879,7 +2591,7 @@ static u8 * format_ip6_tcp_established_connection (u8 * s, va_list * va)
   u32 iest = va_arg (*va, u32);
   u32 iest_div, iest_mod;
   tcp_main_t * tm = &tcp_main;
-  tcp_established_connection_t * est;
+  tcp_connection_t * est;
   ip6_tcp_udp_address_x4_t * esta;
   
   iest_div = iest / 4;
@@ -2965,7 +2677,7 @@ show_established_connections (vlib_main_t * vm, unformat_input_t * input, vlib_c
   tcp_main_t * tm = &tcp_main;
   ip46_tcp_main_t * tm46;
   tcp_ip_4_or_6_t is_ip6 = TCP_IP4;
-  tcp_established_connection_t * est;
+  tcp_connection_t * est;
   ip6_tcp_udp_address_x4_t * esta6;
   ip4_tcp_udp_address_x4_t * esta4;
   clib_error_t * error = 0;
@@ -3016,3 +2728,92 @@ VLIB_CLI_COMMAND (vlib_cli_show_tcp_established_connections_command) = {
   .parent = &vlib_cli_show_tcp_command,
   .function = show_established_connections,
 };
+
+#if 0
+uword
+tcp_write (vlib_main_t * vm, u32 connection_handle, void * data, uword n_data_bytes)
+{
+  tcp_main_t * tm = &tcp_main;
+  tcp_ip_4_or_6_t is_ip6 = tcp_connection_is_ip6 (connection_handle);
+  ip46_tcp_main_t * tm46 = is_ip6 ? &tm->ip6 : &tm->ip4;
+  tcp_connection_t * c = vec_elt_at_index (tm46->established_connections, connection_handle / 2);
+  vlib_buffer_t * b;
+  u32 bi, bi_next, bi_start_of_packet;
+  ip_csum_t sum;
+
+  b = 0;
+  bi = c->write_tail_buffer_index;
+  n_bytes_left_tail = 0;
+  if (bi != 0)
+    {
+      b = vlib_get_buffer (vm, bi);
+      n_bytes_left_tail = tm->tx_buffer_free_list_n_buffer_bytes - b->current_length;
+    }
+
+  n_bytes_this_packet = c->write_tail_packet.n_data_bytes;
+  n_bytes_left_packet = c->max_segment_size - n_bytes_this_packet;
+
+  n_data_left = n_data_bytes;
+  sum = c->write_tail_packet.data_ip_checksum;
+
+  while (n_data_left > 0)
+    {
+      u32 n_copy;
+
+      if (n_bytes_left_tail == 0)
+	{
+	  if (! vlib_buffer_alloc_from_free_list (vm, &bi_next, 1,
+						  tm->tx_buffer_free_list))
+	    return n_data_bytes - n_data_left;
+
+	  bi_start_of_packet = bi_next;
+	  if (b)
+	    {
+	      b->flags |= VLIB_BUFFER_NEXT_PRESENT;
+	      b->next_buffer = bi_next;
+	      bi_start_of_packet = b->opaque[0];
+	    }
+	  bi = bi_next;
+	  b = vlib_get_buffer (vm, bi);
+
+	  /* Save away start of packet buffer in opaque. */
+	  b->opaque[0] = bi_start_of_packet;
+
+	  c->tail_buffer.buffer_index = bi;
+	  n_bytes_left_tail = tm->tx_buffer_free_list_n_buffer_bytes;
+	}
+
+      n_copy = n_data_left;
+      n_copy = clib_min (n_copy, n_bytes_left_tail);
+      n_copy = clib_min (n_copy, n_bytes_left_packet);
+
+      sum = ip_csum_and_memcpy (sum, b->data + b->current_length,
+				data, n_copy);
+
+      b->current_length += n_copy;
+      n_bytes_left_tail -= n_copy;
+      n_bytes_left_packet -= n_copy;
+      n_data_left -=- n_copy;
+      n_bytes_this_packet += n_copy;
+
+      if (n_bytes_left_packet == 0)
+	{
+	  bi_start_of_packet = b->opaque[0];
+
+	  if (c->tail_packet.buffer_index != 0)
+	    {
+	      vlib_buffer_t * p = vlib_get_buffer (vm, c->tail_packet.buffer_index);
+	      tcp_buffer_t * next = vlib_get_buffer_opaque (p);
+	      next[0] = c->;
+	    }
+	  c->tail_packet.buffer_index = bi_start_of_packet;
+	}
+    }
+
+  c->tail_buffer.buffer_index = bi;
+  c->tail_buffer.n_data_bytes = n_bytes_this_packet;
+  c->tail_buffer.data_ip_checksum = ip_csum_fold (sum);
+
+  return 0;
+}
+#endif

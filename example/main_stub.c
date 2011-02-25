@@ -4,6 +4,7 @@
 #include <vnet/pg/pg.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ip/ip.h>
+#include <vnet/ip/tcp.h>
 
 static clib_error_t *
 vnet_main_init (vlib_main_t * vm)
@@ -144,7 +145,16 @@ tcp_test_init (vlib_main_t * vm)
 {
   clib_error_t * error = 0;
 
-  ip4_tcp_register_listener (vm, 1234, tcp_test_node.index);
+  {
+    tcp_listener_registration_t r = {
+      .port = 1234,
+      .flags = TCP_LISTENER_IP4,
+      .data_node_index = tcp_test_node.index,
+      .event_function = 0,
+    };
+
+    tcp_register_listener (vm, &r);
+  }
 
   return error;
 }

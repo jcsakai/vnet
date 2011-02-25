@@ -92,3 +92,78 @@ do {									\
  return sum0;
 }
 
+ip_csum_t
+ip_csum_and_memcpy (ip_csum_t sum, void * dst, void * src, uword n_bytes)
+{
+  uword n_left, n_left_odd;
+  ip_csum_t * dst_even, * src_even;
+  ip_csum_t sum0 = sum, sum1;
+
+  dst_even = uword_to_pointer
+    (pointer_to_uword (dst) &~ (sizeof (sum) - 1),
+     ip_csum_t *);
+
+  n_left = n_bytes;
+  if ((n_left_odd = dst - (void *) dst_even))
+    {
+      u8 * d8 = dst, * s8 = src;
+      uword i, n_copy_odd;
+
+      n_copy_odd = clib_min (n_left, n_left_odd);
+
+      for (i = 0; i < n_copy_odd; i++)
+	d8[i] = s8[i];
+
+      if (n_copy_odd != n_left_odd)
+	return sum0;
+
+      sum0 = ip_csum_with_carry (sum0, dst_even[0]);
+      dst_even += 1;
+      src_even = (void *) (src + n_copy_odd);
+      n_left -= n_left_odd;
+    }
+
+  sum1 = 0;
+  while (n_left >= 2 * sizeof (dst_even[0]))
+    {
+      ip_csum_t dst0, dst1;
+
+      dst0 = clib_mem_unaligned (&src_even[0], ip_csum_t);
+      dst1 = clib_mem_unaligned (&src_even[1], ip_csum_t);
+
+      dst_even[0] = dst0;
+      dst_even[1] = dst1;
+
+      dst_even += 2;
+      src_even += 2;
+      n_left -= 2 * sizeof (dst_even[0]);
+
+      sum0 = ip_csum_with_carry (sum0, dst0);
+      sum1 = ip_csum_with_carry (sum1, dst1);
+    }
+
+  if (n_left >= 1 * sizeof (dst_even[0]))
+    {
+      ip_csum_t dst0;
+
+      dst0 = clib_mem_unaligned (&src_even[0], ip_csum_t);
+
+      dst_even[0] = dst0;
+
+      dst_even += 1;
+      src_even += 1;
+      n_left -= 1 * sizeof (dst_even[0]);
+
+      sum0 = ip_csum_with_carry (sum0, dst0);
+    }
+
+  if (n_left > 0)
+    {
+      u8 * d8 = dst, * s8 = src;
+      uword i;
+      for (i = 0; i < n_left; i++)
+	d8[i] = s8[i];
+    }
+
+  return ip_csum_with_carry (sum0, sum1);
+}

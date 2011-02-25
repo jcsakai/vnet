@@ -49,6 +49,8 @@
 #include <vnet/ip/ip6_error.h>
 #include <vnet/ip/icmp6.h>
 
+#include <vnet/ip/tcp.h>
+
 typedef union {
   ip4_address_t ip4;
   ip6_address_t ip6;
