@@ -85,8 +85,10 @@ ip6_input (vlib_main_t * vm,
 	  vlib_buffer_t * p0, * p1;
 	  ip6_header_t * ip0, * ip1;
 	  ip_buffer_opaque_t * i0, * i1;
-	  u32 pi0, sw_if_index0, next0, error0;
-	  u32 pi1, sw_if_index1, next1, error1;
+	  ip_config_main_t * cm0, * cm1;
+	  u32 pi0, sw_if_index0, next0;
+	  u32 pi1, sw_if_index1, next1;
+	  u8 error0, error1, cast0, cast1;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -124,17 +126,23 @@ ip6_input (vlib_main_t * vm,
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 	  sw_if_index1 = p1->sw_if_index[VLIB_RX];
 
-	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
-	  i1->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
+	  cast0 = ip6_address_is_multicast (&ip0->dst_address) ? VNET_MULTICAST : VNET_UNICAST;
+	  cast1 = ip6_address_is_multicast (&ip1->dst_address) ? VNET_MULTICAST : VNET_UNICAST;
+
+	  cm0 = lm->rx_config_mains + cast0;
+	  cm1 = lm->rx_config_mains + cast1;
+
+	  i0->current_config_index = vec_elt (cm0->config_index_by_sw_if_index, sw_if_index0);
+	  i1->current_config_index = vec_elt (cm1->config_index_by_sw_if_index, sw_if_index1);
 
 	  i0->src_adj_index = ~0;
 	  i1->src_adj_index = ~0;
 
-	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
+	  vnet_get_config_data (&cm0->config_main,
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);
-	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
+	  vnet_get_config_data (&cm1->config_main,
 				&i1->current_config_index,
 				&next1,
 				/* # bytes of config data */ 0);
@@ -169,7 +177,9 @@ ip6_input (vlib_main_t * vm,
 	  vlib_buffer_t * p0;
 	  ip6_header_t * ip0;
 	  ip_buffer_opaque_t * i0;
-	  u32 pi0, sw_if_index0, next0, error0;
+	  ip_config_main_t * cm0;
+	  u32 pi0, sw_if_index0, next0;
+	  u8 error0, cast0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -183,10 +193,12 @@ ip6_input (vlib_main_t * vm,
 	  i0 = vlib_get_buffer_opaque (p0);
 
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
-	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+	  cast0 = ip6_address_is_multicast (&ip0->dst_address) ? VNET_MULTICAST : VNET_UNICAST;
+	  cm0 = lm->rx_config_mains + cast0;
+	  i0->current_config_index = vec_elt (cm0->config_index_by_sw_if_index, sw_if_index0);
 	  i0->src_adj_index = ~0;
 
-	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
+	  vnet_get_config_data (&cm0->config_main,
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);

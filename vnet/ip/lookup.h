@@ -28,6 +28,7 @@
 
 #include <vnet/vnet/config.h>
 #include <vnet/vnet/rewrite.h>
+#include <vnet/vnet/vnet.h>
 
 /* Next index stored in adjacency. */
 typedef enum {
@@ -178,6 +179,12 @@ typedef void (* ip_add_del_adjacency_callback_t) (struct ip_lookup_main_t * lm,
 						  ip_adjacency_t * adj,
 						  u32 is_del);
 
+typedef struct {
+  vnet_config_main_t config_main;
+
+  u32 * config_index_by_sw_if_index;
+} ip_config_main_t;
+
 typedef struct ip_lookup_main_t {
   /* Adjacency heap. */
   ip_adjacency_t * adjacency_heap;
@@ -222,9 +229,7 @@ typedef struct ip_lookup_main_t {
   u32 * if_address_pool_index_by_sw_if_index;
 
   /* rx/tx interface/feature configuration. */
-  vnet_config_main_t config_mains[VLIB_N_RX_TX];
-
-  u32 * config_index_by_sw_if_index[VLIB_N_RX_TX];
+  ip_config_main_t rx_config_mains[VNET_N_CAST], tx_config_main;
 
   /* Number of bytes in a fib result.  Must be at least
      sizeof (uword).  First word is always adjacency index. */

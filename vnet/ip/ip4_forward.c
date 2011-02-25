@@ -1288,39 +1288,59 @@ ip4_sw_interface_add_del (vlib_main_t * vm,
 {
   ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
-  vnet_config_main_t * rx_cm = &lm->config_mains[VLIB_RX];
-  u32 ci;
+  u32 ci, cast;
 
-  if (! rx_cm->node_index_by_feature_index)
+  for (cast = 0; cast < VNET_N_CAST; cast++)
     {
-      char * start_nodes[] = { "ip4-input", "ip4-input-no-checksum", };
-      char * feature_nodes[] = {
-	[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_RX] = "ip4-source-check-via-rx",
-	[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_ANY] = "ip4-source-check-via-any",
-	[IP4_RX_FEATURE_LOOKUP] = "ip4-lookup",
-      };
-      vnet_config_init (vm, &lm->config_mains[VLIB_RX],
-			start_nodes, ARRAY_LEN (start_nodes),
-			feature_nodes, ARRAY_LEN (feature_nodes));
+      ip_config_main_t * cm = &lm->rx_config_mains[cast];
+      vnet_config_main_t * vcm = &cm->config_main;
+
+      if (! vcm->node_index_by_feature_index)
+	{
+	  if (cast == VNET_UNICAST)
+	    {
+	      static char * start_nodes[] = { "ip4-input", "ip4-input-no-checksum", };
+	      static char * feature_nodes[] = {
+		[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_RX] = "ip4-source-check-via-rx",
+		[IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_ANY] = "ip4-source-check-via-any",
+		[IP4_RX_FEATURE_LOOKUP] = "ip4-lookup",
+	      };
+
+	      vnet_config_init (vm, vcm,
+				start_nodes, ARRAY_LEN (start_nodes),
+				feature_nodes, ARRAY_LEN (feature_nodes));
+	    }
+	  else
+	    {
+	      static char * start_nodes[] = { "ip4-input", "ip4-input-no-checksum", };
+	      static char * feature_nodes[] = {
+		[IP4_RX_FEATURE_LOOKUP] = "ip4-lookup-multicast",
+	      };
+
+	      vnet_config_init (vm, vcm,
+				start_nodes, ARRAY_LEN (start_nodes),
+				feature_nodes, ARRAY_LEN (feature_nodes));
+	    }
+	}
+
+      vec_validate_init_empty (cm->config_index_by_sw_if_index, sw_if_index, ~0);
+      ci = cm->config_index_by_sw_if_index[sw_if_index];
+
+      if (is_add)
+	ci = vnet_config_add_feature (vm, vcm,
+				      ci,
+				      IP4_RX_FEATURE_LOOKUP,
+				      /* config data */ 0,
+				      /* # bytes of config data */ 0);
+      else
+	ci = vnet_config_del_feature (vm, vcm,
+				      ci,
+				      IP4_RX_FEATURE_LOOKUP,
+				      /* config data */ 0,
+				      /* # bytes of config data */ 0);
+
+      cm->config_index_by_sw_if_index[sw_if_index] = ci;
     }
-
-  vec_validate_init_empty (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
-  ci = lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
-
-  if (is_add)
-    ci = vnet_config_add_feature (vm, rx_cm,
-				  ci,
-				  IP4_RX_FEATURE_LOOKUP,
-				  /* config data */ 0,
-				  /* # bytes of config data */ 0);
-  else
-    ci = vnet_config_del_feature (vm, rx_cm,
-				  ci,
-				  IP4_RX_FEATURE_LOOKUP,
-				  /* config data */ 0,
-				  /* # bytes of config data */ 0);
-
-  lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
 
   return /* no error */ 0;
 }
@@ -1594,19 +1614,6 @@ static VLIB_REGISTER_NODE (ip4_punt_node) = {
 static VLIB_REGISTER_NODE (ip4_miss_node) = {
   .function = ip4_miss,
   .name = "ip4-miss",
-  .vector_size = sizeof (u32),
-
-  .format_trace = format_ip4_forward_next_trace,
-
-  .n_next_nodes = 1,
-  .next_nodes = {
-    [0] = "error-drop",
-  },
-};
-
-static VLIB_REGISTER_NODE (ip4_multicast_node) = {
-  .function = ip4_drop,
-  .name = "ip4-multicast",
   .vector_size = sizeof (u32),
 
   .format_trace = format_ip4_forward_next_trace,
@@ -2411,4 +2418,216 @@ VLIB_REGISTER_NODE (ip4_rewrite_node) = {
   },
 };
 
+static uword
+ip4_lookup_multicast (vlib_main_t * vm,
+		      vlib_node_runtime_t * node,
+		      vlib_frame_t * frame)
+{
+  ip4_main_t * im = &ip4_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
+  vlib_combined_counter_main_t * cm = &im->lookup_main.adjacency_counters;
+  u32 n_left_from, n_left_to_next, * from, * to_next;
+  ip_lookup_next_t next;
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = frame->n_vectors;
+  next = node->cached_next_index;
+
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, next,
+			   to_next, n_left_to_next);
+
+      while (n_left_from >= 4 && n_left_to_next >= 2)
+	{
+	  vlib_buffer_t * p0, * p1;
+	  u32 pi0, pi1, adj_index0, adj_index1, wrong_next;
+	  ip_lookup_next_t next0, next1;
+	  ip_buffer_opaque_t * i0, * i1;
+	  ip4_header_t * ip0, * ip1;
+	  ip_adjacency_t * adj0, * adj1;
+
+	  /* Prefetch next iteration. */
+	  {
+	    vlib_buffer_t * p2, * p3;
+
+	    p2 = vlib_get_buffer (vm, from[2]);
+	    p3 = vlib_get_buffer (vm, from[3]);
+
+	    vlib_prefetch_buffer_header (p2, LOAD);
+	    vlib_prefetch_buffer_header (p3, LOAD);
+
+	    CLIB_PREFETCH (p2->data, sizeof (ip0[0]), LOAD);
+	    CLIB_PREFETCH (p3->data, sizeof (ip0[0]), LOAD);
+	  }
+
+	  pi0 = to_next[0] = from[0];
+	  pi1 = to_next[1] = from[1];
+
+	  p0 = vlib_get_buffer (vm, pi0);
+	  p1 = vlib_get_buffer (vm, pi1);
+
+	  ip0 = vlib_buffer_get_current (p0);
+	  ip1 = vlib_buffer_get_current (p1);
+
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address);
+
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+	  adj1 = ip_get_adjacency (lm, adj_index1);
+
+	  next0 = adj0->lookup_next_index;
+	  next1 = adj1->lookup_next_index;
+
+	  i0 = vlib_get_buffer_opaque (p0);
+	  i1 = vlib_get_buffer_opaque (p1);
+
+	  i0->flow_hash = ip4_compute_flow_hash (ip0, im->flow_hash_seed);
+	  i1->flow_hash = ip4_compute_flow_hash (ip1, im->flow_hash_seed);
+
+	  ASSERT (adj0->n_adj > 0);
+	  ASSERT (adj1->n_adj > 0);
+	  ASSERT (is_pow2 (adj0->n_adj));
+	  ASSERT (is_pow2 (adj1->n_adj));
+	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
+	  adj_index1 += (i1->flow_hash & (adj1->n_adj - 1));
+
+	  i0->dst_adj_index = adj_index0;
+	  i1->dst_adj_index = adj_index1;
+
+	  vlib_increment_combined_counter (cm, adj_index0, 1,
+					   vlib_buffer_length_in_chain (vm, p0));
+	  vlib_increment_combined_counter (cm, adj_index1, 1,
+					   vlib_buffer_length_in_chain (vm, p1));
+
+	  from += 2;
+	  to_next += 2;
+	  n_left_to_next -= 2;
+	  n_left_from -= 2;
+
+	  wrong_next = (next0 != next) + 2*(next1 != next);
+	  if (PREDICT_FALSE (wrong_next != 0))
+	    {
+	      switch (wrong_next)
+		{
+		case 1:
+		  /* A B A */
+		  to_next[-2] = pi1;
+		  to_next -= 1;
+		  n_left_to_next += 1;
+		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
+		  break;
+
+		case 2:
+		  /* A A B */
+		  to_next -= 1;
+		  n_left_to_next += 1;
+		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
+		  break;
+
+		case 3:
+		  /* A B C */
+		  to_next -= 2;
+		  n_left_to_next += 2;
+		  vlib_set_next_frame_buffer (vm, node, next0, pi0);
+		  vlib_set_next_frame_buffer (vm, node, next1, pi1);
+		  if (next0 == next1)
+		    {
+		      /* A B B */
+		      vlib_put_next_frame (vm, node, next, n_left_to_next);
+		      next = next1;
+		      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
+		    }
+		}
+	    }
+	}
+    
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip4_header_t * ip0;
+	  ip_buffer_opaque_t * i0;
+	  u32 pi0, adj_index0;
+	  ip_lookup_next_t next0;
+	  ip_adjacency_t * adj0;
+
+	  pi0 = from[0];
+	  to_next[0] = pi0;
+
+	  p0 = vlib_get_buffer (vm, pi0);
+
+	  ip0 = vlib_buffer_get_current (p0);
+
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+
+	  next0 = adj0->lookup_next_index;
+
+	  i0 = vlib_get_buffer_opaque (p0);
+
+	  i0->flow_hash = ip4_compute_flow_hash (ip0, im->flow_hash_seed);
+
+	  ASSERT (adj0->n_adj > 0);
+	  ASSERT (is_pow2 (adj0->n_adj));
+	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
+
+	  i0->dst_adj_index = adj_index0;
+
+	  vlib_increment_combined_counter (cm, adj_index0, 1,
+					   vlib_buffer_length_in_chain (vm, p0));
+
+	  from += 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+	  n_left_from -= 1;
+
+	  if (PREDICT_FALSE (next0 != next))
+	    {
+	      n_left_to_next += 1;
+	      vlib_put_next_frame (vm, node, next, n_left_to_next);
+	      next = next0;
+	      vlib_get_next_frame (vm, node, next,
+				   to_next, n_left_to_next);
+	      to_next[0] = pi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	    }
+	}
+
+      vlib_put_next_frame (vm, node, next, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+static VLIB_REGISTER_NODE (ip4_lookup_multicast_node) = {
+  .function = ip4_lookup_multicast,
+  .name = "ip4-lookup-multicast",
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = IP_LOOKUP_N_NEXT,
+  .next_nodes = {
+    [IP_LOOKUP_NEXT_MISS] = "ip4-miss",
+    [IP_LOOKUP_NEXT_DROP] = "ip4-drop",
+    [IP_LOOKUP_NEXT_PUNT] = "ip4-punt",
+    [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
+    [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
+    [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
+    [IP_LOOKUP_NEXT_MULTICAST] = "ip4-multicast",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip4_multicast_node) = {
+  .function = ip4_drop,
+  .name = "ip4-multicast",
+  .vector_size = sizeof (u32),
+
+  .format_trace = format_ip4_forward_next_trace,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [0] = "error-drop",
+  },
+};
 

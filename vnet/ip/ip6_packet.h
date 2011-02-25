@@ -70,6 +70,10 @@ typedef enum {
 #undef _
 } ip6_multicast_link_local_group_id_t;
 
+always_inline uword
+ip6_address_is_multicast (ip6_address_t * a)
+{ return a->as_u8[0] == 0xff; }
+
 always_inline void
 ip6_set_reserved_multicast_address (ip6_address_t * a,
 				    ip6_multicast_address_scope_t scope,
@@ -172,7 +176,7 @@ always_inline uword
 ip6_address_is_local_unicast (ip6_address_t * a)
 { return (a->as_u8[0] & 0xfe) == 0xfc; }
 
-/* Chekc for solicited node multicast 0xff02::1:ff00:0/104 */
+/* Check for solicited node multicast 0xff02::1:ff00:0/104 */
 always_inline uword
 ip6_is_solicited_node_multicast_address (ip6_address_t * a)
 {

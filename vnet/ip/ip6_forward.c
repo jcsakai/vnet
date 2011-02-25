@@ -1325,37 +1325,43 @@ ip6_sw_interface_add_del (vlib_main_t * vm,
 {
   ip6_main_t * im = &ip6_main;
   ip_lookup_main_t * lm = &im->lookup_main;
-  vnet_config_main_t * rx_cm = &lm->config_mains[VLIB_RX];
-  u32 ci;
+  u32 ci, cast;
 
-  if (! rx_cm->node_index_by_feature_index)
+  for (cast = 0; cast < VNET_N_CAST; cast++)
     {
-      char * start_nodes[] = { "ip6-input", };
-      char * feature_nodes[] = {
-	[IP6_RX_FEATURE_LOOKUP] = "ip6-lookup",
-      };
-      vnet_config_init (vm, &lm->config_mains[VLIB_RX],
-			start_nodes, ARRAY_LEN (start_nodes),
-			feature_nodes, ARRAY_LEN (feature_nodes));
+      ip_config_main_t * cm = &lm->rx_config_mains[cast];
+      vnet_config_main_t * vcm = &cm->config_main;
+
+      /* FIXME multicast. */
+      if (! vcm->node_index_by_feature_index)
+	{
+	  char * start_nodes[] = { "ip6-input", };
+	  char * feature_nodes[] = {
+	    [IP6_RX_FEATURE_LOOKUP] = "ip6-lookup",
+	  };
+	  vnet_config_init (vm, vcm,
+			    start_nodes, ARRAY_LEN (start_nodes),
+			    feature_nodes, ARRAY_LEN (feature_nodes));
+	}
+
+      vec_validate_init_empty (cm->config_index_by_sw_if_index, sw_if_index, ~0);
+      ci = cm->config_index_by_sw_if_index[sw_if_index];
+
+      if (is_add)
+	ci = vnet_config_add_feature (vm, vcm,
+				      ci,
+				      IP6_RX_FEATURE_LOOKUP,
+				      /* config data */ 0,
+				      /* # bytes of config data */ 0);
+      else
+	ci = vnet_config_del_feature (vm, vcm,
+				      ci,
+				      IP6_RX_FEATURE_LOOKUP,
+				      /* config data */ 0,
+				      /* # bytes of config data */ 0);
+
+      cm->config_index_by_sw_if_index[sw_if_index] = ci;
     }
-
-  vec_validate_init_empty (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index, ~0);
-  ci = lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index];
-
-  if (is_add)
-    ci = vnet_config_add_feature (vm, rx_cm,
-				  ci,
-				  IP6_RX_FEATURE_LOOKUP,
-				  /* config data */ 0,
-				  /* # bytes of config data */ 0);
-  else
-    ci = vnet_config_del_feature (vm, rx_cm,
-				  ci,
-				  IP6_RX_FEATURE_LOOKUP,
-				  /* config data */ 0,
-				  /* # bytes of config data */ 0);
-
-  lm->config_index_by_sw_if_index[VLIB_RX][sw_if_index] = ci;
 
   return /* no error */ 0;
 }

@@ -49,6 +49,7 @@ typedef enum {
   IP4_INPUT_NEXT_DROP,
   IP4_INPUT_NEXT_PUNT,
   IP4_INPUT_NEXT_LOOKUP,
+  IP4_INPUT_NEXT_LOOKUP_MULTICAST,
   IP4_INPUT_N_NEXT,
 } ip4_input_next_t;
 
@@ -87,9 +88,11 @@ ip4_input_inline (vlib_main_t * vm,
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
 	  ip_buffer_opaque_t * i0, * i1;
-	  u32 sw_if_index0, pi0, ip_len0, cur_len0, next0, error0;
-	  u32 sw_if_index1, pi1, ip_len1, cur_len1, next1, error1;
+	  ip_config_main_t * cm0, * cm1;
+	  u32 sw_if_index0, pi0, ip_len0, cur_len0, next0;
+	  u32 sw_if_index1, pi1, ip_len1, cur_len1, next1;
 	  i32 len_diff0, len_diff1;
+	  u8 error0, error1, cast0, cast1;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -124,17 +127,23 @@ ip4_input_inline (vlib_main_t * vm,
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
 	  sw_if_index1 = p1->sw_if_index[VLIB_RX];
 
-	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
-	  i1->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index1);
+	  cast0 = ip4_address_is_multicast (&ip0->dst_address) ? VNET_MULTICAST : VNET_UNICAST;
+	  cast1 = ip4_address_is_multicast (&ip1->dst_address) ? VNET_MULTICAST : VNET_UNICAST;
+
+	  cm0 = lm->rx_config_mains + cast0;
+	  cm1 = lm->rx_config_mains + cast1;
+
+	  i0->current_config_index = vec_elt (cm0->config_index_by_sw_if_index, sw_if_index0);
+	  i1->current_config_index = vec_elt (cm1->config_index_by_sw_if_index, sw_if_index1);
 
 	  i0->src_adj_index = ~0;
 	  i1->src_adj_index = ~0;
 
-	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
+	  vnet_get_config_data (&cm0->config_main,
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);
-	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
+	  vnet_get_config_data (&cm1->config_main,
 				&i1->current_config_index,
 				&next1,
 				/* # bytes of config data */ 0);
@@ -210,8 +219,10 @@ ip4_input_inline (vlib_main_t * vm,
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
 	  ip_buffer_opaque_t * i0;
-	  u32 sw_if_index0, pi0, ip_len0, cur_len0, next0, error0;
+	  ip_config_main_t * cm0;
+	  u32 sw_if_index0, pi0, ip_len0, cur_len0, next0;
 	  i32 len_diff0;
+	  u8 error0, cast0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -225,9 +236,12 @@ ip4_input_inline (vlib_main_t * vm,
 	  i0 = vlib_get_buffer_opaque (p0);
 
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
-	  i0->current_config_index = vec_elt (lm->config_index_by_sw_if_index[VLIB_RX], sw_if_index0);
+
+	  cast0 = ip4_address_is_multicast (&ip0->dst_address) ? VNET_MULTICAST : VNET_UNICAST;
+	  cm0 = lm->rx_config_mains + cast0;
+	  i0->current_config_index = vec_elt (cm0->config_index_by_sw_if_index, sw_if_index0);
 	  i0->src_adj_index = ~0;
-	  vnet_get_config_data (&lm->config_mains[VLIB_RX],
+	  vnet_get_config_data (&cm0->config_main,
 				&i0->current_config_index,
 				&next0,
 				/* # bytes of config data */ 0);
@@ -318,6 +332,7 @@ VLIB_REGISTER_NODE (ip4_input_node) = {
     [IP4_INPUT_NEXT_DROP] = "error-drop",
     [IP4_INPUT_NEXT_PUNT] = "error-punt",
     [IP4_INPUT_NEXT_LOOKUP] = "ip4-lookup",
+    [IP4_INPUT_NEXT_LOOKUP_MULTICAST] = "ip4-lookup-multicast",
   },
 
   .format_buffer = format_ip4_header,
@@ -334,6 +349,7 @@ static VLIB_REGISTER_NODE (ip4_input_no_checksum_node) = {
     [IP4_INPUT_NEXT_DROP] = "error-drop",
     [IP4_INPUT_NEXT_PUNT] = "error-punt",
     [IP4_INPUT_NEXT_LOOKUP] = "ip4-lookup",
+    [IP4_INPUT_NEXT_LOOKUP_MULTICAST] = "ip4-lookup-multicast",
   },
 
   .format_buffer = format_ip4_header,
