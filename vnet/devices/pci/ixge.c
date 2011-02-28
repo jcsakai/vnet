@@ -1158,9 +1158,7 @@ ixge_interface_tx (vlib_main_t * vm,
     u32 n = _vec_len (xm->tx_buffers_pending_free);
     if (n > 0)
       {
-	vlib_buffer_free (vm, xm->tx_buffers_pending_free,
-			  n,
-			  /* follow_buffer_next */ 0);
+	vlib_buffer_free_no_next (vm, xm->tx_buffers_pending_free, n);
 	_vec_len (xm->tx_buffers_pending_free) = 0;
       }
   }
