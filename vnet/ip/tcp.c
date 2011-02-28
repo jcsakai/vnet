@@ -2325,6 +2325,13 @@ tcp_register_listener (vlib_main_t * vm,
   tcp_main_t * tm = &tcp_main;
   tcp_listener_t * l;
 
+  {
+    clib_error_t * error;
+
+    if ((error = vlib_call_init_function (vm, tcp_udp_lookup_init)))
+      clib_error_report (error);
+  }
+
   pool_get_aligned (tm->listener_pool, l, CLIB_CACHE_LINE_BYTES);
 
   memset (l, 0, sizeof (l[0]));
