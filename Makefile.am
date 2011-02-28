@@ -17,7 +17,8 @@ nobase_include_HEADERS +=			\
   vnet/vnet/buffer.h				\
   vnet/vnet/config.h				\
   vnet/vnet/l3_types.h				\
-  vnet/vnet/rewrite.h
+  vnet/vnet/rewrite.h				\
+  vnet/vnet/vnet.h
 
 ########################################
 # Layer 2 protocols go here

@@ -325,7 +325,7 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/devices/pci/ixge.c vnet/devices/optics/sfp.c \
 	vnet/devices/xge/xge.c vnet/unix/pcap.c vnet/unix/tuntap.c
 nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
-	vnet/vnet/l3_types.h vnet/vnet/rewrite.h \
+	vnet/vnet/l3_types.h vnet/vnet/rewrite.h vnet/vnet/vnet.h \
 	vnet/ethernet/error.def vnet/ethernet/ethernet.h \
 	vnet/ethernet/packet.h vnet/ethernet/phy.h \
 	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
