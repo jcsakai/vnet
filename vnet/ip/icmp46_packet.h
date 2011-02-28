@@ -1,3 +1,28 @@
+/*
+ * icmp46_packet.h: ip4/ip6 icmp packet format
+ *
+ * Copyright (c) 2008 Eliot Dresselhaus
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ *  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ *  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ *  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
 #ifndef included_vnet_icmp46_packet_h
 #define included_vnet_icmp46_packet_h
 
@@ -85,7 +110,7 @@
   _ (140, node_information_response)		\
   _ (141, inverse_neighbor_solicitation)	\
   _ (142, inverse_neighbor_advertisement)	\
-  _ (143, multicast_v2_listener_report)		\
+  _ (143, multicast_listener_report_v2)		\
   _ (144, home_agent_address_discovery_request)	\
   _ (145, home_agent_address_discovery_reply)	\
   _ (146, mobile_prefix_solicitation)		\

@@ -1379,7 +1379,6 @@ static VLIB_REGISTER_NODE (ip6_lookup_node) = {
     [IP_LOOKUP_NEXT_LOCAL] = "ip6-local",
     [IP_LOOKUP_NEXT_ARP] = "ip6-discover-neighbor",
     [IP_LOOKUP_NEXT_REWRITE] = "ip6-rewrite",
-    [IP_LOOKUP_NEXT_MULTICAST] = "ip6-multicast",
   },
 
   .sw_interface_admin_up_down_function = ip6_sw_interface_admin_up_down,

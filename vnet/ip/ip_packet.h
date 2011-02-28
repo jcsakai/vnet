@@ -50,6 +50,23 @@ typedef enum {
   IP_BUILTIN_PROTOCOL_UNKNOWN,
 } ip_builtin_protocol_t;
 
+#define foreach_ip_builtin_multicast_group	\
+  _ (1, all_hosts_on_subnet)			\
+  _ (2, all_routers_on_subnet)			\
+  _ (4, dvmrp)					\
+  _ (5, ospf_all_routers)			\
+  _ (6, ospf_designated_routers)		\
+  _ (13, pim)					\
+  _ (18, vrrp)					\
+  _ (102, hsrp)					\
+  _ (22, igmp_v3)
+
+typedef enum {
+#define _(n,f) IP_MULTICAST_GROUP_##f = n,
+  foreach_ip_builtin_multicast_group
+#undef _
+} ip_multicast_group_t;
+
 /* IP checksum support. */
 
 /* Incremental checksum update. */

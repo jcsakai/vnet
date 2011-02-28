@@ -52,13 +52,10 @@ typedef enum {
      might be another node for further output processing. */
   IP_LOOKUP_NEXT_REWRITE,
 
-  /* This packet is multicast and needs to be replicated. */
-  IP_LOOKUP_NEXT_MULTICAST,
-
   IP_LOOKUP_N_NEXT,
 } ip_lookup_next_t;
 
-/* IP adjacency. */
+/* IP unicast adjacency. */
 typedef struct {
   /* Handle for this adjacency in adjacency heap. */
   u32 heap_handle;
@@ -125,6 +122,39 @@ typedef struct {
     u32 heap_handle;
   } normalized_next_hops, unnormalized_next_hops;
 } ip_multipath_adjacency_t;
+
+/* IP multicast adjacency. */
+typedef struct {
+  /* Handle for this adjacency in adjacency heap. */
+  u32 heap_handle;
+
+  /* Number of adjecencies in block. */
+  u32 n_adj;
+
+  /* Rewrite string. */
+  vnet_declare_rewrite (64 - 2*sizeof(u32));
+} ip_multicast_rewrite_t;
+
+typedef struct {
+  /* ip4-multicast-rewrite next index. */
+  u32 next_index;
+
+  u8 n_rewrite_bytes;
+
+  u8 rewrite_string[64 - 1*sizeof(u32) - 1*sizeof(u8)];
+} ip_multicast_rewrite_string_t;
+
+typedef struct {
+  ip_multicast_rewrite_t * rewrite_heap;
+
+  ip_multicast_rewrite_string_t * rewrite_strings;
+
+  /* Negative rewrite string index; >= 0 sw_if_index.
+     Sorted.  Used to hash. */
+  i32 ** adjacency_id_vector;
+
+  uword * adjacency_by_id_vector;
+} ip_multicast_lookup_main_t;
 
 typedef struct {
   /* Key for mhash; in fact, just a byte offset into mhash key vector. */

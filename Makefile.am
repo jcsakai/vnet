@@ -130,6 +130,7 @@ nobase_include_HEADERS +=			\
  vnet/ip/format.h				\
  vnet/ip/icmp46_packet.h			\
  vnet/ip/icmp6.h				\
+ vnet/ip/igmp_packet.h				\
  vnet/ip/ip.h					\
  vnet/ip/ip4.h					\
  vnet/ip/ip4_error.h				\

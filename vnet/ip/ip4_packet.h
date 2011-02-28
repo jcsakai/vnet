@@ -40,9 +40,10 @@ typedef union {
   u32 as_u32;
 } ip4_address_t;
 
-always_inline uword
-ip4_address_is_multicast (ip4_address_t * a)
-{ return (a->data[0] & 0xf0) == 0xe0; }
+/* (src,dst) pair of addresses as found in packet header. */
+typedef struct {
+  ip4_address_t src, dst;
+} ip4_address_pair_t;
 
 typedef union {
   struct {
@@ -76,7 +77,12 @@ typedef union {
     u16 checksum;
 
     /* Source and destination address. */
-    ip4_address_t src_address, dst_address;
+    union {
+      struct {
+	ip4_address_t src_address, dst_address;
+      };
+      ip4_address_pair_t address_pair;
+    };      
   };
 
   /* For checksumming we'll want to access IP header in word sized chunks. */
@@ -181,6 +187,17 @@ do {									\
       sum1 = ip_csum_with_carry (sum1, ip1->checksum_data_32[4]);	\
     }									\
 } while (0)
+
+always_inline uword
+ip4_address_is_multicast (ip4_address_t * a)
+{ return (a->data[0] & 0xf0) == 0xe0; }
+
+always_inline void
+ip4_multicast_address_set_for_group (ip4_address_t * a, ip_multicast_group_t g)
+{
+  ASSERT (g < (1 << 28));
+  a->as_u32 = clib_host_to_net_u32 ((0xe << 28) + g);
+}
 
 always_inline void
 ip4_tcp_reply_x1 (ip4_header_t * ip0, tcp_header_t * tcp0)

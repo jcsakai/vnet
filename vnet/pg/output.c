@@ -33,7 +33,6 @@ pg_output (vlib_main_t * vm,
 {
   u32 * buffers = vlib_frame_args (frame);
   uword n_buffers = frame->n_vectors;
-  vlib_buffer_free (vm, buffers, /* next buffer stride */ 1, n_buffers,
-		    /* follow_buffer_next */ 1);
+  vlib_buffer_free (vm, buffers, n_buffers, /* follow_buffer_next */ 1);
   return n_buffers;
 }

@@ -810,7 +810,6 @@ ige_interface_tx (vlib_main_t * vm,
     if (n > 0)
       {
 	vlib_buffer_free (vm, xm->tx_buffers_pending_free,
-			  /* stride */ 1,
 			  n,
 			  /* follow_buffer_next */ 0);
 	_vec_len (xm->tx_buffers_pending_free) = 0;

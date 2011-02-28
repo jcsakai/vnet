@@ -1358,7 +1358,6 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
     [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
     [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
     [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
-    [IP_LOOKUP_NEXT_MULTICAST] = "ip4-multicast",
   },
 
   .sw_interface_admin_up_down_function = ip4_sw_interface_admin_up_down,
@@ -2614,7 +2613,6 @@ static VLIB_REGISTER_NODE (ip4_lookup_multicast_node) = {
     [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
     [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
     [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
-    [IP_LOOKUP_NEXT_MULTICAST] = "ip4-multicast",
   },
 };
 
@@ -2630,4 +2628,3 @@ static VLIB_REGISTER_NODE (ip4_multicast_node) = {
     [0] = "error-drop",
   },
 };
-
