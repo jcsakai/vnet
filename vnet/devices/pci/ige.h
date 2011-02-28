@@ -22,7 +22,10 @@ typedef volatile struct {
   CLIB_PAD_FROM_TO (0x24, 0x28);
   u32 control;
   u32 interrupt_absolute_delay_timer;
-  CLIB_PAD_FROM_TO (0x30, 0x40);
+
+  u32 tcp_segmentation_pad_control_8254x;
+  CLIB_PAD_FROM_TO (0x34, 0x40);
+
   u32 tx_arbitration;
   CLIB_PAD_FROM_TO (0x44, 0x100);
 } ige_dma_regs_t;
@@ -32,7 +35,22 @@ typedef ixge_rx_to_hw_descriptor_t ige_rx_to_hw_descriptor_t;
 typedef ixge_rx_from_hw_descriptor_t ige_rx_from_hw_descriptor_t;
 typedef ixge_tx_descriptor_t ige_tx_descriptor_t;
 
+typedef struct {
+  u64 buffer_address;
+
+  u16 n_packet_bytes_this_descriptor;
+
+  /* 16 bit ones complement sum of packet.  You must back out fields
+     to get IP/TCP/UDP checksum. */
+  u16 ip_checksum;
+
+  u16 status;
+
+  u16 vlan_tag;
+} ige_legacy_rx_descriptor_t;
+
 typedef union {
+  ige_legacy_rx_descriptor_t rx_legacy;
   ige_rx_to_hw_descriptor_t rx_to_hw;
   ige_rx_from_hw_descriptor_t rx_from_hw;
   ige_tx_descriptor_t tx;
@@ -109,6 +127,21 @@ typedef struct {
 #define IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET (8 + 0)
 #define IGE_TX_DESCRIPTOR_STATUS0_IS_END_OF_PACKET (1 << IGE_TX_DESCRIPTOR_STATUS0_LOG2_IS_END_OF_PACKET)
 #define IGE_TX_DESCRIPTOR_STATUS1_DONE (1 << 0)
+
+/* Legacy RX descriptors: only used for 8254X. */
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE (1 << (0 + 0))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET (1 << (0 + 1))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_NOT_IP4 (1 << (0 + 2))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN (1 << (0 + 3))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_IP4_TCP_CHECKSUMMED (1 << (0 + 5))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_IP4_CHECKSUMMED (1 << (0 + 6))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_PASSED_MULTICAST_FILTER (1 << (0 + 7))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_CRC_ERROR (1 << (8 + 0))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_SYMBOL_ERROR (1 << (8 + 1))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_SEQUENCE_ERROR (1 << (8 + 2))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_IP4_TCP_CHECKSUM_ERROR (1 << (8 + 5))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_IP4_CHECKSUM_ERROR (1 << (8 + 6))
+#define IGE_LEGACY_RX_DESCRIPTOR_STATUS_RX_DATA_ERROR (1 << (8 + 7))
 
 typedef volatile struct {
   /*
@@ -396,7 +429,45 @@ typedef volatile struct {
   u32 wakeup_flexible_filter_values[128][2];
 } ige_regs_t;
 
-#define foreach_ige_pci_device_id		\
+#define foreach_ige_8254x_pci_device_id		\
+  _ (82542, 0x1000)				\
+  _ (82543gc_fiber, 0x1001)			\
+  _ (82543gc_copper, 0x1004)			\
+  _ (82544ei_copper, 0x1008)			\
+  _ (82544ei_fiber, 0x1009)			\
+  _ (82544gc_copper, 0x100c)			\
+  _ (82544gc_lom, 0x100d)			\
+  _ (82540em, 0x100e)				\
+  _ (82540em_lom, 0x1015)			\
+  _ (82540ep_lom, 0x1016)			\
+  _ (82540ep, 0x1017)				\
+  _ (82540ep_lp, 0x101e)			\
+  _ (82545em_copper, 0x100f)			\
+  _ (82545em_fiber, 0x1011)			\
+  _ (82545gm_copper, 0x1026)			\
+  _ (82545gm_fiber, 0x1027)			\
+  _ (82545gm_serdes, 0x1028)			\
+  _ (82546eb_copper, 0x1010)			\
+  _ (82546eb_fiber, 0x1012)			\
+  _ (82546eb_quad_copper, 0x101d)		\
+  _ (82541ei, 0x1013)				\
+  _ (82541ei_mobile, 0x1018)			\
+  _ (82541er_lom, 0x1014)			\
+  _ (82541er, 0x1078)				\
+  _ (82547gi, 0x1075)				\
+  _ (82541gi, 0x1076)				\
+  _ (82541gi_mobile, 0x1077)			\
+  _ (82541gi_lf, 0x107c)			\
+  _ (82546gb_copper, 0x1079)			\
+  _ (82546gb_fiber, 0x107a)			\
+  _ (82546gb_serdes, 0x107b)			\
+  _ (82546gb_pcie, 0x108a)			\
+  _ (82546gb_quad_copper, 0x1099)		\
+  _ (82547ei, 0x1019)				\
+  _ (82547ei_mobile, 0x101a)			\
+  _ (82546gb_quad_copper_ksp3, 0x10b5)
+
+#define foreach_ige_8257x_pci_device_id		\
   _ (82571eb_copper, 0x105e)			\
   _ (82571eb_fiber, 0x105f)			\
   _ (82571eb_serdes, 0x1060)			\
@@ -448,7 +519,8 @@ typedef volatile struct {
 
 typedef enum {
 #define _(f,n) IGE_##f = n,
-  foreach_ige_pci_device_id
+  foreach_ige_8257x_pci_device_id
+  foreach_ige_8254x_pci_device_id
 #undef _
 } ige_pci_device_id_t;
 
@@ -512,7 +584,9 @@ typedef enum {
   IGE_N_COUNTER,
 } ige_counter_type_t;
 
-typedef struct {
+struct ige_main_t;
+
+typedef struct ige_device_t {
   ige_regs_t * regs;
 
   /* PCI bus info. */
@@ -524,7 +598,16 @@ typedef struct {
   u16 device_index;
 
   /* 0 or 1. */
-  u16 pci_function;
+  u8 pci_function;
+
+  /* True if for 8254x versus 8257x. */
+  u8 is_8254x;
+
+  uword (* rx_queue_no_wrap) (struct ige_main_t * xm,
+			      struct ige_device_t * xd,
+			      ige_dma_queue_t * dq,
+			      u32 start_descriptor_index,
+			      u32 n_descriptors);
 
   /* VLIB interface for this instance. */
   u32 vlib_hw_if_index, vlib_sw_if_index;
@@ -540,7 +623,7 @@ typedef struct {
   u64 counters[IGE_N_COUNTER], counters_last_clear[IGE_N_COUNTER];
 } ige_device_t;
 
-typedef struct {
+typedef struct ige_main_t {
   vlib_main_t * vlib_main;
 
   /* Vector of devices. */
@@ -549,8 +632,7 @@ typedef struct {
   /* Descriptor ring sizes. */
   u32 n_descriptors[VLIB_N_RX_TX];
 
-  /* RX buffer size.  Must be at least 1k; will be rounded to
-     next largest 1k size. */
+  /* RX buffer size. */
   u32 n_bytes_in_rx_buffer;
 
   u32 n_descriptors_per_cache_line;
