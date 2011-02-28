@@ -126,6 +126,9 @@ hdlc_input (vlib_main_t * vm,
 	  h0 = (void *) (b0->data + b0->current_data);
 	  h1 = (void *) (b1->data + b1->current_data);
 
+	  protocol0 = h0->protocol;
+	  protocol1 = h1->protocol;
+
 	  /* Add padding bytes for OSI protocols. */
 	  len0 = sizeof (h0[0]);
 	  len1 = sizeof (h1[0]);
@@ -140,8 +143,6 @@ hdlc_input (vlib_main_t * vm,
 	  b1->current_length -= len1;
 
 	  /* Index sparse array with network byte order. */
-	  protocol0 = h0->protocol;
-	  protocol1 = h1->protocol;
 	  sparse_vec_index2 (rt->next_by_protocol, protocol0, protocol1, &i0, &i1);
 
 	  b0->error = node->errors[i0 == SPARSE_VEC_INVALID_INDEX ? HDLC_ERROR_UNKNOWN_PROTOCOL : HDLC_ERROR_NONE];

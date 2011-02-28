@@ -71,11 +71,8 @@ ige_read_write_phy_reg (ethernet_phy_t * phy, u32 reg_index, u32 * data,
   u32 x;
   
   ASSERT (xd->phy_index < 2);
-  ige_software_firmware_sync (xd, 1 << (1 + xd->phy_index));
-
-  /* Busy wait timed to take 28e-6 secs.  No suspend. */
-  while (! (r->mdi_control & ready_bit))
-    ;
+  if (! xd->is_8254x)
+    ige_software_firmware_sync (xd, 1 << (1 + xd->phy_index));
 
   r->mdi_control =
     ((/* write data */ (data[0] & 0xffff) << 0)
@@ -89,7 +86,8 @@ ige_read_write_phy_reg (ethernet_phy_t * phy, u32 reg_index, u32 * data,
   if (rw == VLIB_READ)
     data[0] = x & 0xffff;
 
-  ige_software_firmware_sync_release (xd, 1 << (1 + xd->phy_index));
+  if (! xd->is_8254x)
+    ige_software_firmware_sync_release (xd, 1 << (1 + xd->phy_index));
 
   return /* no error */ 0;
 }
@@ -97,14 +95,23 @@ ige_read_write_phy_reg (ethernet_phy_t * phy, u32 reg_index, u32 * data,
 static clib_error_t *
 ige_interface_admin_up_down (vlib_main_t * vm, u32 hw_if_index, u32 flags)
 {
-#if 0
   vlib_hw_interface_t * hif = vlib_get_hw_interface (vm, hw_if_index);
   uword is_up = (flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) != 0;
   ige_main_t * xm = &ige_main;
   ige_device_t * xd = vec_elt_at_index (xm->devices, hif->dev_instance);
-
-  /* fixme do something?  show link up to partner? */
-#endif
+  ige_regs_t * r = xd->regs;
+  
+  /* RX/TX enable. */
+  if (is_up)
+    {
+      r->rx_control |= 1 << 1;
+      r->tx_control |= 1 << 1;
+    }
+  else
+    {
+      r->rx_control &= ~(1 << 1);
+      r->tx_control &= ~(1 << 1);
+    }
 
   return /* no error */ 0;
 }
@@ -152,6 +159,50 @@ static u8 * format_ige_rx_from_hw_descriptor (u8 * s, va_list * va)
 	s = format (s, ", %s checksum %s",
                     is_tcp ? "tcp" : "udp",
                     (s2 & IGE_RX_DESCRIPTOR_STATUS2_IP4_TCP_UDP_CHECKSUM_ERROR) ? "bad" : "ok");
+    }
+
+  return s;
+}
+
+static u8 * format_ige_legacy_rx_descriptor (u8 * s, va_list * va)
+{
+  ige_legacy_rx_descriptor_t * d = va_arg (*va, ige_legacy_rx_descriptor_t *);
+  u32 s2 = d->status;
+  u32 is_ip4, is_tcp;
+  uword indent = format_get_indent (s);
+
+  s = format (s, "%s-owned",
+	      (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE) ? "sw" : "hw");
+  s = format (s, ", length this descriptor %d", d->n_packet_bytes_this_descriptor);
+  if (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET)
+    s = format (s, ", end-of-packet");
+
+  if (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_PASSED_MULTICAST_FILTER)
+    s = format (s, ", passed multicast-filter");
+
+  s = format (s, "\n%U", format_white_space, indent);
+
+  if (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN)
+    s = format (s, "vlan header 0x%x\n%U", d->vlan_tag,
+		format_white_space, indent);
+
+  if (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_CRC_ERROR)
+    s = format (s, ", crc-error");
+  if (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_SYMBOL_ERROR)
+    s = format (s, ", symbol-error");
+  if (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_SEQUENCE_ERROR)
+    s = format (s, ", sequence-error");
+  if (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_RX_DATA_ERROR)
+    s = format (s, ", rx-data-error");
+
+  if ((is_ip4 = !(s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_NOT_IP4)))
+    {
+      s = format (s, "ip4 checksum %s",
+                  (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IP4_CHECKSUM_ERROR) ? "bad" : "ok");
+      is_tcp = (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_IP4_CHECKSUMMED) != 0;
+      if (is_tcp)
+	s = format (s, ", tcp checksum %s",
+                    (s2 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IP4_TCP_CHECKSUM_ERROR) ? "bad" : "ok");
     }
 
   return s;
@@ -216,13 +267,22 @@ static u8 * format_ige_rx_dma_trace (u8 * s, va_list * va)
 		t->queue_index);
   }
 
-  s = format (s, "\n%Ubefore: %U",
-	      format_white_space, indent,
-	      format_ige_rx_from_hw_descriptor, &t->before);
-  s = format (s, "\n%Uafter : head/tail address 0x%Lx/0x%Lx",
-	      format_white_space, indent,
-	      t->after.rx_to_hw.head_address,
-	      t->after.rx_to_hw.tail_address);
+  if (xd->is_8254x)
+    {
+      s = format (s, "\n%Ubefore: %U",
+		  format_white_space, indent,
+		  format_ige_legacy_rx_descriptor, &t->before.rx_legacy);
+    }
+  else
+    {
+      s = format (s, "\n%Ubefore: %U",
+		  format_white_space, indent,
+		  format_ige_rx_from_hw_descriptor, &t->before);
+      s = format (s, "\n%Uafter : head/tail address 0x%Lx/0x%Lx",
+		  format_white_space, indent,
+		  t->after.rx_to_hw.head_address,
+		  t->after.rx_to_hw.tail_address);
+    }
 
   s = format (s, "\n%Ubuffer 0x%x: %U",
 	      format_white_space, indent,
@@ -310,25 +370,75 @@ ige_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
   ige_rx_next_and_error_from_status_x1 (s10, s12, next1, error1, flags1);
 }
 
-static void
+always_inline void
+ige_rx_legacy_next_and_error_from_status_x1 (u32 s00,
+					     u8 * next0, u8 * error0, u32 * flags0)
+{
+  u8 is0_ip4, n0, e0;
+  u32 f0;
+
+  e0 = IGE_RX_ERROR_none;
+  n0 = IGE_RX_NEXT_ETHERNET_INPUT;
+
+  is0_ip4 = s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_IP4_CHECKSUMMED;
+  n0 = is0_ip4 ? IGE_RX_NEXT_IP4_INPUT : n0;
+  e0 = (is0_ip4 && (s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IP4_CHECKSUM_ERROR)
+	? IGE_RX_ERROR_ip4_checksum_error
+	: e0);
+
+  e0 = ((s00 &
+         (IGE_LEGACY_RX_DESCRIPTOR_STATUS_CRC_ERROR
+          | IGE_LEGACY_RX_DESCRIPTOR_STATUS_SYMBOL_ERROR
+          | IGE_LEGACY_RX_DESCRIPTOR_STATUS_SEQUENCE_ERROR
+          | IGE_LEGACY_RX_DESCRIPTOR_STATUS_RX_DATA_ERROR))
+        ? IGE_RX_ERROR_rx_data_error
+        : e0);
+
+  /* Check for error. */
+  n0 = e0 != IGE_RX_ERROR_none ? IGE_RX_NEXT_DROP : n0;
+
+  f0 = ((s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_IP4_TCP_CHECKSUMMED)
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+
+  f0 |= ((s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IP4_TCP_CHECKSUM_ERROR)
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+
+  *error0 = e0;
+  *next0 = n0;
+  *flags0 = f0;
+}
+
+always_inline void
+ige_rx_legacy_next_and_error_from_status_x2 (u32 s00, u32 s10,
+					     u8 * next0, u8 * error0, u32 * flags0,
+					     u8 * next1, u8 * error1, u32 * flags1)
+{
+  ige_rx_legacy_next_and_error_from_status_x1 (s00, next0, error0, flags0);
+  ige_rx_legacy_next_and_error_from_status_x1 (s10, next1, error1, flags1);
+}
+
+always_inline void
 ige_rx_trace (ige_main_t * xm,
-	       ige_device_t * xd,
-	       ige_dma_queue_t * dq,
-	       ige_descriptor_t * before_descriptors,
-	       u32 * before_buffers,
-	       ige_descriptor_t * after_descriptors,
-	       uword n_descriptors)
+	      ige_device_t * xd,
+	      ige_dma_queue_t * dq,
+	      ige_descriptor_t * before_descriptors,
+	      u32 * before_buffers,
+	      ige_descriptor_t * after_descriptors,
+	      uword n_descriptors,
+	      uword is_8254x)
 {
   vlib_main_t * vm = xm->vlib_main;
   vlib_node_runtime_t * node = dq->rx.node;
-  ige_rx_from_hw_descriptor_t * bd;
-  ige_rx_to_hw_descriptor_t * ad;
+  ige_descriptor_t * bd;
+  ige_descriptor_t * ad;
   u32 * b, n_left, is_sop, next_index_sop;
 
   n_left = n_descriptors;
   b = before_buffers;
-  bd = &before_descriptors->rx_from_hw;
-  ad = &after_descriptors->rx_to_hw;
+  bd = before_descriptors;
+  ad = after_descriptors;
   is_sop = dq->rx.is_start_of_packet;
   next_index_sop = dq->rx.saved_start_of_packet_next_index;
 
@@ -346,10 +456,18 @@ ige_rx_trace (ige_main_t * xm,
       b0 = vlib_get_buffer (vm, bi0);
       b1 = vlib_get_buffer (vm, bi1);
 
-      ige_rx_next_and_error_from_status_x2 (bd[0].status[0], bd[0].status[2],
-                                            bd[1].status[0], bd[1].status[2],
-                                            &next0, &error0, &flags0,
-                                            &next1, &error1, &flags1);
+      if (is_8254x)
+	ige_rx_legacy_next_and_error_from_status_x2 (bd[0].rx_legacy.status,
+						     bd[1].rx_legacy.status,
+						     &next0, &error0, &flags0,
+						     &next1, &error1, &flags1);
+      else
+	ige_rx_next_and_error_from_status_x2 (bd[0].rx_from_hw.status[0],
+					      bd[0].rx_from_hw.status[2],
+					      bd[1].rx_from_hw.status[0],
+					      bd[1].rx_from_hw.status[2],
+					      &next0, &error0, &flags0,
+					      &next1, &error1, &flags1);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -367,10 +485,10 @@ ige_rx_trace (ige_main_t * xm,
       t1->queue_index = dq->queue_index;
       t0->device_index = xd->device_index;
       t1->device_index = xd->device_index;
-      t0->before.rx_from_hw = bd[0];
-      t1->before.rx_from_hw = bd[1];
-      t0->after.rx_to_hw = ad[0];
-      t1->after.rx_to_hw = ad[1];
+      t0->before = bd[0];
+      t1->before = bd[1];
+      t0->after = ad[0];
+      t1->after = ad[1];
       t0->buffer_index = bi0;
       t1->buffer_index = bi1;
       memcpy (&t0->buffer, b0, sizeof (b0[0]) - sizeof (b0->pre_data));
@@ -395,8 +513,13 @@ ige_rx_trace (ige_main_t * xm,
 
       b0 = vlib_get_buffer (vm, bi0);
 
-      ige_rx_next_and_error_from_status_x1 (bd[0].status[0], bd[0].status[2],
-					    &next0, &error0, &flags0);
+      if (is_8254x)
+	ige_rx_legacy_next_and_error_from_status_x1 (bd[0].rx_legacy.status,
+						     &next0, &error0, &flags0);
+      else
+	ige_rx_next_and_error_from_status_x1 (bd[0].rx_from_hw.status[0],
+					      bd[0].rx_from_hw.status[2],
+					      &next0, &error0, &flags0);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -406,8 +529,8 @@ ige_rx_trace (ige_main_t * xm,
 
       t0->queue_index = dq->queue_index;
       t0->device_index = xd->device_index;
-      t0->before.rx_from_hw = bd[0];
-      t0->after.rx_to_hw = ad[0];
+      t0->before = bd[0];
+      t0->after = ad[0];
       t0->buffer_index = bi0;
       memcpy (&t0->buffer, b0, sizeof (b0[0]) - sizeof (b0->pre_data));
       memcpy (t0->buffer.pre_data, b0->data, sizeof (t0->buffer.pre_data));
@@ -481,12 +604,12 @@ typedef struct {
 
 static void
 ige_tx_trace (ige_main_t * xm,
-	       ige_device_t * xd,
-	       ige_dma_queue_t * dq,
-	       ige_tx_state_t * tx_state,
-	       ige_tx_descriptor_t * descriptors,
-	       u32 * buffers,
-	       uword n_descriptors)
+	      ige_device_t * xd,
+	      ige_dma_queue_t * dq,
+	      ige_tx_state_t * tx_state,
+	      ige_tx_descriptor_t * descriptors,
+	      u32 * buffers,
+	      uword n_descriptors)
 {
   vlib_main_t * vm = xm->vlib_main;
   vlib_node_runtime_t * node = tx_state->node;
@@ -612,12 +735,12 @@ ige_tx_descriptor_matches_template (ige_main_t * xm, ige_tx_descriptor_t * d)
 
 static uword
 ige_tx_no_wrap (ige_main_t * xm,
-		 ige_device_t * xd,
-		 ige_dma_queue_t * dq,
-		 u32 * buffers,
-		 u32 start_descriptor_index,
-		 u32 n_descriptors,
-		 ige_tx_state_t * tx_state)
+		ige_device_t * xd,
+		ige_dma_queue_t * dq,
+		u32 * buffers,
+		u32 start_descriptor_index,
+		u32 n_descriptors,
+		ige_tx_state_t * tx_state)
 {
   vlib_main_t * vm = xm->vlib_main;
   ige_tx_descriptor_t * d;
@@ -723,9 +846,9 @@ ige_tx_no_wrap (ige_main_t * xm,
     {
       to_tx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
       ige_tx_trace (xm, xd, dq, tx_state,
-		     &dq->descriptors[start_descriptor_index].tx,
-		     to_tx,
-		     n_descriptors);
+		    &dq->descriptors[start_descriptor_index].tx,
+		    to_tx,
+		    n_descriptors);
     }
 
   _vec_len (xm->tx_buffers_pending_free) = to_free - xm->tx_buffers_pending_free;
@@ -737,8 +860,8 @@ ige_tx_no_wrap (ige_main_t * xm,
 
 static uword
 ige_interface_tx (vlib_main_t * vm,
-		   vlib_node_runtime_t * node,
-		   vlib_frame_t * f)
+		  vlib_node_runtime_t * node,
+		  vlib_frame_t * f)
 {
   ige_main_t * xm = &ige_main;
   vlib_interface_output_runtime_t * rd = (void *) node->runtime_data;
@@ -827,12 +950,13 @@ ige_interface_tx (vlib_main_t * vm,
   return f->n_vectors;
 }
 
-static uword
+always_inline uword
 ige_rx_queue_no_wrap (ige_main_t * xm,
-		       ige_device_t * xd,
-		       ige_dma_queue_t * dq,
-		       u32 start_descriptor_index,
-		       u32 n_descriptors)
+		      ige_device_t * xd,
+		      ige_dma_queue_t * dq,
+		      u32 start_descriptor_index,
+		      u32 n_descriptors,
+		      uword is_8254x)
 {
   vlib_main_t * vm = xm->vlib_main;
   vlib_node_runtime_t * node = dq->rx.node;
@@ -909,14 +1033,25 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  vlib_prefetch_buffer_with_index (vm, to_rx[3], STORE);
 	  CLIB_PREFETCH (d + 4, CLIB_CACHE_LINE_BYTES, LOAD);
 
-	  s00 = d[0].rx_from_hw.status[0];
-	  s01 = d[1].rx_from_hw.status[0];
+	  if (is_8254x)
+	    {
+	      s00 = d[0].rx_legacy.status;
+	      s01 = d[1].rx_legacy.status;
 
-	  s20 = d[0].rx_from_hw.status[2];
-	  s21 = d[1].rx_from_hw.status[2];
+	      if (! ((s00 | s01) & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE))
+		goto found_hw_owned_descriptor_x2;
+	    }
+	  else
+	    {
+	      s00 = d[0].rx_from_hw.status[0];
+	      s01 = d[1].rx_from_hw.status[0];
 
-	  if (! ((s20 | s21) & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
-	    goto found_hw_owned_descriptor_x2;
+	      s20 = d[0].rx_from_hw.status[2];
+	      s21 = d[1].rx_from_hw.status[2];
+
+	      if (! ((s20 | s21) & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+		goto found_hw_owned_descriptor_x2;
+	    }
 
 	  bi0 = to_rx[0];
 	  bi1 = to_rx[1];
@@ -941,12 +1076,36 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  CLIB_PREFETCH (b0->data, CLIB_CACHE_LINE_BYTES, LOAD);
 	  CLIB_PREFETCH (b1->data, CLIB_CACHE_LINE_BYTES, LOAD);
 
-	  is_eop0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-	  is_eop1 = (s21 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+	  if (is_8254x)
+	    {
+	      is_eop0 = (s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET) != 0;
+	      is_eop1 = (s01 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET) != 0;
 
-	  ige_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
-                                                &next0, &error0, &flags0,
-                                                &next1, &error1, &flags1);
+	      is_vlan0 = (s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN) != 0;
+	      is_vlan1 = (s01 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN) != 0;
+
+	      ige_rx_legacy_next_and_error_from_status_x2 (s00, s01,
+							   &next0, &error0, &flags0,
+							   &next1, &error1, &flags1);
+
+              len0 = d[0].rx_legacy.n_packet_bytes_this_descriptor;
+              len1 = d[1].rx_legacy.n_packet_bytes_this_descriptor;
+	    }
+	  else
+	    {
+	      is_eop0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+	      is_eop1 = (s21 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+
+	      is_vlan0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
+	      is_vlan1 = (s21 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
+
+	      ige_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
+						    &next0, &error0, &flags0,
+						    &next1, &error1, &flags1);
+
+              len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
+              len1 = d[1].rx_from_hw.n_packet_bytes_this_descriptor;
+	    }
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next1 = is_eop0 ? next1 : next0;
@@ -961,21 +1120,16 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  b0->error = node->errors[error0];
 	  b1->error = node->errors[error1];
 
-	  len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
-	  len1 = d[1].rx_from_hw.n_packet_bytes_this_descriptor;
 	  n_bytes += len0 + len1;
 	  n_packets += is_eop0 + is_eop1;
 
-	  /* Give new buffers to hardware. */
+	  /* Give new buffers to hardware.  Works also for legacy descriptors. */
 	  d[0].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi0);
 	  d[1].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi1);
 	  d[0].rx_to_hw.head_address = 0; /* must set low bit to zero */
 	  d[1].rx_to_hw.head_address = 0; /* must set low bit to zero */
 	  d += 2;
 	  n_descriptors_left -= 2;
-
-          is_vlan0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
-          is_vlan1 = (s21 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
 
 	  /* Point to either l2 or l3 header depending on next. */
 	  l3_offset0 = (is_sop && next0 == IGE_RX_NEXT_IP4_INPUT
@@ -1055,10 +1209,19 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
 	  u8 is_eop0, is_vlan0, error0, next0;
 
-	  s00 = d[0].rx_from_hw.status[0];
-	  s20 = d[0].rx_from_hw.status[2];
-	  if (! (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
-	    goto found_hw_owned_descriptor_x1;
+	  if (is_8254x)
+	    {
+	      s00 = d[0].rx_legacy.status;
+	      if (! (s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE))
+		goto found_hw_owned_descriptor_x1;
+	    }
+	  else
+	    {
+	      s00 = d[0].rx_from_hw.status[0];
+	      s20 = d[0].rx_from_hw.status[2];
+	      if (! (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+                goto found_hw_owned_descriptor_x1;
+	    }
 
 	  bi0 = to_rx[0];
 	  ASSERT (to_add >= xm->rx_buffers_to_add);
@@ -1073,8 +1236,28 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
-	  is_eop0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-	  ige_rx_next_and_error_from_status_x1 (s00, s20, &next0, &error0, &flags0);
+	  if (is_8254x)
+	    {
+	      is_eop0 = (s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET) != 0;
+
+	      is_vlan0 = (s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN) != 0;
+
+	      ige_rx_legacy_next_and_error_from_status_x1 (s00,
+							   &next0, &error0, &flags0);
+
+              len0 = d[0].rx_legacy.n_packet_bytes_this_descriptor;
+	    }
+	  else
+	    {
+	      is_eop0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
+
+	      is_vlan0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
+
+	      ige_rx_next_and_error_from_status_x1 (s00, s20,
+						    &next0, &error0, &flags0);
+
+              len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
+	    }
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next_index_sop = next0;
@@ -1085,7 +1268,6 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 
 	  b0->error = node->errors[error0];
 
-	  len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
 	  n_bytes += len0;
 	  n_packets += is_eop0;
 
@@ -1094,8 +1276,6 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  d[0].rx_to_hw.head_address = 0; /* must set low bit to zero */
 	  d += 1;
 	  n_descriptors_left -= 1;
-
-          is_vlan0 = (s20 & IGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
 
 	  /* Point to either l2 or l3 header depending on next. */
 	  l3_offset0 = (is_sop && next0 == IGE_RX_NEXT_IP4_INPUT
@@ -1152,10 +1332,11 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
       {
 	u32 n = clib_min (n_trace, n_done);
 	ige_rx_trace (xm, xd, dq,
-		       d_trace_save,
-		       d_trace_buffers,
-		       &dq->descriptors[start_descriptor_index],
-		       n);
+		      d_trace_save,
+		      d_trace_buffers,
+		      &dq->descriptors[start_descriptor_index],
+		      n,
+		      is_8254x);
 	vlib_set_trace_count (vm, node, n_trace - n);
       }
     if (d_trace_save)
@@ -1184,6 +1365,28 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 
     return n_packets;
   }
+}
+
+static uword
+ige_8257x_rx_queue_no_wrap (ige_main_t * xm,
+			    ige_device_t * xd,
+			    ige_dma_queue_t * dq,
+			    u32 start_descriptor_index,
+			    u32 n_descriptors)
+{
+  return ige_rx_queue_no_wrap (xm, xd, dq, start_descriptor_index, n_descriptors,
+			       /* is_8254x */ 0);
+}
+
+static uword
+ige_8254x_rx_queue_no_wrap (ige_main_t * xm,
+			    ige_device_t * xd,
+			    ige_dma_queue_t * dq,
+			    u32 start_descriptor_index,
+			    u32 n_descriptors)
+{
+  return ige_rx_queue_no_wrap (xm, xd, dq, start_descriptor_index, n_descriptors,
+			       /* is_8254x */ 1);
 }
 
 static uword
@@ -1221,7 +1424,7 @@ ige_rx_queue (ige_main_t * xm,
   if (hw_head_index < sw_head_index)
     {
       u32 n_tried = dq->n_descriptors - sw_head_index;
-      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
+      n_packets += xd->rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
       sw_head_index = ige_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
       if (dq->rx.n_descriptors_done_this_call != n_tried)
 	goto done;
@@ -1229,7 +1432,7 @@ ige_rx_queue (ige_main_t * xm,
   if (hw_head_index >= sw_head_index)
     {
       u32 n_tried = hw_head_index - sw_head_index;
-      n_packets += ige_rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
+      n_packets += xd->rx_queue_no_wrap (xm, xd, dq, sw_head_index, n_tried);
       sw_head_index = ige_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
     }
 
@@ -1345,8 +1548,8 @@ ige_device_input (ige_main_t * xm,
 
 static uword
 ige_input (vlib_main_t * vm,
-	    vlib_node_runtime_t * node,
-	    vlib_frame_t * f)
+	   vlib_node_runtime_t * node,
+	   vlib_frame_t * f)
 {
   ige_main_t * xm = &ige_main;
   ige_device_t * xd;
@@ -1387,7 +1590,7 @@ ige_input (vlib_main_t * vm,
 
 static char * ige_rx_error_strings[] = {
 #define _(n,s) s,
-    foreach_ige_rx_error
+  foreach_ige_rx_error
 #undef _
 };
 
@@ -1464,7 +1667,8 @@ static u8 * format_ige_device_id (u8 * s, va_list * args)
   switch (device_id)
     {
 #define _(f,n) case n: t = #f; break;
-      foreach_ige_pci_device_id;
+      foreach_ige_8257x_pci_device_id;
+      foreach_ige_8254x_pci_device_id;
 #undef _
     default:
       t = 0;
@@ -1487,7 +1691,7 @@ static u8 * format_ige_device (u8 * s, va_list * args)
 
   ige_update_counters (xd);
 
-  s = format (s, "Intel 8257X: id %U\n%U%U",
+  s = format (s, "Intel %U\n%U%U",
 	      format_ige_device_id, xd->device_id,
 	      format_white_space, indent + 2,
 	      format_ethernet_media, &phy->media);
@@ -1498,7 +1702,7 @@ static u8 * format_ige_device (u8 * s, va_list * args)
     static char * names[] = {
 #define _(a,f) #f,
 #define _64(a,f) _(a,f)
-    foreach_ige_counter
+      foreach_ige_counter
 #undef _
 #undef _64
     };
@@ -1526,13 +1730,13 @@ static void ige_clear_hw_interface_counters (u32 instance)
 }
 
 VLIB_DEVICE_CLASS (ige_device_class) = {
-    .name = "ige",
-    .tx_function = ige_interface_tx,
-    .format_device_name = format_ige_device_name,
-    .format_device = format_ige_device,
-    .format_tx_trace = format_ige_tx_dma_trace,
-    .clear_counters = ige_clear_hw_interface_counters,
-    .admin_up_down_function = ige_interface_admin_up_down,
+  .name = "ige",
+  .tx_function = ige_interface_tx,
+  .format_device_name = format_ige_device_name,
+  .format_device = format_ige_device,
+  .format_tx_trace = format_ige_tx_dma_trace,
+  .clear_counters = ige_clear_hw_interface_counters,
+  .admin_up_down_function = ige_interface_admin_up_down,
 };
 
 static clib_error_t *
@@ -1549,9 +1753,21 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   if (! xm->n_descriptors_per_cache_line)
     xm->n_descriptors_per_cache_line = CLIB_CACHE_LINE_BYTES / sizeof (dq->descriptors[0]);
 
-  if (! xm->n_bytes_in_rx_buffer)
-    xm->n_bytes_in_rx_buffer = 512;
-  xm->n_bytes_in_rx_buffer = round_pow2 (xm->n_bytes_in_rx_buffer, 512);
+  /* Chip only supports a few buffer sizes. */
+  switch (xm->n_bytes_in_rx_buffer)
+    {
+    case 512:
+    case 1 << 10:
+    case 2 << 10:
+    case 4 << 10:
+    case 8 << 10:
+    case 16 << 10:
+      break;
+
+    default:
+      xm->n_bytes_in_rx_buffer = 512;
+      break;
+    }
   xm->vlib_buffer_free_list_index = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer);
 
   if (! xm->n_descriptors[rt])
@@ -1659,7 +1875,8 @@ static void ige_device_init (ige_main_t * xm)
 	;
 
       /* Software loaded. */
-      r->extended_control |= (1 << 28);
+      if (! xd->is_8254x)
+	r->extended_control |= (1 << 28);
 
       xd->phy.opaque = xd->device_index;
       xd->phy.read_write = ige_read_write_phy_reg;
@@ -1698,8 +1915,25 @@ static void ige_device_init (ige_main_t * xm)
       ige_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ige_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
-      /* RX buffers are 512 bytes. */
-      r->rx_control |= (2 << 16);
+      {
+	u32 bsize = 0, bsex = 0;
+
+	bsex = xm->n_bytes_in_rx_buffer >= 4 << 10;
+	switch (xm->n_bytes_in_rx_buffer)
+	  {
+	  case 512: bsize = 2; break;
+	  case 1 << 10: bsize = 1; break;
+	  case 2 << 10: bsize = 0; break;
+	  case 4 << 10: bsize = 3; break;
+	  case 8 << 10: bsize = 2; break;
+	  case 16 << 10: bsize = 1; break;
+	  default:
+	    ASSERT (0);
+	    break;
+	  }
+
+	r->rx_control |= (bsize << 16) | (bsex << 25);
+      }
 
       /* Strip ethernet crc and don't include in descriptor length. */
       r->rx_control |= (1 << 26);
@@ -1716,18 +1950,17 @@ static void ige_device_init (ige_main_t * xm)
         (/* checksum start offset */ (sizeof (ethernet_header_t) << 0)
          | (1 << 8) | (1 << 9));
 
-      /* Extended status enable (since we use extended descriptors). */
-      r->rx_filter_control |= 1 << 15;
-
       /* Pad short packets. */
       r->tx_control |= 1 << 3;
 
-      /* Multiple descriptor read. */
-      r->tx_control |= 1 << 28;
+      if (! xd->is_8254x)
+	{
+	  /* Extended status enable (since we use extended descriptors). */
+	  r->rx_filter_control |= 1 << 15;
 
-      /* RX/TX enable. */
-      r->rx_control |= 1 << 1;
-      r->tx_control |= 1 << 1;
+	  /* Multiple descriptor read. */
+	  r->tx_control |= 1 << 28;
+	}
 
       r->interrupt.enable_write_1_to_set = ~0;
     }
@@ -1735,8 +1968,8 @@ static void ige_device_init (ige_main_t * xm)
 
 static uword
 ige_process (vlib_main_t * vm,
-	      vlib_node_runtime_t * rt,
-	      vlib_frame_t * f)
+	     vlib_node_runtime_t * rt,
+	     vlib_frame_t * f)
 {
   ige_main_t * xm = &ige_main;
   ige_device_t * xd;
@@ -1787,9 +2020,9 @@ ige_process (vlib_main_t * vm,
 }
 
 static vlib_node_registration_t ige_process_node = {
-    .function = ige_process,
-    .type = VLIB_NODE_TYPE_PROCESS,
-    .name = "ige-process",
+  .function = ige_process,
+  .type = VLIB_NODE_TYPE_PROCESS,
+  .name = "ige-process",
 };
 
 clib_error_t * ige_init (vlib_main_t * vm)
@@ -1838,10 +2071,25 @@ ige_pci_init (vlib_main_t * vm, pci_device_t * dev)
 
   vec_add2 (xm->devices, xd, 1);
   xd->pci_device = dev[0];
-  xd->device_id = xd->pci_device.config0.header.device_id;
   xd->regs = r;
   xd->device_index = xd - xm->devices;
   xd->pci_function = dev->bus_address.slot_function & 1;
+
+  xd->device_id = xd->pci_device.config0.header.device_id;
+  switch (xd->device_id)
+    {
+    default:
+      xd->is_8254x = 0;
+      xd->rx_queue_no_wrap = ige_8257x_rx_queue_no_wrap;
+      break;
+
+#define _(f,i) case IGE_##f:
+      foreach_ige_8254x_pci_device_id;
+#undef _
+      xd->is_8254x = 1;
+      xd->rx_queue_no_wrap = ige_8254x_rx_queue_no_wrap;
+      break;
+    }
 
   /* Chip found so enable node. */
   {
@@ -1871,8 +2119,30 @@ static PCI_REGISTER_DEVICE (ige_pci_device_registration) = {
   .init_function = ige_pci_init,
   .supported_devices = {
 #define _(t,i) { .vendor_id = PCI_VENDOR_ID_INTEL, .device_id = i, },
-    foreach_ige_pci_device_id
+    foreach_ige_8254x_pci_device_id
+    foreach_ige_8257x_pci_device_id
 #undef _
     { 0 },
   },
 };
+
+static clib_error_t *
+ige_config (vlib_main_t * vm, unformat_input_t * input)
+{
+  ige_main_t * xm = &ige_main;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "rx-buffer-size %d", &xm->n_bytes_in_rx_buffer))
+	;
+
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
+    }
+
+  return 0;
+}
+
+/* ige { ... } configuration. */
+VLIB_CONFIG_FUNCTION (ige_config, "ige");
