@@ -121,7 +121,7 @@ tuntap_tx (vlib_main_t * vm,
 	clib_unix_warning ("writev");
     }
     
-  vlib_buffer_free (vm, buffers, n_packets, /* follow_buffer_next */ 1);
+  vlib_buffer_free (vm, buffers, n_packets);
     
   return n_packets;
 }
@@ -561,7 +561,7 @@ tuntap_dummy_tx (vlib_main_t * vm,
 {
   u32 * buffers = vlib_frame_args (frame);
   uword n_buffers = frame->n_vectors;
-  vlib_buffer_free (vm, buffers, n_buffers, /* follow_buffer_next */ 1);
+  vlib_buffer_free (vm, buffers, n_buffers);
   return n_buffers;
 }
 

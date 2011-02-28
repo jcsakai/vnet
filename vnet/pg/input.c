@@ -985,9 +985,8 @@ pg_generate_fix_multi_buffer_lengths (pg_main_t * pg,
 
   if (vec_len (unused_buffers) > 0)
     {
-      vlib_buffer_free (vm, unused_buffers,
-			vec_len (unused_buffers),
-			/* follow chain */ 0);
+      vlib_buffer_free_no_next (vm, unused_buffers,
+				vec_len (unused_buffers));
       _vec_len (unused_buffers) = 0;
     }
 }
