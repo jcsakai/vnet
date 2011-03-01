@@ -209,6 +209,9 @@ lib_LTLIBRARIES = libvnet.la
 
 noinst_PROGRAMS = vnet_unix
 
-vnet_unix_SOURCES = example/main_stub.c
+vnet_unix_SOURCES =				\
+  example/main_stub.c				\
+  example/rtt_test.c
+
 vnet_unix_LDFLAGS = -static
 vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm -ldl

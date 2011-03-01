@@ -103,7 +103,8 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/unix/pcap.lo vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
-am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT)
+am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT) \
+	example/rtt_test.$(OBJEXT)
 vnet_unix_OBJECTS = $(am_vnet_unix_OBJECTS)
 vnet_unix_DEPENDENCIES = libvnet.la
 vnet_unix_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
@@ -343,7 +344,10 @@ nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/devices/pci/ixge.h vnet/devices/xge/xge.h \
 	vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
-vnet_unix_SOURCES = example/main_stub.c
+vnet_unix_SOURCES = \
+  example/main_stub.c				\
+  example/rtt_test.c
+
 vnet_unix_LDFLAGS = -static
 vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm -ldl
 all: all-am
@@ -650,6 +654,8 @@ example/$(DEPDIR)/$(am__dirstamp):
 	@: > example/$(DEPDIR)/$(am__dirstamp)
 example/main_stub.$(OBJEXT): example/$(am__dirstamp) \
 	example/$(DEPDIR)/$(am__dirstamp)
+example/rtt_test.$(OBJEXT): example/$(am__dirstamp) \
+	example/$(DEPDIR)/$(am__dirstamp)
 vnet_unix$(EXEEXT): $(vnet_unix_OBJECTS) $(vnet_unix_DEPENDENCIES) 
 	@rm -f vnet_unix$(EXEEXT)
 	$(vnet_unix_LINK) $(vnet_unix_OBJECTS) $(vnet_unix_LDADD) $(LIBS)
@@ -657,6 +663,7 @@ vnet_unix$(EXEEXT): $(vnet_unix_OBJECTS) $(vnet_unix_DEPENDENCIES)
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
 	-rm -f example/main_stub.$(OBJEXT)
+	-rm -f example/rtt_test.$(OBJEXT)
 	-rm -f vnet/devices/ethernet_phy_bcm.$(OBJEXT)
 	-rm -f vnet/devices/ethernet_phy_bcm.lo
 	-rm -f vnet/devices/i2c/i2c.$(OBJEXT)
@@ -788,6 +795,7 @@ distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@example/$(DEPDIR)/main_stub.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@example/$(DEPDIR)/rtt_test.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/$(DEPDIR)/ethernet_phy_bcm.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/i2c/$(DEPDIR)/i2c.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/devices/optics/$(DEPDIR)/sfp.Plo@am__quote@

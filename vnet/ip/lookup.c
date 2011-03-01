@@ -798,6 +798,24 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 is_ip6)
       lm->format_address_and_length = format_ip4_address_and_length;
       mhash_init (&lm->address_to_if_address_index, sizeof (uword), sizeof (ip4_address_t));
     }
+
+  {
+    int i;
+
+    /* Setup all IP protocols to be punted and builtin-unknown. */
+    for (i = 0; i < 256; i++)
+      {
+	lm->local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
+	lm->builtin_protocol_by_ip_protocol[i] = IP_BUILTIN_PROTOCOL_UNKNOWN;
+      }
+
+    lm->local_next_by_ip_protocol[IP_PROTOCOL_TCP] = IP_LOCAL_NEXT_TCP_LOOKUP;
+    lm->local_next_by_ip_protocol[IP_PROTOCOL_UDP] = IP_LOCAL_NEXT_UDP_LOOKUP;
+    lm->local_next_by_ip_protocol[IP_PROTOCOL_ICMP] = IP_LOCAL_NEXT_ICMP;
+    lm->builtin_protocol_by_ip_protocol[IP_PROTOCOL_TCP] = IP_BUILTIN_PROTOCOL_TCP;
+    lm->builtin_protocol_by_ip_protocol[IP_PROTOCOL_UDP] = IP_BUILTIN_PROTOCOL_UDP;
+    lm->builtin_protocol_by_ip_protocol[is_ip6 ? IP_PROTOCOL_ICMP6 : IP_PROTOCOL_ICMP] = IP_BUILTIN_PROTOCOL_ICMP;
+  }
 }
 
 u8 * format_ip_lookup_next (u8 * s, va_list * args)

@@ -2386,10 +2386,7 @@ tcp_udp_lookup_init (vlib_main_t * vm)
   tcp_main_t * tm = &tcp_main;
   ip4_main_t * im4 = &ip4_main;
   ip6_main_t * im6 = &ip6_main;
-  ip_lookup_main_t * lm4 = &im4->lookup_main;
-  ip_lookup_main_t * lm6 = &im6->lookup_main;
   clib_error_t * error;
-  int i;
 
   if ((error = vlib_call_init_function (vm, ip4_lookup_init)))
     return error;
@@ -2397,29 +2394,6 @@ tcp_udp_lookup_init (vlib_main_t * vm)
     return error;
 
   tcp_time_init (vm, tm);
-
-  /* Setup all IP protocols to be punted and builtin-unknown. */
-  for (i = 0; i < 256; i++)
-    {
-      lm4->local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
-      lm6->local_next_by_ip_protocol[i] = IP_LOCAL_NEXT_PUNT;
-      lm4->builtin_protocol_by_ip_protocol[i] = IP_BUILTIN_PROTOCOL_UNKNOWN;
-      lm6->builtin_protocol_by_ip_protocol[i] = IP_BUILTIN_PROTOCOL_UNKNOWN;
-    }
-
-  lm4->local_next_by_ip_protocol[IP_PROTOCOL_TCP] = IP_LOCAL_NEXT_TCP_LOOKUP;
-  lm4->local_next_by_ip_protocol[IP_PROTOCOL_UDP] = IP_LOCAL_NEXT_UDP_LOOKUP;
-  lm4->local_next_by_ip_protocol[IP_PROTOCOL_ICMP] = IP_LOCAL_NEXT_ICMP;
-  lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_TCP] = IP_BUILTIN_PROTOCOL_TCP;
-  lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_UDP] = IP_BUILTIN_PROTOCOL_UDP;
-  lm4->builtin_protocol_by_ip_protocol[IP_PROTOCOL_ICMP] = IP_BUILTIN_PROTOCOL_ICMP;
-
-  lm6->local_next_by_ip_protocol[IP_PROTOCOL_TCP] = IP_LOCAL_NEXT_TCP_LOOKUP;
-  lm6->local_next_by_ip_protocol[IP_PROTOCOL_UDP] = IP_LOCAL_NEXT_UDP_LOOKUP;
-  lm6->local_next_by_ip_protocol[IP_PROTOCOL_ICMP6] = IP_LOCAL_NEXT_ICMP;
-  lm6->builtin_protocol_by_ip_protocol[IP_PROTOCOL_TCP] = IP_BUILTIN_PROTOCOL_TCP;
-  lm6->builtin_protocol_by_ip_protocol[IP_PROTOCOL_UDP] = IP_BUILTIN_PROTOCOL_UDP;
-  lm6->builtin_protocol_by_ip_protocol[IP_PROTOCOL_ICMP6] = IP_BUILTIN_PROTOCOL_ICMP;
 
   {
     ip4_add_del_interface_address_callback_t cb;

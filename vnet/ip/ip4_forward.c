@@ -1997,6 +1997,16 @@ static VLIB_REGISTER_NODE (ip4_local_node) = {
   },
 };
 
+void ip4_register_protocol (u32 protocol, u32 node_index)
+{
+  vlib_main_t * vm = &vlib_global_main;
+  ip4_main_t * im = &ip4_main;
+  ip_lookup_main_t * lm = &im->lookup_main;
+
+  ASSERT (protocol < ARRAY_LEN (lm->local_next_by_ip_protocol));
+  lm->local_next_by_ip_protocol[protocol] = vlib_node_add_next (vm, ip4_local_node.index, node_index);
+}
+
 typedef enum {
   IP4_ARP_NEXT_DROP,
   IP4_ARP_N_NEXT,

@@ -311,6 +311,8 @@ ip6_udp_register_listener (vlib_main_t * vm,
 
 u16 ip6_tcp_udp_icmp_compute_checksum (vlib_main_t * vm, vlib_buffer_t * p0, ip6_header_t * ip0);
 
+void ip6_register_protocol (u32 protocol, u32 node_index);
+
 serialize_function_t serialize_vnet_ip6_main, unserialize_vnet_ip6_main;
 
 #endif /* included_ip_ip6_h */
