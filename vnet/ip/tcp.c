@@ -33,7 +33,7 @@ static u8 my_zero_mask_table[256] = {
   [0xff] = (1 << 0) | (1 << 1),
 };
 
-always_inline u32 my_zero_mask (u32 x)
+static_always_inline u32 my_zero_mask (u32 x)
 {
   return ((my_zero_mask_table[(x >> 0) & 0xff] << 0)
 	  | (my_zero_mask_table[(x >> 8) & 0xff] << 2));
@@ -46,14 +46,14 @@ static u8 my_first_set_table[256] = {
   [0xff] = 0,
 };
 
-always_inline u32 my_first_set (u32 zero_mask)
+static_always_inline u32 my_first_set (u32 zero_mask)
 {
   u8 r0 = my_first_set_table[(zero_mask >> 0) & 0xff];
   u8 r1 = 2 + my_first_set_table[(zero_mask >> 8) & 0xff];
   return r0 != 4 ? r0 : r1;
 }
 
-always_inline void
+static_always_inline void
 ip4_tcp_udp_address_x4_set_from_headers (ip4_tcp_udp_address_x4_t * a,
 					 ip4_header_t * ip,
 					 tcp_header_t * tcp,
@@ -64,7 +64,7 @@ ip4_tcp_udp_address_x4_set_from_headers (ip4_tcp_udp_address_x4_t * a,
   a->ports.as_ports[i].as_u32 = tcp->ports.src_and_dst;
 }
 
-always_inline void
+static_always_inline void
 ip4_tcp_udp_address_x4_copy_and_invalidate (ip4_tcp_udp_address_x4_t * dst,
 					    ip4_tcp_udp_address_x4_t * src,
 					    u32 dst_i, u32 src_i)
@@ -76,7 +76,7 @@ ip4_tcp_udp_address_x4_copy_and_invalidate (ip4_tcp_udp_address_x4_t * dst,
 #undef _
 }
 
-always_inline void
+static_always_inline void
 ip4_tcp_udp_address_x4_invalidate (ip4_tcp_udp_address_x4_t * a, u32 i)
 {
   a->src.as_ip4_address[i].as_u32 = 0;
@@ -84,7 +84,7 @@ ip4_tcp_udp_address_x4_invalidate (ip4_tcp_udp_address_x4_t * a, u32 i)
   a->ports.as_ports[i].as_u32 = 0;
 }
 
-always_inline uword
+static_always_inline uword
 ip4_tcp_udp_address_x4_is_valid (ip4_tcp_udp_address_x4_t * a, u32 i)
 {
   return !(a->src.as_ip4_address[i].as_u32 == 0
@@ -92,7 +92,7 @@ ip4_tcp_udp_address_x4_is_valid (ip4_tcp_udp_address_x4_t * a, u32 i)
 	   && a->ports.as_ports[i].as_u32 == 0);
 }
 
-always_inline uword
+static_always_inline uword
 ip4_tcp_udp_address_x4_match_helper (ip4_tcp_udp_address_x4_t * ax4,
 				     u32x4 src, u32x4 dst, u32x4 ports)
 {
@@ -110,7 +110,7 @@ ip4_tcp_udp_address_x4_match_helper (ip4_tcp_udp_address_x4_t * ax4,
   return m;
 }
 
-always_inline uword
+static_always_inline uword
 ip4_tcp_udp_address_x4_match (ip4_tcp_udp_address_x4_t * ax4,
 			      ip4_header_t * ip,
 			      tcp_header_t * tcp)
@@ -121,14 +121,14 @@ ip4_tcp_udp_address_x4_match (ip4_tcp_udp_address_x4_t * ax4,
   return my_first_set (ip4_tcp_udp_address_x4_match_helper (ax4, src, dst, ports));
 }
 
-always_inline uword
+static_always_inline uword
 ip4_tcp_udp_address_x4_first_empty (ip4_tcp_udp_address_x4_t * ax4)
 {
   u32x4 zero = {0};
   return my_first_set (ip4_tcp_udp_address_x4_match_helper (ax4, zero, zero, zero));
 }
 
-always_inline uword
+static_always_inline uword
 ip4_tcp_udp_address_x4_empty_mask (ip4_tcp_udp_address_x4_t * ax4)
 {
   u32x4 zero = {0};
@@ -150,7 +150,7 @@ static u8 * format_ip4_tcp_udp_address_x4 (u8 * s, va_list * va)
   return s;
 }
 
-always_inline void
+static_always_inline void
 ip6_tcp_udp_address_x4_set_from_headers (ip6_tcp_udp_address_x4_t * a,
 					 ip6_header_t * ip,
 					 tcp_header_t * tcp,
@@ -167,7 +167,7 @@ ip6_tcp_udp_address_x4_set_from_headers (ip6_tcp_udp_address_x4_t * a,
   a->ports.as_ports[i].as_u32 = tcp->ports.src_and_dst;
 }
 
-always_inline void
+static_always_inline void
 ip6_tcp_udp_address_x4_copy_and_invalidate (ip6_tcp_udp_address_x4_t * dst,
 					    ip6_tcp_udp_address_x4_t * src,
 					    u32 dst_i, u32 src_i)
@@ -185,7 +185,7 @@ ip6_tcp_udp_address_x4_copy_and_invalidate (ip6_tcp_udp_address_x4_t * dst,
 #undef _
 }
 
-always_inline void
+static_always_inline void
 ip6_tcp_udp_address_x4_invalidate (ip6_tcp_udp_address_x4_t * a, u32 i)
 {
   a->src.as_u32[0][i] = 0;
@@ -199,7 +199,7 @@ ip6_tcp_udp_address_x4_invalidate (ip6_tcp_udp_address_x4_t * a, u32 i)
   a->ports.as_ports[i].as_u32 = 0;
 }
 
-always_inline uword
+static_always_inline uword
 ip6_tcp_udp_address_x4_is_valid (ip6_tcp_udp_address_x4_t * a, u32 i)
 {
   return !(a->src.as_u32[0][i] == 0
@@ -213,7 +213,7 @@ ip6_tcp_udp_address_x4_is_valid (ip6_tcp_udp_address_x4_t * a, u32 i)
 	   && a->ports.as_ports[i].as_u32 == 0);
 }
 
-always_inline uword
+static_always_inline uword
 ip6_tcp_udp_address_x4_match_helper (ip6_tcp_udp_address_x4_t * ax4,
 				     u32x4 src0, u32x4 src1, u32x4 src2, u32x4 src3,
 				     u32x4 dst0, u32x4 dst1, u32x4 dst2, u32x4 dst3,
@@ -239,7 +239,7 @@ ip6_tcp_udp_address_x4_match_helper (ip6_tcp_udp_address_x4_t * ax4,
   return m;
 }
 
-always_inline uword
+static_always_inline uword
 ip6_tcp_udp_address_x4_match (ip6_tcp_udp_address_x4_t * ax4,
 			      ip6_header_t * ip,
 			      tcp_header_t * tcp)
@@ -259,7 +259,7 @@ ip6_tcp_udp_address_x4_match (ip6_tcp_udp_address_x4_t * ax4,
 							    ports));
 }
 
-always_inline uword
+static_always_inline uword
 ip6_tcp_udp_address_x4_first_empty (ip6_tcp_udp_address_x4_t * ax4)
 {
   u32x4 zero = {0};
@@ -269,7 +269,7 @@ ip6_tcp_udp_address_x4_first_empty (ip6_tcp_udp_address_x4_t * ax4)
 							    zero));
 }
 
-always_inline uword
+static_always_inline uword
 ip6_tcp_udp_address_x4_empty_mask (ip6_tcp_udp_address_x4_t * ax4)
 {
   u32x4 zero = {0};
@@ -301,7 +301,7 @@ static u8 * format_ip6_tcp_udp_address_x4 (u8 * s, va_list * va)
   return s;
 }
 
-always_inline u32
+static_always_inline u32
 find_oldest_timestamp_x4 (u32 * time_stamps, u32 now)
 {
   u32 dt0, dt_min0, i_min0;
@@ -322,11 +322,11 @@ find_oldest_timestamp_x4 (u32 * time_stamps, u32 now)
   return dt_min0 > dt_min1 ? i_min0 : (2 + i_min1);
 }
 
-always_inline uword
+static_always_inline uword
 tcp_round_trip_time_stats_is_valid (tcp_round_trip_time_stats_t * s)
 { return s->count > 0; }
 
-always_inline void
+static_always_inline void
 tcp_round_trip_time_stats_compute (tcp_round_trip_time_stats_t * s, f64 * r)
 {
   f64 ave, rms;
@@ -395,7 +395,7 @@ typedef struct {
   tcp_ack_packet_t tcp;
 } ip6_tcp_ack_packet_t;
 
-always_inline void
+static_always_inline void
 ip4_tcp_packet_init (ip4_header_t * ip, u32 n_bytes)
 {
   ip->ip_version_and_header_length = 0x45;
@@ -413,7 +413,7 @@ ip4_tcp_packet_init (ip4_header_t * ip, u32 n_bytes)
   ip->checksum = ip4_header_checksum (ip);
 }
 
-always_inline void
+static_always_inline void
 ip6_tcp_packet_init (ip6_header_t * ip, u32 n_bytes)
 {
   ip->ip_version_traffic_class_and_flow_label = clib_host_to_net_u32 (0x6 << 28);
@@ -423,7 +423,7 @@ ip6_tcp_packet_init (ip6_header_t * ip, u32 n_bytes)
   ip->hop_limit = ip6_main.host_config.ttl;
 }
 
-always_inline u32
+static_always_inline u32
 tcp_time_now (tcp_main_t * tm, tcp_timer_type_t t)
 {
   ASSERT (t < ARRAY_LEN (tm->log2_clocks_per_tick));
@@ -497,13 +497,13 @@ typedef enum {
   TCP_N_ERROR,
 } tcp_error_t;
 
-always_inline u32x4 u32x4_splat_x2 (u32 x)
+static_always_inline u32x4 u32x4_splat_x2 (u32 x)
 {
   u32x4 r = u32x4_set0 (x);
   return u32x4_interleave_lo (r, r);
 }
 
-always_inline u32x4 u32x4_set_x2 (u32 x, u32 y)
+static_always_inline u32x4 u32x4_set_x2 (u32 x, u32 y)
 {
   u32x4 r0 = u32x4_set0 (x);
   u32x4 r1 = u32x4_set0 (y);
@@ -516,7 +516,7 @@ always_inline u32x4 u32x4_set_x2 (u32 x, u32 y)
 
 /* Dispatching on tcp/udp listeners (by dst port)
    and tcp/udp connections (by src/dst address/port). */
-always_inline uword
+static_always_inline uword
 ip46_tcp_lookup (vlib_main_t * vm,
 		 vlib_node_runtime_t * node,
 		 vlib_frame_t * frame,
@@ -612,7 +612,23 @@ ip46_tcp_lookup (vlib_main_t * vm,
 
 	  if (is_ip6)
 	    {
-	      ASSERT (0);
+	      ip6_tcp_udp_address_x4_and_timestamps_t * mina0;
+	      ip6_tcp_udp_address_x4_t * esta0;
+
+	      mina0 = vec_elt_at_index (tm->ip6_mini_connection_address_hash, imin0);
+	      esta0 = vec_elt_at_index (tm->ip6_established_connection_address_hash, iest0);
+
+	      min_match0 = ip6_tcp_udp_address_x4_match (&mina0->address_x4, ip60, tcp0);
+	      est_match0 = ip6_tcp_udp_address_x4_match (esta0, ip60, tcp0);
+
+	      min_oldest0 = find_oldest_timestamp_x4 (mina0->time_stamps, mini_now);
+	      est_first_empty0 = ip6_tcp_udp_address_x4_first_empty (esta0);
+
+	      if (PREDICT_FALSE (! est_match0 && est_first_empty0 >= 4 && ! min_match0))
+		{
+		  /* Lookup in overflow hash. */
+		  ASSERT (0);
+		}
 	    }
 	  else
 	    {
@@ -1044,7 +1060,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_lookup_node) = {
   .error_strings = tcp_error_strings,
 };
 
-always_inline void
+static_always_inline void
 tcp_options_decode_for_syn (tcp_main_t * tm, tcp_mini_connection_t * m, tcp_header_t * tcp)
 {
   u8 * o = (void *) (tcp + 1);
@@ -1091,7 +1107,7 @@ do {								\
   m->time_stamps.his_net_byte_order = ((u32 *) option_decode[TCP_OPTION_TIME_STAMP])[0];
 }
 
-always_inline u32
+static_always_inline u32
 tcp_options_decode_for_ack (tcp_main_t * tm, tcp_header_t * tcp,
 			    u32 * his_time_stamp)
 {
@@ -1154,7 +1170,7 @@ typedef enum {
   TCP_LISTEN_N_NEXT,
 } tcp_listen_next_t;
 
-always_inline uword
+static_always_inline uword
 ip46_tcp_listen (vlib_main_t * vm,
 		 vlib_node_runtime_t * node,
 		 vlib_frame_t * frame,
@@ -1404,7 +1420,7 @@ typedef enum {
   TCP_CONNECT_N_NEXT,
 } tcp_connect_next_t;
 
-always_inline uword
+static_always_inline uword
 ip46_tcp_connect (vlib_main_t * vm,
 		 vlib_node_runtime_t * node,
 		 vlib_frame_t * frame,
@@ -1533,7 +1549,7 @@ typedef enum {
   TCP_ESTABLISH_N_NEXT,
 } tcp_establish_next_t;
 
-always_inline uword
+static_always_inline uword
 ip46_tcp_establish (vlib_main_t * vm,
 		    vlib_node_runtime_t * node,
 		    vlib_frame_t * frame,
@@ -1773,7 +1789,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_establish_node) = {
   },
 };
 
-always_inline void
+static_always_inline void
 tcp_free_connection_x1 (vlib_main_t * vm, tcp_main_t * tm,
 			tcp_ip_4_or_6_t is_ip6,
 			u32 iest0)
@@ -1801,7 +1817,7 @@ tcp_free_connection_x1 (vlib_main_t * vm, tcp_main_t * tm,
   est0 = vec_elt_at_index (tm46->established_connections, iest0);
 }
 
-always_inline void
+static_always_inline void
 tcp_free_connection_x2 (vlib_main_t * vm, tcp_main_t * tm,
 			tcp_ip_4_or_6_t is_ip6,
 			u32 iest0, u32 iest1)
@@ -1810,7 +1826,7 @@ tcp_free_connection_x2 (vlib_main_t * vm, tcp_main_t * tm,
   tcp_free_connection_x1 (vm, tm, is_ip6, iest1);
 }
 
-always_inline uword
+static_always_inline uword
 ip46_tcp_output (vlib_main_t * vm,
 		 vlib_node_runtime_t * node,
 		 vlib_frame_t * frame,
@@ -2063,7 +2079,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_output_node) = {
   },
 };
 
-always_inline void
+static_always_inline void
 tcp_ack (tcp_main_t * tm, tcp_connection_t * c, u32 n_bytes)
 {
   ASSERT (n_bytes == 0);
@@ -2074,7 +2090,7 @@ typedef enum {
   TCP_ESTABLISHED_N_NEXT,
 } tcp_established_next_t;
 
-always_inline uword
+static_always_inline uword
 ip46_tcp_established (vlib_main_t * vm,
 		      vlib_node_runtime_t * node,
 		      vlib_frame_t * frame,
