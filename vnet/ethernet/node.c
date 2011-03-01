@@ -63,7 +63,7 @@ typedef enum {
   ETHERNET_INPUT_VARIANT_VLAN,
 } ethernet_input_variant_t;
 
-always_inline uword
+static_always_inline uword
 ethernet_input_inline (vlib_main_t * vm,
 		       vlib_node_runtime_t * node,
 		       vlib_frame_t * from_frame,
