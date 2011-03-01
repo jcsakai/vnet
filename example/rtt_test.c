@@ -398,6 +398,8 @@ rtt_test_tx_stream (vlib_main_t * vm,
   if (s->n_packets_to_send > 0 && s->n_packets_sent >= s->n_packets_to_send)
     {
       rtt_test_stream_free (vm, tm, s);
+      if (pool_elts (tm->stream_pool) == 0)
+	vlib_node_set_state (vm, node->node_index, VLIB_NODE_STATE_DISABLED);
       return 0;
     }
 
