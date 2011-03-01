@@ -948,7 +948,7 @@ ige_interface_tx (vlib_main_t * vm,
   return f->n_vectors;
 }
 
-always_inline uword
+static_always_inline uword
 ige_rx_queue_no_wrap (ige_main_t * xm,
 		      ige_device_t * xd,
 		      ige_dma_queue_t * dq,
