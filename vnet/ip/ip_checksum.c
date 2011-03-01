@@ -102,6 +102,7 @@ ip_csum_and_memcpy (ip_csum_t sum, void * dst, void * src, uword n_bytes)
   dst_even = uword_to_pointer
     (pointer_to_uword (dst) &~ (sizeof (sum) - 1),
      ip_csum_t *);
+  src_even = src;
 
   n_left = n_bytes;
   if ((n_left_odd = dst - (void *) dst_even))
