@@ -210,7 +210,7 @@ typedef enum {
   ICMP6_NEIGHBOR_SOLICITATION_N_NEXT,
 } icmp6_neighbor_solicitation_or_advertisement_next_t;
 
-always_inline uword
+static_always_inline uword
 icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 					      vlib_node_runtime_t * node,
 					      vlib_frame_t * frame,
