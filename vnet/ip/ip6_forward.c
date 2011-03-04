@@ -29,14 +29,20 @@
 
 /* This is really, really simple but stupid fib. */
 u32
-ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
+ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst, vlib_buffer_t * b)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
-  u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
-  ip6_fib_t * fib = vec_elt_at_index (im->fibs, fib_index);
+  u32 fib_index;
+  ip6_fib_t * fib;
   ip6_fib_mhash_t * fm;
   ip6_address_t masked_dst;
   uword i, * p;
+
+  fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
+
+  fib_index = (b->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index;
+
+  fib = vec_elt_at_index (im->fibs, fib_index);
 
   vec_foreach (fm, fib->non_empty_dst_address_length_mhash)
     {
@@ -771,8 +777,8 @@ ip6_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
-	  adj_index1 = ip6_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address);
+	  adj_index0 = ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index1 = ip6_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -859,7 +865,7 @@ ip6_lookup (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  adj_index0 = ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+	  adj_index0 = ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
@@ -2417,7 +2423,9 @@ ip6_lookup_init (vlib_main_t * vm)
     vlib_packet_template_init (vm,
 			       &im->discover_neighbor_packet_template,
 			       &p, sizeof (p),
-			       /* alloc chunk size */ 8);
+			       /* alloc chunk size */ 8,
+			       VNET_BUFFER_LOCALLY_GENERATED,
+			       "ip6 neighbor discovery");
   }
 
   return 0;

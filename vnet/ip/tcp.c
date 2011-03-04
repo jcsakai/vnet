@@ -970,45 +970,47 @@ do {									\
       }
     }
 
-#define _(t,x)							\
+#define _(t,x,n)						\
 do {								\
   vlib_packet_template_init					\
     (vm,							\
      &tm->ip4.packet_templates[t].vlib,				\
      &x, sizeof (x),						\
-     /* alloc chunk size */ VLIB_FRAME_SIZE);			\
+     /* alloc chunk size */ VLIB_FRAME_SIZE,			\
+     VNET_BUFFER_LOCALLY_GENERATED, (n));			\
   tm->ip4.packet_templates[t].tcp_checksum_net_byte_order	\
     = x.tcp.header.checksum;					\
   tm->ip4.packet_templates[t].ip4_checksum_net_byte_order	\
     = x.ip4.checksum;						\
 } while (0)
 
-    _ (TCP_PACKET_TEMPLATE_SYN, ip4_syn);
-    _ (TCP_PACKET_TEMPLATE_SYN_ACK, ip4_syn_ack);
-    _ (TCP_PACKET_TEMPLATE_ACK, ip4_ack);
-    _ (TCP_PACKET_TEMPLATE_FIN_ACK, ip4_fin_ack);
-    _ (TCP_PACKET_TEMPLATE_RST_ACK, ip4_rst_ack);
+    _ (TCP_PACKET_TEMPLATE_SYN, ip4_syn, "ip4 tcp syn");
+    _ (TCP_PACKET_TEMPLATE_SYN_ACK, ip4_syn_ack, "ip4 tcp syn-ack");
+    _ (TCP_PACKET_TEMPLATE_ACK, ip4_ack, "ip4 tcp ack");
+    _ (TCP_PACKET_TEMPLATE_FIN_ACK, ip4_fin_ack, "ip4 tcp fin-ack");
+    _ (TCP_PACKET_TEMPLATE_RST_ACK, ip4_rst_ack, "ip4 tcp rst-ack");
 
 #undef _
 
-#define _(t,x)							\
+#define _(t,x,n)						\
 do {								\
   vlib_packet_template_init					\
     (vm,							\
      &tm->ip6.packet_templates[t].vlib,				\
      &x, sizeof (x),						\
-     /* alloc chunk size */ VLIB_FRAME_SIZE);			\
+     /* alloc chunk size */ VLIB_FRAME_SIZE,			\
+     VNET_BUFFER_LOCALLY_GENERATED, (n));			\
   tm->ip6.packet_templates[t].tcp_checksum_net_byte_order	\
     = x.tcp.header.checksum;					\
   tm->ip6.packet_templates[t].ip4_checksum_net_byte_order	\
     = 0xdead;							\
 } while (0)
 
-    _ (TCP_PACKET_TEMPLATE_SYN, ip6_syn);
-    _ (TCP_PACKET_TEMPLATE_SYN_ACK, ip6_syn_ack);
-    _ (TCP_PACKET_TEMPLATE_ACK, ip6_ack);
-    _ (TCP_PACKET_TEMPLATE_FIN_ACK, ip6_fin_ack);
-    _ (TCP_PACKET_TEMPLATE_RST_ACK, ip6_rst_ack);
+    _ (TCP_PACKET_TEMPLATE_SYN, ip6_syn, "ip6 tcp syn");
+    _ (TCP_PACKET_TEMPLATE_SYN_ACK, ip6_syn_ack, "ip6 tcp syn-ack");
+    _ (TCP_PACKET_TEMPLATE_ACK, ip6_ack, "ip6 tcp ack");
+    _ (TCP_PACKET_TEMPLATE_FIN_ACK, ip6_fin_ack, "ip6 tcp fin-ack");
+    _ (TCP_PACKET_TEMPLATE_RST_ACK, ip6_rst_ack, "ip6 tcp rst-ack");
 
 #undef _
   }

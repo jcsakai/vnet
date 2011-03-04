@@ -964,11 +964,13 @@ static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
       ip_lookup_main_t * lm = is_ip6 ? &ip6_main.lookup_main : &ip4_main.lookup_main;
       ip_adjacency_t * a_adj;
       u32 adj_index;
+      vlib_buffer_t dummy;
 
+      dummy.flags = VNET_BUFFER_LOCALLY_GENERATED;
       if (is_ip6)
-	adj_index = ip6_fib_lookup (&ip6_main, sw_if_index, &a46.ip6);
+	adj_index = ip6_fib_lookup (&ip6_main, sw_if_index, &a46.ip6, &dummy);
       else
-	adj_index = ip4_fib_lookup (&ip4_main, sw_if_index, &a46.ip4);
+	adj_index = ip4_fib_lookup (&ip4_main, sw_if_index, &a46.ip4, &dummy);
 
       a_adj = ip_get_adjacency (lm, adj_index);
 

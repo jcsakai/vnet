@@ -1058,6 +1058,8 @@ typedef struct {
   union {
     struct {
       u32 * head_index_write_back;
+
+      u32 n_buffers_on_ring;
     } tx;
 
     struct {

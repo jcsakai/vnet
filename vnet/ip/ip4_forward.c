@@ -737,8 +737,8 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
-	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address);
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -825,7 +825,7 @@ ip4_lookup (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
@@ -1421,7 +1421,9 @@ ip4_lookup_init (vlib_main_t * vm)
 			       &im->ip4_arp_request_packet_template,
 			       /* data */ &h,
 			       sizeof (h),
-			       /* alloc chunk size */ 8);
+			       /* alloc chunk size */ 8,
+			       /* flags */ VNET_BUFFER_LOCALLY_GENERATED,
+			       "ip4 arp");
   }
 
   return 0;
@@ -2427,6 +2429,55 @@ VLIB_REGISTER_NODE (ip4_rewrite_node) = {
   },
 };
 
+static clib_error_t *
+add_del_interface_table (vlib_main_t * vm,
+			 unformat_input_t * input,
+			 vlib_cli_command_t * cmd)
+{
+  clib_error_t * error = 0;
+  u32 sw_if_index, table_id, is_del;
+
+  sw_if_index = ~0;
+  is_del = 0;
+
+  if (unformat (input, "del"))
+    is_del = 1;
+
+  if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
+    {
+      error = clib_error_return (0, "unknown interface `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+
+  if (unformat (input, "%d", &table_id))
+    ;
+  else
+    {
+      error = clib_error_return (0, "expected table id `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+
+  {
+    ip4_main_t * im = &ip4_main;
+    ip4_fib_t * fib = find_fib_by_table_index_or_id (im, table_id, IP4_ROUTE_FLAG_TABLE_ID);
+
+    if (fib)
+      im->fib_index_by_sw_if_index[sw_if_index] = fib->index;
+  }
+
+ done:
+  return error;
+}
+
+static VLIB_CLI_COMMAND (set_interface_ip_table_command) = {
+  .name = "table",
+  .function = add_del_interface_table,
+  .short_help = "Add/delete FIB table id for interface",
+  .parent = &set_interface_ip_command,
+};
+
 static uword
 ip4_lookup_multicast (vlib_main_t * vm,
 		      vlib_node_runtime_t * node,
@@ -2479,8 +2530,8 @@ ip4_lookup_multicast (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
-	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address);
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -2567,7 +2618,7 @@ ip4_lookup_multicast (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 

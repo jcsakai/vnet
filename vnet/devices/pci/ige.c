@@ -1766,7 +1766,8 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
       xm->n_bytes_in_rx_buffer = 512;
       break;
     }
-  xm->vlib_buffer_free_list_index = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer);
+  xm->vlib_buffer_free_list_index
+    = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer, "ige rx");
 
   if (! xm->n_descriptors[rt])
     xm->n_descriptors[rt] = 3 * VLIB_FRAME_SIZE / 2;

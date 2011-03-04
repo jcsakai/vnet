@@ -160,7 +160,7 @@ extern vlib_node_registration_t ip6_rewrite_node;
 extern vlib_node_registration_t ip6_discover_neighbor_node;
 
 u32
-ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst);
+ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst, vlib_buffer_t * b);
 
 always_inline uword
 ip6_destination_matches_route (ip6_main_t * im,
@@ -217,7 +217,7 @@ ip6_src_lookup_for_packet (ip6_main_t * im, vlib_buffer_t * p, ip6_header_t * i)
   ip_buffer_opaque_t * o = vlib_get_buffer_opaque (p);
   if (o->src_adj_index == ~0)
     o->src_adj_index =
-      ip6_fib_lookup (im, p->sw_if_index[VLIB_RX], &i->src_address);
+      ip6_fib_lookup (im, p->sw_if_index[VLIB_RX], &i->src_address, p);
   return o->src_adj_index;
 }
 

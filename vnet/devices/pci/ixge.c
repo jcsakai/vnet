@@ -7,6 +7,7 @@
 #include <vnet/vnet/buffer.h>
 
 ixge_main_t ixge_main;
+static vlib_node_registration_t ixge_input_node;
 
 static void ixge_semaphore_get (ixge_device_t * xd)
 {
@@ -229,6 +230,10 @@ ixge_sfp_device_up_down (ixge_device_t * xd, uword is_up)
     }
 
   ixge_sfp_enable_disable_laser (xd, /* enable */ is_up);
+
+  /* Give time for link partner to notice that we're up. */
+  if (is_up)
+    vlib_process_suspend (&vlib_global_main, 300e-3);
 }
 
 static clib_error_t *
@@ -499,16 +504,17 @@ static u8 * format_ixge_rx_dma_trace (u8 * s, va_list * va)
   return s;
 }
 
-#define foreach_ixge_rx_error				\
-  _ (none, "no error")					\
+#define foreach_ixge_error			\
+  _ (none, "no error")				\
+  _ (tx_full_drops, "tx ring full drops")	\
   _ (ip4_checksum_error, "ip4 checksum errors")
 
 typedef enum {
-#define _(f,s) IXGE_RX_ERROR_##f,
-  foreach_ixge_rx_error
+#define _(f,s) IXGE_ERROR_##f,
+  foreach_ixge_error
 #undef _
-  IXGE_RX_N_ERROR,
-} ixge_rx_error_t;
+  IXGE_N_ERROR,
+} ixge_error_t;
 
 typedef enum {
   IXGE_RX_NEXT_IP4_INPUT,
@@ -525,20 +531,23 @@ ixge_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
   u8 is0_ip4, is0_ip6, n0, e0;
   u32 f0;
 
-  e0 = IXGE_RX_ERROR_none;
+  e0 = IXGE_ERROR_none;
   n0 = IXGE_RX_NEXT_ETHERNET_INPUT;
 
   is0_ip4 = s02 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
   n0 = is0_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n0;
-  e0 = (is0_ip4 && (s02 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
-	? IXGE_RX_ERROR_ip4_checksum_error
-	: e0);
+
+  /* Does not seem to work reliably so disabled; we do ip4 checksum in software. */
+  if (0)
+    e0 = (is0_ip4 && (s02 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
+	  ? IXGE_ERROR_ip4_checksum_error
+	  : e0);
 
   is0_ip6 = s00 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
   n0 = is0_ip6 ? IXGE_RX_NEXT_IP6_INPUT : n0;
 
   /* Check for error. */
-  n0 = e0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
+  n0 = e0 != IXGE_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
 
   f0 = ((s02 & (IXGE_RX_DESCRIPTOR_STATUS2_IS_TCP_CHECKSUMMED
 		| IXGE_RX_DESCRIPTOR_STATUS2_IS_UDP_CHECKSUMMED))
@@ -565,7 +574,7 @@ ixge_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
   u8 is1_ip4, is1_ip6, n1, e1;
   u32 f0, f1;
 
-  e0 = e1 = IXGE_RX_ERROR_none;
+  e0 = e1 = IXGE_ERROR_none;
   n0 = n1 = IXGE_RX_NEXT_ETHERNET_INPUT;
 
   is0_ip4 = s02 & IXGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
@@ -574,12 +583,16 @@ ixge_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
   n0 = is0_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n0;
   n1 = is1_ip4 ? IXGE_RX_NEXT_IP4_INPUT : n1;
 
-  e0 = (is0_ip4 && (s02 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
-	? IXGE_RX_ERROR_ip4_checksum_error
-	: e0);
-  e1 = (is1_ip4 && (s12 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
-	? IXGE_RX_ERROR_ip4_checksum_error
-	: e1);
+  /* Does not seem to work reliably so disabled; we do ip4 checksum in software. */
+  if (0)
+    {
+      e0 = (is0_ip4 && (s02 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
+	    ? IXGE_ERROR_ip4_checksum_error
+	    : e0);
+      e1 = (is1_ip4 && (s12 & IXGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
+	    ? IXGE_ERROR_ip4_checksum_error
+	    : e1);
+    }
 
   is0_ip6 = s00 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
   is1_ip6 = s10 & IXGE_RX_DESCRIPTOR_STATUS0_IS_IP6;
@@ -588,8 +601,8 @@ ixge_rx_next_and_error_from_status_x2 (u32 s00, u32 s02,
   n1 = is1_ip6 ? IXGE_RX_NEXT_IP6_INPUT : n1;
 
   /* Check for error. */
-  n0 = e0 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
-  n1 = e1 != IXGE_RX_ERROR_none ? IXGE_RX_NEXT_DROP : n1;
+  n0 = e0 != IXGE_ERROR_none ? IXGE_RX_NEXT_DROP : n0;
+  n1 = e1 != IXGE_ERROR_none ? IXGE_RX_NEXT_DROP : n1;
 
   *error0 = e0;
   *error1 = e1;
@@ -882,7 +895,7 @@ ixge_ring_sub (ixge_dma_queue_t * q, u32 i0, u32 i1)
   i32 d = i1 - i0;
   ASSERT (i0 < q->n_descriptors);
   ASSERT (i1 < q->n_descriptors);
-  return d < 0 ? -d : d;
+  return d < 0 ? q->n_descriptors + d : d;
 }
 
 always_inline uword
@@ -1081,7 +1094,7 @@ ixge_interface_tx (vlib_main_t * vm,
   vlib_interface_output_runtime_t * rd = (void *) node->runtime_data;
   ixge_device_t * xd = vec_elt_at_index (xm->devices, rd->dev_instance);
   ixge_dma_queue_t * dq;
-  u32 * from, n_left_from, n_left_tx, n_descriptors_to_tx;
+  u32 * from, n_left_tx, n_descriptors_to_tx;
   u32 queue_index = 0;		/* fixme parameter */
   ixge_tx_state_t tx_state;
 
@@ -1091,22 +1104,64 @@ ixge_interface_tx (vlib_main_t * vm,
   tx_state.n_bytes_in_packet = 0;
   
   from = vlib_frame_vector_args (f);
-  n_left_from = f->n_vectors;
 
   dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], queue_index);
 
-  n_left_tx = dq->n_descriptors;
+  dq->head_index = dq->tx.head_index_write_back[0];
 
-  /* There might be room on the ring due to packets already transmitted. */
-  {
-    u32 hw_head_index = dq->tx.head_index_write_back[0];
-    n_left_tx += ixge_ring_sub (dq, hw_head_index, dq->head_index);
-    dq->head_index = hw_head_index;
-  }
-
-  n_descriptors_to_tx = clib_min (n_left_tx, n_left_from);
+  /* Since head == tail means ring is empty we can send up to dq->n_descriptors - 1. */
+  n_left_tx = dq->n_descriptors - 1;
+  n_left_tx -= ixge_ring_sub (dq, dq->head_index, dq->tail_index);
 
   _vec_len (xm->tx_buffers_pending_free) = 0;
+
+  n_descriptors_to_tx = f->n_vectors;
+  if (PREDICT_FALSE (n_descriptors_to_tx > n_left_tx))
+    {
+      i32 i, n_ok, i_eop, i_sop;
+
+      i_sop = i_eop = ~0;
+      for (i = n_left_tx - 1; i >= 0; i--)
+	{
+	  vlib_buffer_t * b = vlib_get_buffer (vm, from[i]);
+	  if (! (b->flags & VLIB_BUFFER_NEXT_PRESENT))
+	    {
+	      if (i_sop != ~0 && i_eop != ~0)
+		break;
+	      i_eop = i;
+	      i_sop = i + 1;
+	    }
+	}
+      if (i == 0)
+	n_ok = 0;
+      else
+	n_ok = i_eop + 1;
+
+      {
+	ELOG_TYPE_DECLARE (e) = {
+	  .function = (char *) __FUNCTION__,
+	  .format = "ixge %d, ring full to tx %d head %d tail %d",
+	  .format_args = "i2i2i2i2",
+	};
+	struct { u16 instance, to_tx, head, tail; } * ed;
+	ed = ELOG_DATA (&vm->elog_main, e);
+	ed->instance = xd->device_index;
+	ed->to_tx = n_descriptors_to_tx;
+	ed->head = dq->head_index;
+	ed->tail = dq->tail_index;
+      }
+
+      if (n_ok < n_descriptors_to_tx)
+	{
+	  u32 n_drop = n_descriptors_to_tx - n_ok;
+	  vec_add (xm->tx_buffers_pending_free, from + n_ok, n_drop);
+	  vlib_error_count (vm, ixge_input_node.index, IXGE_ERROR_tx_full_drops, n_drop);
+	}
+
+      n_descriptors_to_tx = n_ok;
+    }
+
+  dq->tx.n_buffers_on_ring += n_descriptors_to_tx;
 
   /* Process from tail to end of descriptor ring. */
   if (n_descriptors_to_tx > 0 && dq->tail_index < dq->n_descriptors)
@@ -1114,7 +1169,6 @@ ixge_interface_tx (vlib_main_t * vm,
       u32 n = clib_min (dq->n_descriptors - dq->tail_index, n_descriptors_to_tx);
       n = ixge_tx_no_wrap (xm, xd, dq, from, dq->tail_index, n, &tx_state);
       from += n;
-      n_left_from -= n;
       n_descriptors_to_tx -= n;
       dq->tail_index += n;
       ASSERT (dq->tail_index <= dq->n_descriptors);
@@ -1126,7 +1180,6 @@ ixge_interface_tx (vlib_main_t * vm,
     {
       u32 n = ixge_tx_no_wrap (xm, xd, dq, from, 0, n_descriptors_to_tx, &tx_state);
       from += n;
-      n_left_from -= n;
       ASSERT (n == n_descriptors_to_tx);
       dq->tail_index += n;
       ASSERT (dq->tail_index <= dq->n_descriptors);
@@ -1160,16 +1213,10 @@ ixge_interface_tx (vlib_main_t * vm,
       {
 	vlib_buffer_free_no_next (vm, xm->tx_buffers_pending_free, n);
 	_vec_len (xm->tx_buffers_pending_free) = 0;
+	ASSERT (dq->tx.n_buffers_on_ring >= n);
+	dq->tx.n_buffers_on_ring -= n;
       }
   }
-
-  /* Not enough room on ring: drop the buffers. */
-  if (n_left_from > 0)
-    {
-      /* Back up to last start of packet and free from there. */
-      ASSERT (0);
-      abort ();
-    }
 
   return f->n_vectors;
 }
@@ -1649,6 +1696,120 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
     }
 }
 
+always_inline u32
+clean_block (u32 * b, u32 * t, u32 n_left)
+{
+  u32 * t0 = t;
+
+  while (n_left >= 4)
+    {
+      u32 bi0, bi1, bi2, bi3;
+
+      t[0] = bi0 = b[0];
+      b[0] = 0;
+      t += bi0 != 0;
+
+      t[0] = bi1 = b[1];
+      b[1] = 0;
+      t += bi1 != 0;
+
+      t[0] = bi2 = b[2];
+      b[2] = 0;
+      t += bi2 != 0;
+
+      t[0] = bi3 = b[3];
+      b[3] = 0;
+      t += bi3 != 0;
+
+      b += 4;
+      n_left -= 4;
+    }
+
+  while (n_left > 0)
+    {
+      u32 bi0;
+
+      t[0] = bi0 = b[0];
+      b[0] = 0;
+      t += bi0 != 0;
+      b += 1;
+      n_left -= 1;
+    }
+
+  return t - t0;
+}
+
+static void
+ixge_tx_queue (ixge_main_t * xm, ixge_device_t * xd, u32 queue_index)
+{
+  vlib_main_t * vm = xm->vlib_main;
+  ixge_dma_queue_t * dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], queue_index);
+  i32 head, tail;
+  u32 n_clean, * b, * t, * t0;
+
+  dq->head_index = dq->tx.head_index_write_back[0];
+
+  /* TX ring not empty?  Nothing to do. */
+  if (dq->head_index != dq->tail_index)
+    return;
+
+  n_clean = dq->tx.n_buffers_on_ring;
+  if (n_clean == 0)
+    return;
+
+  tail = dq->tail_index;
+  head = tail - n_clean;
+  head = head < 0 ? dq->n_descriptors + head : head;
+
+  vec_validate (xm->tx_buffers_pending_free, dq->n_descriptors - 1);
+  t0 = t = xm->tx_buffers_pending_free;
+  b = dq->descriptor_buffer_indices + head;
+
+  /* Clean from head to end of ring. */
+  if (head >= tail)
+    {
+      t += clean_block (b, t, dq->n_descriptors - head);
+      head = 0;
+    }
+
+  b = dq->descriptor_buffer_indices + head;
+  if (tail > head)
+    t += clean_block (b, t, tail - head);
+
+  if (t > t0)
+    {
+      u32 n = t - t0;
+      vlib_buffer_free_no_next (vm, t0, n);
+      ASSERT (dq->tx.n_buffers_on_ring >= n);
+      dq->tx.n_buffers_on_ring -= n;
+    }
+}
+
+/* RX queue interrupts 0 thru 7; TX 8 thru 15. */
+always_inline uword ixge_interrupt_is_rx_queue (uword i)
+{ return i >= 0 && i < 8; }
+
+always_inline uword ixge_interrupt_is_tx_queue (uword i)
+{ return i >= 8 && i < 16; }
+
+always_inline uword ixge_tx_queue_to_interrupt (uword i)
+{ return 8 + i; }
+
+always_inline uword ixge_rx_queue_to_interrupt (uword i)
+{ return 0 + i; }
+
+always_inline uword ixge_interrupt_rx_queue (uword i)
+{
+  ASSERT (ixge_interrupt_is_rx_queue (i));
+  return i - 0;
+}
+
+always_inline uword ixge_interrupt_tx_queue (uword i)
+{
+  ASSERT (ixge_interrupt_is_tx_queue (i));
+  return i - 8;
+}
+
 static uword
 ixge_device_input (ixge_main_t * xm,
 		   ixge_device_t * xd,
@@ -1663,8 +1824,12 @@ ixge_device_input (ixge_main_t * xm,
     r->interrupt.status_write_1_to_clear = s;
 
   foreach_set_bit (i, s, ({
-    if (i < 16)
-      n_rx_packets += ixge_rx_queue (xm, xd, node, i);
+    if (ixge_interrupt_is_rx_queue (i))
+      n_rx_packets += ixge_rx_queue (xm, xd, node, ixge_interrupt_rx_queue (i));
+
+    else if (ixge_interrupt_is_tx_queue (i))
+      ixge_tx_queue (xm, xd, ixge_interrupt_tx_queue (i));
+
     else
       ixge_interrupt (xm, xd, i);
   }));
@@ -1707,16 +1872,21 @@ ixge_input (vlib_main_t * vm,
 
 	  /* Re-enable interrupts when switching out of polling mode. */
 	  if (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE)
-	    xd->regs->interrupt.enable_write_1_to_set = ~0;
+	    {
+	      xd->regs->interrupt.enable_write_1_to_set = ~0;
+
+	      /* May need to clean TX ring. */
+	      ixge_tx_queue (xm, xd, 0);
+	    }
 	}
     }
 
   return n_rx_packets;
 }
 
-static char * ixge_rx_error_strings[] = {
+static char * ixge_error_strings[] = {
 #define _(n,s) s,
-    foreach_ixge_rx_error
+    foreach_ixge_error
 #undef _
 };
 
@@ -1731,14 +1901,14 @@ static VLIB_REGISTER_NODE (ixge_input_node) = {
   .format_buffer = format_ethernet_header_with_length,
   .format_trace = format_ixge_rx_dma_trace,
 
-  .n_errors = IXGE_RX_N_ERROR,
-  .error_strings = ixge_rx_error_strings,
+  .n_errors = IXGE_N_ERROR,
+  .error_strings = ixge_error_strings,
 
   .n_next_nodes = IXGE_RX_N_NEXT,
   .next_nodes = {
     [IXGE_RX_NEXT_DROP] = "error-drop",
     [IXGE_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
-    [IXGE_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
+    [IXGE_RX_NEXT_IP4_INPUT] = "ip4-input",
     [IXGE_RX_NEXT_IP6_INPUT] = "ip6-input",
   },
 };
@@ -1865,6 +2035,11 @@ static u8 * format_ixge_device (u8 * s, va_list * args)
   else
     s = format (s, "PHY not found");
 
+  /* FIXME */
+  s = format (s, "\n%U%d buffers on ring",
+	      format_white_space, indent + 2,
+	      xd->dma_queues[VLIB_TX][0].tx.n_buffers_on_ring);
+
   {
     u32 i;
     u64 v;
@@ -1927,7 +2102,7 @@ ixge_dma_init (ixge_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
   xm->n_bytes_in_rx_buffer = round_pow2 (xm->n_bytes_in_rx_buffer, 1024);
   if (! xm->vlib_buffer_free_list_index)
     {
-      xm->vlib_buffer_free_list_index = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer);
+      xm->vlib_buffer_free_list_index = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer, "ixge rx");
       ASSERT (xm->vlib_buffer_free_list_index != 0);
     }
 
@@ -2089,9 +2264,14 @@ static void ixge_device_init (ixge_main_t * xm)
       ixge_dma_init (xd, VLIB_RX, /* queue_index */ 0);
       ixge_dma_init (xd, VLIB_TX, /* queue_index */ 0);
 
-      /* RX queue gets mapped to interrupt bit 0.
-	 We don't use TX interrupts. */
-      r->interrupt.queue_mapping[0] = ((1 << 7) | 0) << 0;
+      /* RX/TX queue 0 gets mapped to interrupt bits 0 & 8. */
+      r->interrupt.queue_mapping[0] =
+	((/* valid bit */ (1 << 7) |
+	  ixge_rx_queue_to_interrupt (0)) << 0);
+
+      r->interrupt.queue_mapping[0] |=
+	((/* valid bit */ (1 << 7) |
+	  ixge_tx_queue_to_interrupt (0)) << 8);
 
       /* No use in getting too many interrupts.
 	 Limit them to one every 3/4 ring size at line rate

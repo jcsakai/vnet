@@ -347,7 +347,10 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
     vec_resize (s->buffer_indices, n);
 
     vec_foreach (bi, s->buffer_indices)
-      bi->free_list_index = vlib_buffer_create_free_list (vm, s->buffer_bytes);
+      bi->free_list_index = vlib_buffer_create_free_list (vm, s->buffer_bytes,
+							  "pg stream %d buffer #%d",
+							  s - pg->streams,
+							  1 + (bi - s->buffer_indices));
   }
 
   /* Find an interface to use. */
