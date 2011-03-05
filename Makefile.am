@@ -214,4 +214,4 @@ vnet_unix_SOURCES =				\
   example/rtt_test.c
 
 vnet_unix_LDFLAGS = -static
-vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm -ldl
+vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -l:libclib.a -lpthread -lm -ldl
