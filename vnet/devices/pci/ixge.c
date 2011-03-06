@@ -1094,7 +1094,7 @@ ixge_interface_tx (vlib_main_t * vm,
   vlib_interface_output_runtime_t * rd = (void *) node->runtime_data;
   ixge_device_t * xd = vec_elt_at_index (xm->devices, rd->dev_instance);
   ixge_dma_queue_t * dq;
-  u32 * from, n_left_tx, n_descriptors_to_tx;
+  u32 * from, n_left_tx, n_descriptors_to_tx, n_tail_drop;
   u32 queue_index = 0;		/* fixme parameter */
   ixge_tx_state_t tx_state;
 
@@ -1116,6 +1116,7 @@ ixge_interface_tx (vlib_main_t * vm,
   _vec_len (xm->tx_buffers_pending_free) = 0;
 
   n_descriptors_to_tx = f->n_vectors;
+  n_tail_drop = 0;
   if (PREDICT_FALSE (n_descriptors_to_tx > n_left_tx))
     {
       i32 i, n_ok, i_eop, i_sop;
@@ -1153,9 +1154,9 @@ ixge_interface_tx (vlib_main_t * vm,
 
       if (n_ok < n_descriptors_to_tx)
 	{
-	  u32 n_drop = n_descriptors_to_tx - n_ok;
-	  vec_add (xm->tx_buffers_pending_free, from + n_ok, n_drop);
-	  vlib_error_count (vm, ixge_input_node.index, IXGE_ERROR_tx_full_drops, n_drop);
+	  n_tail_drop = n_descriptors_to_tx - n_ok;
+	  vec_add (xm->tx_buffers_pending_free, from + n_ok, n_tail_drop);
+	  vlib_error_count (vm, ixge_input_node.index, IXGE_ERROR_tx_full_drops, n_tail_drop);
 	}
 
       n_descriptors_to_tx = n_ok;
@@ -1214,7 +1215,7 @@ ixge_interface_tx (vlib_main_t * vm,
 	vlib_buffer_free_no_next (vm, xm->tx_buffers_pending_free, n);
 	_vec_len (xm->tx_buffers_pending_free) = 0;
 	ASSERT (dq->tx.n_buffers_on_ring >= n);
-	dq->tx.n_buffers_on_ring -= n;
+	dq->tx.n_buffers_on_ring -= (n - n_tail_drop);
       }
   }
 
