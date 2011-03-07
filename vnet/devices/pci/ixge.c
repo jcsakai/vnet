@@ -6,6 +6,8 @@
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/vnet/buffer.h>
 
+#define IXGE_ALWAYS_POLL 1
+
 ixge_main_t ixge_main;
 static vlib_node_registration_t ixge_input_node;
 
@@ -2294,7 +2296,8 @@ static void ixge_device_init (ixge_main_t * xm)
       r->xge_mac.rx_max_frame_size = (9216 + 14) << 16;
 
       /* Enable all interrupts. */
-      r->interrupt.enable_write_1_to_set = ~0;
+      if (! IXGE_ALWAYS_POLL)
+	r->interrupt.enable_write_1_to_set = ~0;
     }
 }
 
@@ -2413,7 +2416,10 @@ ixge_pci_init (vlib_main_t * vm, pci_device_t * dev)
   {
     linux_pci_device_t * lp = pci_dev_for_linux (dev);
 
-    vlib_node_set_state (vm, ixge_input_node.index, VLIB_NODE_STATE_INTERRUPT);
+    vlib_node_set_state (vm, ixge_input_node.index,
+			 (IXGE_ALWAYS_POLL
+			  ? VLIB_NODE_STATE_POLLING
+			  : VLIB_NODE_STATE_INTERRUPT));
     lp->device_input_node_index = ixge_input_node.index;
     lp->device_index = xd->device_index;
   }

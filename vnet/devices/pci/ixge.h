@@ -298,7 +298,7 @@ typedef volatile struct {
   u32 flow_control_refresh_threshold;
   CLIB_PAD_FROM_TO (0x32a4, 0x3c00);
   /* For each of 8 traffic classes (units of bytes). */
-  u32 dcb_rx_packet_buffer_size[8];
+  u32 rx_packet_buffer_size[8];
   CLIB_PAD_FROM_TO (0x3c20, 0x3d00);
   u32 flow_control_config;
   CLIB_PAD_FROM_TO (0x3d04, 0x4200);
@@ -691,7 +691,7 @@ typedef volatile struct {
   CLIB_PAD_FROM_TO (0xc804, 0xcc00);
 
   /* In bytes units of 1k.  Total packet buffer is 160k. */
-  u32 tx_packet_buffer_sizes[8];
+  u32 tx_packet_buffer_size[8];
 
   CLIB_PAD_FROM_TO (0xcc20, 0xcd10);
   u32 tx_manageability_tc_mapping;
