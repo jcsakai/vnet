@@ -6,8 +6,7 @@ typedef struct {
   u64 sequence_number;
   f64 time_stamp;
   u32 stream_index;
-  u32 is_ack;
-  u32 unused[2];
+  u32 unused[3];
 } __attribute__ ((packed)) rtt_test_header_t;
 
 typedef struct {
@@ -27,26 +26,28 @@ typedef struct {
   f64 packet_accumulator;
 
   u64 n_packets_sent;
-  u64 n_rx[3];
 
-  f64 tx_times[2];
+  /* [0] from past, [1] in sequence, [2] from future. */
+  u64 n_packets_received[3];
+
+  f64 tx_time_stream_created;
+  f64 tx_time_last_sent;
+
+  f64 rx_ack_times[2];
 
   u64 rx_expected_sequence_number;
-
-  f64 sum_dt, sum_dt2;
-
-  f64 rtt_histogram_bins_per_sec;
 
   u32 n_bytes_payload;
 
   /* Including IP & L2 header. */
   u32 n_bytes_per_packet_on_wire;
 
-  u32 log2_n_histogram;
+  f64 ave_rtt, rms_rtt, rtt_count;
+
+  u32 max_n_rx_ack_dts;
+  f64 * rx_ack_dts;
 
   u32 * rtt_histogram;
-
-  f64 rx_ack_times[2];
 
   vlib_packet_template_t packet_template;
 } rtt_test_stream_t;
@@ -59,9 +60,7 @@ typedef struct {
 
   u32 verbose;
 
-  u32 my_ip_protocol;
-
-  f64 print_status_every_n_packets_sent;
+  f64 rms_histogram_units;
 
   rtt_test_stream_t stream_history[32];
   u32 stream_history_index;
@@ -71,6 +70,12 @@ typedef struct {
   vlib_packet_template_t ack_packet_template;
   u16 ack_packet_template_ip4_checksum;
 } rtt_test_main_t;
+
+/* Use 2 IP protocols 253/254 which are assigned for experimental testing. */
+typedef enum {
+  RTT_TEST_IP_PROTOCOL_DATA = 253,
+  RTT_TEST_IP_PROTOCOL_ACK = 254,
+} rtt_test_ip_protcol_t;
 
 always_inline void
 rtt_test_stream_free (vlib_main_t * vm, rtt_test_main_t * tm, rtt_test_stream_t * s)
@@ -106,68 +111,6 @@ static char * rtt_test_error_strings[] = {
 #undef _
 };
 
-static uword
-handle_rx (rtt_test_main_t * tm, rtt_test_header_t * r0, f64 now)
-{
-  vlib_main_t * vm = &vlib_global_main;
-  rtt_test_stream_t * s0;
-  f64 dt0;
-  u32 bin0, i0, out_of_seq0;
-
-  s0 = pool_elt_at_index (tm->stream_pool, r0->stream_index);
-  if (pool_is_free_index (tm->stream_pool, r0->stream_index))
-    {
-      ELOG_TYPE_DECLARE (e) = {
-	.format = "rtt-test: unknown stream %d",
-	.format_args = "i4",
-      };
-      struct { u32 stream; } * ed;
-      ed = ELOG_DATA (&vm->elog_main, e);
-      ed->stream = r0->stream_index;
-      return 1;
-    }
-
-  dt0 = now - r0->time_stamp;
-
-  i0 = r0->sequence_number == s0->rx_expected_sequence_number;
-  i0 = (r0->sequence_number < s0->rx_expected_sequence_number
-	? 0
-	: (i0 ? 1 : 2));
-
-  out_of_seq0 = i0 != 1;
-  if (out_of_seq0)
-    {
-      ELOG_TYPE_DECLARE (e) = {
-	.format = "rtt-test: out-of-seq expected %Ld got %Ld",
-	.format_args = "i8i8",
-      };
-      struct { u64 expected, got; } * ed;
-      ed = ELOG_DATA (&vm->elog_main, e);
-      ed->expected = s0->rx_expected_sequence_number;
-      ed->got = r0->sequence_number;
-    }
-
-  if (i0 == 2)
-    s0->rx_expected_sequence_number = r0->sequence_number + 1;
-  else if (i0 == 1)
-    s0->rx_expected_sequence_number++;
-  s0->n_rx[i0] += 1;
-
-  s0->sum_dt += dt0;
-  s0->sum_dt2 += dt0*dt0;
-
-  bin0 = flt_round_nearest (dt0 * s0->rtt_histogram_bins_per_sec);
-
-  ASSERT (is_pow2 (_vec_len (s0->rtt_histogram)));
-  bin0 &= _vec_len (s0->rtt_histogram) - 1;
-
-  s0->rtt_histogram[bin0] += 1;
-
-  i0 = r0->sequence_number > 0;
-  s0->rx_ack_times[i0] = now;
-  return out_of_seq0;
-}
-
 typedef enum {
   RTT_TEST_RX_NEXT_DROP,
   RTT_TEST_RX_NEXT_ECHO,
@@ -175,15 +118,14 @@ typedef enum {
 } rtt_test_rx_next_t;
 
 static uword
-rtt_rx_listener (vlib_main_t * vm,
-		 vlib_node_runtime_t * node,
-		 vlib_frame_t * frame)
+rtt_test_rx_data (vlib_main_t * vm,
+		  vlib_node_runtime_t * node,
+		  vlib_frame_t * frame)
 {
   rtt_test_main_t * tm = &rtt_test_main;
   uword n_packets = frame->n_vectors;
   u32 * from, * to_drop, * to_echo;
   u32 n_left_from, n_left_to_drop, n_left_to_echo;
-  f64 now = vlib_time_now (vm);
 
   from = vlib_frame_vector_args (frame);
   n_left_from = n_packets;
@@ -216,10 +158,6 @@ rtt_rx_listener (vlib_main_t * vm,
 
 	  p0->error = node->errors[RTT_TEST_ERROR_listener_acks_dropped];
 
-	  /* Don't ack acks. */
-	  if (PREDICT_FALSE (r0->is_ack))
-	    goto ack0;
-
 	  ack0 = vlib_packet_template_get_packet (vm, &tm->ack_packet_template, to_echo);
 
 	  to_echo += 1;
@@ -238,11 +176,6 @@ rtt_rx_listener (vlib_main_t * vm,
 	  ASSERT (ack0->ip4.checksum == ip4_header_checksum (&ack0->ip4));
 
 	  ack0->rtt = r0[0];
-	  ack0->rtt.is_ack = 1;
-	  continue;
-
-	ack0:
-	  handle_rx (tm, r0, now);
 	}
   
       vlib_put_next_frame (vm, node, RTT_TEST_RX_NEXT_DROP, n_left_to_drop);
@@ -252,71 +185,9 @@ rtt_rx_listener (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
-static uword
-rtt_rx_sender (vlib_main_t * vm,
-	       vlib_node_runtime_t * node,
-	       vlib_frame_t * frame)
-{
-  rtt_test_main_t * tm = &rtt_test_main;
-  uword n_packets = frame->n_vectors;
-  u32 * from, * to_next;
-  u32 n_left_from, n_left_to_next, next;
-  f64 now;
-
-  from = vlib_frame_vector_args (frame);
-  n_left_from = n_packets;
-  next = RTT_TEST_RX_NEXT_DROP;
-  now = vlib_time_now (vm);
-  
-  while (n_left_from > 0)
-    {
-      vlib_get_next_frame (vm, node, next, to_next, n_left_to_next);
-
-      while (n_left_from > 0 && n_left_to_next > 0)
-	{
-	  vlib_buffer_t * p0;
-	  ip4_header_t * ip0;
-	  rtt_test_header_t * r0;
-	  u32 bi0, error0;
-      
-	  bi0 = to_next[0] = from[0];
-
-	  from += 1;
-	  n_left_from -= 1;
-	  to_next += 1;
-	  n_left_to_next -= 1;
-      
-	  p0 = vlib_get_buffer (vm, bi0);
-	  ip0 = vlib_buffer_get_current (p0);
-	  r0 = ip4_next_header (ip0);
-
-	  error0 = (pool_is_free_index (tm->stream_pool, r0->stream_index)
-		    ? RTT_TEST_ERROR_unknown_stream
-		    : RTT_TEST_ERROR_packets_received);
-
-	  handle_rx (tm, r0, now);
-
-	  p0->error = node->errors[error0];
-	}
-  
-      vlib_put_next_frame (vm, node, next, n_left_to_next);
-    }
-
-  return frame->n_vectors;
-}
-
-static uword
-rtt_test_rx (vlib_main_t * vm,
-	     vlib_node_runtime_t * node,
-	     vlib_frame_t * frame)
-{
-  rtt_test_main_t * tm = &rtt_test_main;
-  return (tm->is_sender ? rtt_rx_sender : rtt_rx_listener) (vm, node, frame);
-}
-
-VLIB_REGISTER_NODE (rtt_test_rx_node) = {
-  .function = rtt_test_rx,
-  .name = "rtt-test-rx",
+VLIB_REGISTER_NODE (rtt_test_rx_data_node) = {
+  .function = rtt_test_rx_data,
+  .name = "rtt-test-rx-data",
 
   .vector_size = sizeof (u32),
 
@@ -328,6 +199,124 @@ VLIB_REGISTER_NODE (rtt_test_rx_node) = {
 
   .n_errors = RTT_TEST_N_ERROR,
   .error_strings = rtt_test_error_strings,
+};
+
+static uword
+rtt_test_rx_ack (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame)
+{
+  rtt_test_main_t * tm = &rtt_test_main;
+  uword n_packets = frame->n_vectors;
+  u32 * from, * to_drop;
+  u32 n_left_from, n_left_to_drop;
+  f64 now = vlib_time_now (vm);
+  vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, rtt_test_rx_data_node.index);
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = n_packets;
+  
+  while (n_left_from > 0)
+    {
+      vlib_get_next_frame (vm, node, RTT_TEST_RX_NEXT_DROP, to_drop, n_left_to_drop);
+
+      while (n_left_from > 0 && n_left_to_drop > 0)
+	{
+	  vlib_buffer_t * p0;
+	  ip4_header_t * ip0;
+	  rtt_test_header_t * r0;
+	  rtt_test_stream_t * s0;
+	  u32 bi0, i0;
+	  u64 rseq0, eseq0;
+      
+	  bi0 = to_drop[0] = from[0];
+
+	  from += 1;
+	  n_left_from -= 1;
+	  to_drop += 1;
+	  n_left_to_drop -= 1;
+      
+	  p0 = vlib_get_buffer (vm, bi0);
+	  ip0 = vlib_buffer_get_current (p0);
+
+	  r0 = ip4_next_header (ip0);
+
+	  p0->error = error_node->errors[RTT_TEST_ERROR_listener_acks_dropped];
+
+	  if (pool_is_free_index (tm->stream_pool, r0->stream_index))
+	    goto bad_stream_x1;
+
+	  s0 = pool_elt_at_index (tm->stream_pool, r0->stream_index);
+
+	  rseq0 = r0->sequence_number;
+	  eseq0 = s0->rx_expected_sequence_number;
+
+	  if (rseq0 != eseq0)
+	    goto out_of_sequence_x1;
+
+	  s0->rx_expected_sequence_number = rseq0 + 1;
+	  s0->n_packets_received[1] += 1;
+	  
+	  vec_add1 (s0->rx_ack_dts, now - r0->time_stamp);
+	  _vec_len (s0->rx_ack_dts) -= _vec_len (s0->rx_ack_dts) >= s0->max_n_rx_ack_dts;
+
+	  i0 = rseq0 != 0;
+	  s0->rx_ack_times[i0] = now;
+	  continue;
+
+	bad_stream_x1:
+	  {
+	    ELOG_TYPE_DECLARE (e) = {
+	      .format = "rtt-test: unknown stream %d",
+	      .format_args = "i4",
+	    };
+	    struct { u32 stream; } * ed;
+	    ed = ELOG_DATA (&vm->elog_main, e);
+	    ed->stream = r0->stream_index;
+	  }
+	  continue;
+
+	out_of_sequence_x1:
+	  i0 = (r0->sequence_number < s0->rx_expected_sequence_number
+		? 0
+		: (i0 ? 1 : 2));
+	  if (i0 != 1)
+	    {
+	      ELOG_TYPE_DECLARE (e) = {
+		.format = "rtt-test: out-of-seq expected %Ld got %Ld",
+		.format_args = "i8i8",
+	      };
+	      struct { u64 expected, got; } * ed;
+	      ed = ELOG_DATA (&vm->elog_main, e);
+	      ed->expected = s0->rx_expected_sequence_number;
+	      ed->got = r0->sequence_number;
+	    }
+
+	  s0->rx_expected_sequence_number = i0 > 0 ? r0->sequence_number + 1 : s0->rx_expected_sequence_number;
+
+	  s0->n_packets_received[i0] += 1;
+
+	  i0 = r0->sequence_number > 0;
+	  s0->rx_ack_times[i0] = now;
+	}
+  
+      vlib_put_next_frame (vm, node, RTT_TEST_RX_NEXT_DROP, n_left_to_drop);
+    }
+
+  return frame->n_vectors;
+}
+
+VLIB_REGISTER_NODE (rtt_test_rx_ack_node) = {
+  .function = rtt_test_rx_ack,
+  .name = "rtt-test-rx-ack",
+
+  .vector_size = sizeof (u32),
+
+  .n_next_nodes = RTT_TEST_RX_N_NEXT,
+  .next_nodes = {
+    [RTT_TEST_RX_NEXT_DROP] = "error-drop",
+    [RTT_TEST_RX_NEXT_ECHO] = "ip4-input-no-checksum",
+  },
 };
 
 always_inline void
@@ -351,7 +340,6 @@ rtt_test_tx_packets (vlib_main_t * vm,
       for (i = 0; i < n_this_frame; i++)
 	{
 	  p = vlib_packet_template_get_packet (vm, &s->packet_template, to_next + i);
-	  p->rtt.is_ack = 0;
 	  p->rtt.time_stamp = time_now;
 	  p->rtt.sequence_number = s->n_packets_sent + i;
 	}
@@ -385,13 +373,13 @@ rtt_test_stream_is_done (rtt_test_stream_t * s, f64 time_now)
     return 0;
 
   /* Received everything we've sent? */
-  if (s->n_rx[0] + s->n_rx[1] + s->n_rx[2] >= s->n_packets_to_send)
+  if (s->n_packets_received[0] + s->n_packets_received[1] + s->n_packets_received[2] >= s->n_packets_to_send)
     return 1;
 
   /* No ACK received after 5 seconds of sending. */
   if (s->rx_ack_times[0] == 0
       && s->n_packets_sent > 0
-      && time_now - s->tx_times[0] > 5)
+      && time_now - s->tx_time_stream_created > 5)
     return 1;
 
   /* No ACK received after 5 seconds of waiting? */
@@ -421,11 +409,11 @@ rtt_test_tx_stream (vlib_main_t * vm,
     }
 
   /* Apply rate limit. */
-  if (s->tx_times[1] == 0)
-    s->tx_times[1] = time_now;
+  if (s->tx_time_last_sent == 0)
+    s->tx_time_last_sent = time_now;
 
-  dt = time_now - s->tx_times[1];
-  s->tx_times[1] = time_now;
+  dt = time_now - s->tx_time_last_sent;
+  s->tx_time_last_sent = time_now;
 
   n_packets = VLIB_FRAME_SIZE;
   if (s->send_rate_packets_per_second > 0)
@@ -482,6 +470,109 @@ VLIB_REGISTER_NODE (rtt_test_tx_node) = {
   },
 };
 
+static void rtt_test_stream_compute (rtt_test_main_t * tm, rtt_test_stream_t * s)
+{
+  int i;
+
+  /* Compute average and standard deviation of RTT time. */
+  if (vec_len (s->rx_ack_dts) == 0)
+    return;
+
+  {
+    f64 c = vec_len (s->rx_ack_dts);
+
+    s->ave_rtt = s->rms_rtt = 0;
+    vec_foreach_index (i, s->rx_ack_dts)
+      {
+	f64 dt = s->rx_ack_dts[i];
+	s->ave_rtt += dt;
+	s->rms_rtt += dt*dt;
+      }
+    s->ave_rtt /= c;
+    s->rms_rtt = sqrt (s->rms_rtt / c - s->ave_rtt*s->ave_rtt);
+    s->rtt_count = c;
+  }
+
+  if (! tm->rms_histogram_units)
+    tm->rms_histogram_units = .1;
+
+  /* Generate historgram. */
+  vec_foreach_index (i, s->rx_ack_dts)
+    {
+      i32 bin = flt_round_nearest ((s->rx_ack_dts[i] - s->ave_rtt) / (tm->rms_histogram_units * s->rms_rtt));
+      u32 ib = bin < 0 ? 2*(-bin) + 1 : 2 *bin;
+      vec_validate (s->rtt_histogram, ib);
+      s->rtt_histogram[ib] += 1;
+    }  
+
+  if (s->n_packets_sent >= s->n_packets_to_send)
+    vec_free (s->rx_ack_dts);
+}
+
+static clib_error_t *
+do_plot_stream (rtt_test_main_t * tm, rtt_test_stream_t * s, char * file_name, int n)
+{
+  FILE * out;
+  char * f;
+  clib_error_t * error = 0;
+  u32 i;
+
+  f = (char *) format (0, "%s.%d", file_name, n);
+  out = fopen (f, "w");
+
+  if (! out)
+    {
+      error = clib_error_return_unix (0, "open `%s'", f);
+      goto done;
+    }
+
+  rtt_test_stream_compute (tm, s);
+  vec_foreach_index (i, s->rtt_histogram)
+    {
+      if (s->rtt_histogram[i] > 0)
+	{
+	  i32 bi = (i & 1) ? -(i/2) : (i/2);
+	  f64 dt = s->ave_rtt + (bi * tm->rms_histogram_units * s->rms_rtt);
+	  fformat (out, "%.6e %.6e\n",
+		   dt, s->rtt_histogram[i] / s->rtt_count);
+	}
+    }
+  clib_warning ("wrote `%s'", f);
+
+ done:
+  vec_free (f);
+  fclose (out);
+  return error;
+}
+
+static clib_error_t *
+do_plot (rtt_test_main_t * tm, char * file_name)
+{
+  rtt_test_stream_t * s;
+  clib_error_t * error = 0;
+  int i, n;
+
+  n = 0;
+  for (i = 0; i < ARRAY_LEN (tm->stream_history); i++)
+    {
+      s = tm->stream_history + i;
+      if (s->n_packets_sent > 0)
+	{
+	  error = do_plot_stream (tm, s, file_name, n++);
+	  if (error)
+	    return error;
+	}
+    }
+
+  pool_foreach (s, tm->stream_pool, ({
+    error = do_plot_stream (tm, s, file_name, n++);
+    if (error)
+      return error;
+  }));
+
+  return error;
+}
+
 static clib_error_t *
 rtt_test_command (vlib_main_t * vm,
 		  unformat_input_t * input,
@@ -490,14 +581,24 @@ rtt_test_command (vlib_main_t * vm,
   rtt_test_main_t * tm = &rtt_test_main;
   rtt_test_stream_t * s;
 
+  {
+    char * file_name;
+
+    if (unformat (input, "plot %s", &file_name))
+      {
+	clib_error_t * e = do_plot (tm, file_name);
+	vec_free (file_name);
+	return e;
+      }
+  }
+
   pool_get (tm->stream_pool, s);
 
   memset (s, 0, sizeof (s[0]));
   s->n_packets_to_send = 1;
   s->send_rate_bits_per_second = 1e6;
   s->n_bytes_payload = 1448;
-  s->log2_n_histogram = 14;
-  s->rtt_histogram_bins_per_sec = 1e4;
+  s->max_n_rx_ack_dts = 0;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "%U -> %U",
@@ -506,22 +607,25 @@ rtt_test_command (vlib_main_t * vm,
 	;
       else if (unformat (input, "count %f", &s->n_packets_to_send))
 	;
+      else if (unformat (input, "hist %d", &s->max_n_rx_ack_dts))
+	;
       else if (unformat (input, "rate %f", &s->send_rate_bits_per_second))
 	;
       else if (unformat (input, "size %d", &s->n_bytes_payload))
 	;
-      else if (unformat (input, "histogram-time %f", &s->rtt_histogram_bins_per_sec))
-	s->rtt_histogram_bins_per_sec = 1 / s->rtt_histogram_bins_per_sec;
       else
 	return clib_error_return (0, "parse error: %U", format_unformat_error, input);
     }
 
   vlib_node_set_state (vm, rtt_test_tx_node.index, VLIB_NODE_STATE_POLLING);
 
-  vec_validate (s->rtt_histogram, pow2_mask (s->log2_n_histogram));
+  if (! s->max_n_rx_ack_dts)
+    s->max_n_rx_ack_dts = s->n_packets_to_send;
+  vec_validate (s->rx_ack_dts, s->max_n_rx_ack_dts - 1);
+  _vec_len (s->rx_ack_dts) = 0;
 
-  s->tx_times[0] = vlib_time_now (vm);
-  s->tx_times[1] = 0;
+  s->tx_time_stream_created = vlib_time_now (vm);
+  s->tx_time_last_sent = 0;
   s->n_bytes_per_packet_on_wire
     = (s->n_bytes_payload
        + sizeof (rtt_test_header_t)
@@ -543,7 +647,7 @@ rtt_test_command (vlib_main_t * vm,
     t->ip4.ip_version_and_header_length = 0x45;
     t->ip4.length = clib_host_to_net_u16 (sizeof (t[0]) + s->n_bytes_payload);
     t->ip4.flags_and_fragment_offset = clib_host_to_net_u16 (IP4_HEADER_FLAG_DONT_FRAGMENT);
-    t->ip4.protocol = tm->my_ip_protocol;
+    t->ip4.protocol = RTT_TEST_IP_PROTOCOL_DATA;
     t->ip4.ttl = 64;
 
     t->ip4.src_address = s->src_address;
@@ -578,7 +682,6 @@ VLIB_CLI_COMMAND (rtt_test_cli_command) = {
 static u8 * format_rtt_test_stream (u8 * s, va_list * args)
 {
   rtt_test_stream_t * t = va_arg (*args, rtt_test_stream_t *);
-  f64 ave, rms, count;
   uword indent = format_get_indent (s);
 
   s = format (s, "%U -> %U",
@@ -588,32 +691,18 @@ static u8 * format_rtt_test_stream (u8 * s, va_list * args)
   s = format (s, "\n%U  sent %Ld, received: from-past %Ld in-sequence %Ld from-future %Ld",
 	      format_white_space, indent,
 	      t->n_packets_sent,
-	      t->n_rx[0], t->n_rx[1], t->n_rx[2]);
+	      t->n_packets_received[0], t->n_packets_received[1], t->n_packets_received[2]);
 
   s = format (s, "\n%U  rx-rate %.4e bits/sec",
 	      format_white_space, indent,
-	      (((f64) (t->n_rx[0] + t->n_rx[1] + t->n_rx[2]) * (f64) t->n_bytes_per_packet_on_wire * BITS (u8))
+	      (((f64) (t->n_packets_received[0] + t->n_packets_received[1] + t->n_packets_received[2]) * (f64) t->n_bytes_per_packet_on_wire * BITS (u8))
 	       / (t->rx_ack_times[1] - t->rx_ack_times[0])));
 	       
-  count = t->n_rx[1];
-  if (count > 0)
-    {
-      ave = t->sum_dt / count;
-      rms = sqrt (t->sum_dt2 / count - ave*ave);
-      s = format (s, "\n%U  rtt %.4e +- %.4e",
-		  format_white_space, indent,
-		  ave, rms);
-    }
+  rtt_test_stream_compute (&rtt_test_main, t);
 
-  if (0) {
-    u32 i;
-    s = format (s, "\n%U", format_white_space, indent);
-    for (i = 0; i < vec_len (t->rtt_histogram); i++)
-      {
-	if (t->rtt_histogram[i] > 0)
-	  s = format (s, ", %d %d", i, t->rtt_histogram[i]);
-      }
-  }
+  s = format (s, "\n%U  rtt %.4e +- %.4e",
+	      format_white_space, indent,
+	      t->ave_rtt, t->rms_rtt);
 
   return s;
 }
@@ -653,9 +742,8 @@ rtt_test_init (vlib_main_t * vm)
 {
   rtt_test_main_t * tm = &rtt_test_main;
 
-  tm->my_ip_protocol = IP_PROTOCOL_CHAOS;
-
-  ip4_register_protocol (tm->my_ip_protocol, rtt_test_rx_node.index);
+  ip4_register_protocol (RTT_TEST_IP_PROTOCOL_DATA, rtt_test_rx_data_node.index);
+  ip4_register_protocol (RTT_TEST_IP_PROTOCOL_ACK, rtt_test_rx_ack_node.index);
 
   {
     rtt_test_packet_t ack;
@@ -665,7 +753,7 @@ rtt_test_init (vlib_main_t * vm)
     ack.ip4.ip_version_and_header_length = 0x45;
     ack.ip4.length = clib_host_to_net_u16 (sizeof (ack));
     ack.ip4.flags_and_fragment_offset = clib_host_to_net_u16 (IP4_HEADER_FLAG_DONT_FRAGMENT);
-    ack.ip4.protocol = tm->my_ip_protocol;
+    ack.ip4.protocol = RTT_TEST_IP_PROTOCOL_ACK;
     ack.ip4.ttl = 64;
 
     ack.ip4.checksum = ip4_header_checksum (&ack.ip4);
@@ -690,12 +778,12 @@ rtt_test_config (vlib_main_t * vm, unformat_input_t * input)
   rtt_test_main_t * tm = &rtt_test_main;
   clib_error_t * error = 0;
 
-  tm->print_status_every_n_packets_sent = 0;
+  tm->rms_histogram_units = .1;
   tm->n_encap_bytes = 14 + 12 + 8;	/* size of ethernet header */
   tm->verbose = 1;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
-      if (unformat (input, "print %f", &tm->print_status_every_n_packets_sent))
+      if (unformat (input, "rms-histogram-units %f", &tm->rms_histogram_units))
 	;
       else if (unformat (input, "silent"))
 	tm->verbose = 0;
