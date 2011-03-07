@@ -402,6 +402,16 @@ rtt_test_tx_stream (vlib_main_t * vm,
 
   if (rtt_test_stream_is_done (s, time_now))
     {
+      {
+	ELOG_TYPE_DECLARE (e) = {
+	  .format = "rtt-test: done stream %d",
+	  .format_args = "i4",
+	};
+	struct { u32 stream_index; } * ed;
+	ed = ELOG_DATA (&vm->elog_main, e);
+	ed->stream_index = s - tm->stream_pool;
+      }
+
       rtt_test_stream_free (vm, tm, s);
       if (pool_elts (tm->stream_pool) == 0)
 	vlib_node_set_state (vm, node->node_index, VLIB_NODE_STATE_DISABLED);
@@ -409,9 +419,6 @@ rtt_test_tx_stream (vlib_main_t * vm,
     }
 
   /* Apply rate limit. */
-  if (s->tx_time_last_sent == 0)
-    s->tx_time_last_sent = time_now;
-
   dt = time_now - s->tx_time_last_sent;
   s->tx_time_last_sent = time_now;
 
@@ -517,7 +524,7 @@ do_plot_stream (rtt_test_main_t * tm, rtt_test_stream_t * s, char * file_name, i
   clib_error_t * error = 0;
   u32 i;
 
-  f = (char *) format (0, "%s.%d", file_name, n);
+  f = (char *) format (0, "%s.%d%c", file_name, n, 0);
   out = fopen (f, "w");
 
   if (! out)
@@ -617,7 +624,8 @@ rtt_test_command (vlib_main_t * vm,
 	return clib_error_return (0, "parse error: %U", format_unformat_error, input);
     }
 
-  vlib_node_set_state (vm, rtt_test_tx_node.index, VLIB_NODE_STATE_POLLING);
+  if (pool_elts (tm->stream_pool) == 1)
+    vlib_node_set_state (vm, rtt_test_tx_node.index, VLIB_NODE_STATE_POLLING);
 
   if (! s->max_n_rx_ack_dts)
     s->max_n_rx_ack_dts = s->n_packets_to_send;
@@ -625,7 +633,7 @@ rtt_test_command (vlib_main_t * vm,
   _vec_len (s->rx_ack_dts) = 0;
 
   s->tx_time_stream_created = vlib_time_now (vm);
-  s->tx_time_last_sent = 0;
+  s->tx_time_last_sent = s->tx_time_stream_created;
   s->n_bytes_per_packet_on_wire
     = (s->n_bytes_payload
        + sizeof (rtt_test_header_t)
@@ -633,9 +641,6 @@ rtt_test_command (vlib_main_t * vm,
        + tm->n_encap_bytes);
 
   s->send_rate_packets_per_second = s->send_rate_bits_per_second / (s->n_bytes_per_packet_on_wire * BITS (u8));
-  clib_warning ("%d bytes on wire %.4epps",
-		s->n_bytes_per_packet_on_wire,
-		s->send_rate_packets_per_second);
 
   {
     rtt_test_packet_t * t;
@@ -667,6 +672,16 @@ rtt_test_command (vlib_main_t * vm,
 			       "rtt-test stream %d data", s - tm->stream_pool);
 
     clib_mem_free (t);
+  }
+
+  {
+    ELOG_TYPE_DECLARE (e) = {
+      .format = "rtt-test: start stream %d",
+      .format_args = "i4",
+    };
+    struct { u32 stream_index; } * ed;
+    ed = ELOG_DATA (&vm->elog_main, e);
+    ed->stream_index = s - tm->stream_pool;
   }
 
   return 0;
@@ -779,7 +794,11 @@ rtt_test_config (vlib_main_t * vm, unformat_input_t * input)
   clib_error_t * error = 0;
 
   tm->rms_histogram_units = .1;
-  tm->n_encap_bytes = 14 + 12 + 8;	/* size of ethernet header */
+  tm->n_encap_bytes = 
+    (14 /* ethernet header */
+     + 8 /* preamble */
+     + 12 /* inter packet gap */
+     + 4 /* crc */);
   tm->verbose = 1;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
