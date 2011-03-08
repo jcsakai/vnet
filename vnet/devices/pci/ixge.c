@@ -6,7 +6,7 @@
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/vnet/buffer.h>
 
-#define IXGE_ALWAYS_POLL 1
+#define IXGE_ALWAYS_POLL 0
 
 ixge_main_t ixge_main;
 static vlib_node_registration_t ixge_input_node;
