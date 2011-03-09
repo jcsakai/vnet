@@ -203,8 +203,9 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 #define IP4_ROUTE_FLAG_DEL (1 << 0)
 #define IP4_ROUTE_FLAG_TABLE_ID  (0 << 1)
 #define IP4_ROUTE_FLAG_FIB_INDEX (1 << 1)
-#define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 2)
-#define IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 3)
+#define IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 2)
+#define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
+#define IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE (1 << 4)
 
 typedef struct {
   /* IP4_ROUTE_FLAG_* */

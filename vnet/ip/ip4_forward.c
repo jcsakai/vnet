@@ -126,16 +126,44 @@ static void unserialize_ip4_address (serialize_main_t * m, va_list * va)
   memcpy (a->as_u8, p, sizeof (a->as_u8));
 }
 
+static void serialize_ip4_address_and_length (serialize_main_t * m, va_list * va)
+{
+  ip4_address_t * a = va_arg (*va, ip4_address_t *);
+  u32 l = va_arg (*va, u32);
+  u32 n_bytes = (l / 8) + ((l % 8) != 0);
+  u8 * p = serialize_get (m, 1 + n_bytes);
+  ASSERT (l <= 32);
+  p[0] = l;
+  memcpy (p + 1, a->as_u8, n_bytes);
+}
+
+static void unserialize_ip4_address_and_length (serialize_main_t * m, va_list * va)
+{
+  ip4_address_t * a = va_arg (*va, ip4_address_t *);
+  u32 * al = va_arg (*va, u32 *);
+  u8 * p = unserialize_get (m, 1);
+  u32 l, n_bytes;
+
+  al[0] = l = p[0];
+  ASSERT (l <= 32);
+  n_bytes = (l / 8) + ((l % 8) != 0);
+
+  if (n_bytes)
+    {
+      p = unserialize_get (m, n_bytes);
+      memcpy (a->as_u8, p, n_bytes);
+    }
+}
+
 static void serialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * va)
 {
   ip4_add_del_route_args_t * a = va_arg (*va, ip4_add_del_route_args_t *);
     
-  serialize_integer (m, a->table_index_or_table_id, sizeof (a->table_index_or_table_id));
-  serialize_integer (m, a->flags, sizeof (a->flags));
-  serialize (m, serialize_ip4_address, &a->dst_address);
-  serialize_integer (m, a->dst_address_length, sizeof (a->dst_address_length));
-  serialize_integer (m, a->adj_index, sizeof (a->adj_index));
-  serialize_integer (m, a->n_add_adj, sizeof (a->n_add_adj));
+  serialize_likely_small_unsigned_integer (m, a->table_index_or_table_id);
+  serialize_likely_small_unsigned_integer (m, a->flags);
+  serialize (m, serialize_ip4_address_and_length, &a->dst_address, a->dst_address_length);
+  serialize_likely_small_unsigned_integer (m, a->adj_index);
+  serialize_likely_small_unsigned_integer (m, a->n_add_adj);
   if (a->n_add_adj > 0)
     serialize (m, serialize_vec_ip_adjacency, a->add_adj, a->n_add_adj);
 }
@@ -176,12 +204,11 @@ static void unserialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * v
   ip4_main_t * i4m = &ip4_main;
   ip4_add_del_route_args_t a;
     
-  unserialize_integer (m, &a.table_index_or_table_id, sizeof (a.table_index_or_table_id));
-  unserialize_integer (m, &a.flags, sizeof (a.flags));
-  unserialize (m, unserialize_ip4_address, &a.dst_address);
-  unserialize_integer (m, &a.dst_address_length, sizeof (a.dst_address_length));
-  unserialize_integer (m, &a.adj_index, sizeof (a.adj_index));
-  unserialize_integer (m, &a.n_add_adj, sizeof (a.n_add_adj));
+  a.table_index_or_table_id = unserialize_likely_small_unsigned_integer (m);
+  a.flags = unserialize_likely_small_unsigned_integer (m);
+  unserialize (m, unserialize_ip4_address_and_length, &a.dst_address, &a.dst_address_length);
+  a.adj_index = unserialize_likely_small_unsigned_integer (m);
+  a.n_add_adj = unserialize_likely_small_unsigned_integer (m);
   a.add_adj = 0;
   if (a.n_add_adj > 0)
     {
@@ -261,7 +288,9 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 
   if (vm->mc_main && ! (a->flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE))
     {
-      mc_serialize (vm->mc_main, &ip4_add_del_route_msg, a);
+      u32 multiple_messages_per_vlib_buffer = (a->flags & IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE);
+      mc_serialize2 (vm->mc_main, multiple_messages_per_vlib_buffer,
+		     &ip4_add_del_route_msg, a);
       return;
     }
 
@@ -329,12 +358,11 @@ static void serialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_l
   u32 next_hop_sw_if_index = va_arg (*va, u32);
   u32 next_hop_weight = va_arg (*va, u32);
 
-  serialize_integer (m, flags, sizeof (flags));
-  serialize (m, serialize_ip4_address, dst_address);
-  serialize_integer (m, dst_address_length, sizeof (dst_address_length));
+  serialize_likely_small_unsigned_integer (m, flags);
+  serialize (m, serialize_ip4_address_and_length, dst_address, dst_address_length);
   serialize (m, serialize_ip4_address, next_hop_address);
-  serialize_integer (m, next_hop_sw_if_index, sizeof (next_hop_sw_if_index));
-  serialize_integer (m, next_hop_weight, sizeof (next_hop_weight));
+  serialize_likely_small_unsigned_integer (m, next_hop_sw_if_index);
+  serialize_likely_small_unsigned_integer (m, next_hop_weight);
 }
 
 static void unserialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_list * va)
@@ -343,12 +371,11 @@ static void unserialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va
   u32 flags, dst_address_length, next_hop_sw_if_index, next_hop_weight;
   ip4_address_t dst_address, next_hop_address;
 
-  unserialize_integer (m, &flags, sizeof (flags));
-  unserialize (m, unserialize_ip4_address, &dst_address);
-  unserialize_integer (m, &dst_address_length, sizeof (dst_address_length));
+  flags = unserialize_likely_small_unsigned_integer (m);
+  unserialize (m, unserialize_ip4_address_and_length, &dst_address, &dst_address_length);
   unserialize (m, unserialize_ip4_address, &next_hop_address);
-  unserialize_integer (m, &next_hop_sw_if_index, sizeof (next_hop_sw_if_index));
-  unserialize_integer (m, &next_hop_weight, sizeof (next_hop_weight));
+  next_hop_sw_if_index = unserialize_likely_small_unsigned_integer (m);
+  next_hop_weight = unserialize_likely_small_unsigned_integer (m);
 
   ip4_add_del_route_next_hop
     (im,
@@ -391,10 +418,13 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
 
   if (vm->mc_main && ! (flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE))
     {
-      mc_serialize (vm->mc_main, &ip4_add_del_route_next_hop_msg,
-		    flags,
-		    dst_address, dst_address_length,
-		    next_hop, next_hop_sw_if_index, next_hop_weight);
+      u32 multiple_messages_per_vlib_buffer = (flags & IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE);
+      mc_serialize2 (vm->mc_main,
+		     multiple_messages_per_vlib_buffer,
+		     &ip4_add_del_route_next_hop_msg,
+		     flags,
+		     dst_address, dst_address_length,
+		     next_hop, next_hop_sw_if_index, next_hop_weight);
       return;
     }
 

@@ -986,7 +986,7 @@ static clib_error_t *
 ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * cmd)
 {
   clib_error_t * error = 0;
-  u32 table_id, is_del;
+  u32 table_id, is_del, add_del_flags;
   u32 weight, * weights = 0;
   u32 sw_if_index, * sw_if_indices = 0;
   ip4_address_t ip4_addr, * ip4_dst_addresses = 0, * ip4_via_next_hops = 0;
@@ -997,6 +997,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 
   is_del = 0;
   table_id = 0;
+  add_del_flags = 0;
 
   /* Get a line of input. */
   if (! unformat_user (main_input, unformat_line_input, line_input))
@@ -1010,6 +1011,8 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	is_del = 1;
       else if (unformat (line_input, "add"))
 	is_del = 0;
+      else if (unformat (line_input, "multi"))
+	add_del_flags |= IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE;
 
       else if (unformat (line_input, "%U/%d",
 			 unformat_ip4_address, &ip4_addr,
@@ -1122,7 +1125,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	ip4_add_del_route_args_t a;
 
 	memset (&a, 0, sizeof (a));
-	a.flags = IP4_ROUTE_FLAG_TABLE_ID;
+	a.flags = IP4_ROUTE_FLAG_TABLE_ID | add_del_flags;
 	a.table_index_or_table_id = table_id;
 	a.dst_address = ip4_dst_addresses[i];
 	a.dst_address_length = dst_address_lengths[i];
@@ -1142,7 +1145,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
 		  {
 		    ip4_add_del_route_next_hop (im4,
-						IP4_ROUTE_FLAG_DEL,
+						IP4_ROUTE_FLAG_DEL | add_del_flags,
 						&a.dst_address,
 						a.dst_address_length,
 						&ip4_via_next_hops[i],
@@ -1167,7 +1170,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
 		  {
 		    ip4_add_del_route_next_hop (im4,
-						IP4_ROUTE_FLAG_ADD,
+						IP4_ROUTE_FLAG_ADD | add_del_flags,
 						&a.dst_address,
 						a.dst_address_length,
 						&ip4_via_next_hops[i],
