@@ -104,6 +104,9 @@ ip4_fib_init_adj_index_by_dst_address (ip_lookup_main_t * lm,
   fib->adj_index_by_dst_address[address_length] =
     hash_create (32 /* elts */, lm->fib_result_n_words * sizeof (uword));
 
+  hash_set_flags (fib->adj_index_by_dst_address[address_length],
+                  HASH_FLAG_NO_AUTO_SHRINK);
+
   h = hash_header (fib->adj_index_by_dst_address[address_length]);
   max_index = (hash_value_bytes (h) / sizeof (fib->new_hash_values[0])) - 1;
 

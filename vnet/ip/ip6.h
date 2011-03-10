@@ -233,8 +233,9 @@ int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2);
 #define IP6_ROUTE_FLAG_DEL (1 << 0)
 #define IP6_ROUTE_FLAG_TABLE_ID  (0 << 1)
 #define IP6_ROUTE_FLAG_FIB_INDEX (1 << 1)
-#define IP6_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 2)
-#define IP6_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 3)
+#define IP6_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 2)
+#define IP6_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
+#define IP6_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE (1 << 4)
 
 typedef struct {
   /* IP6_ROUTE_FLAG_* */
