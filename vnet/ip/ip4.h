@@ -205,7 +205,8 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 #define IP4_ROUTE_FLAG_FIB_INDEX (1 << 1)
 #define IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 2)
 #define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
-#define IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE (1 << 4)
+/* Not last add/del in group.  Facilities batching requests into packets. */
+#define IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP (1 << 4)
 
 typedef struct {
   /* IP4_ROUTE_FLAG_* */
