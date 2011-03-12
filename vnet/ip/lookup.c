@@ -986,7 +986,7 @@ static clib_error_t *
 ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * cmd)
 {
   clib_error_t * error = 0;
-  u32 table_id, is_del, add_del_flags;
+  u32 table_id, is_del;
   u32 weight, * weights = 0;
   u32 sw_if_index, * sw_if_indices = 0;
   ip4_address_t ip4_addr, * ip4_dst_addresses = 0, * ip4_via_next_hops = 0;
@@ -994,10 +994,11 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
   u32 dst_address_length, * dst_address_lengths = 0;
   ip_adjacency_t parse_adj, * add_adj = 0;
   unformat_input_t _line_input, * line_input = &_line_input;
+  f64 count;
 
   is_del = 0;
   table_id = 0;
-  add_del_flags = 0;
+  count = 1;
 
   /* Get a line of input. */
   if (! unformat_user (main_input, unformat_line_input, line_input))
@@ -1011,8 +1012,8 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	is_del = 1;
       else if (unformat (line_input, "add"))
 	is_del = 0;
-      else if (unformat (line_input, "multi"))
-	add_del_flags |= IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE;
+      else if (unformat (line_input, "count %f", &count))
+	;
 
       else if (unformat (line_input, "%U/%d",
 			 unformat_ip4_address, &ip4_addr,
@@ -1125,7 +1126,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	ip4_add_del_route_args_t a;
 
 	memset (&a, 0, sizeof (a));
-	a.flags = IP4_ROUTE_FLAG_TABLE_ID | add_del_flags;
+	a.flags = IP4_ROUTE_FLAG_TABLE_ID;
 	a.table_index_or_table_id = table_id;
 	a.dst_address = ip4_dst_addresses[i];
 	a.dst_address_length = dst_address_lengths[i];
@@ -1141,17 +1142,28 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	      }
 	    else
 	      {
-		u32 i;
-		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		u32 i, j, n, f;
+		ip4_address_t dst = a.dst_address;
+		f64 t[2];
+		n = count;
+		t[0] = vlib_time_now (vm);
+		for (i = 0; i < n; i++)
 		  {
-		    ip4_add_del_route_next_hop (im4,
-						IP4_ROUTE_FLAG_DEL | add_del_flags,
-						&a.dst_address,
-						a.dst_address_length,
-						&ip4_via_next_hops[i],
-						sw_if_indices[i],
-						weights[i]);
+		    f = i + 1 < n ? IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP : 0;
+		    a.dst_address = dst;
+		    for (j = 0; j < vec_len (ip4_via_next_hops); j++)
+		      ip4_add_del_route_next_hop (im4,
+						  IP4_ROUTE_FLAG_DEL | f,
+						  &a.dst_address,
+						  a.dst_address_length,
+						  &ip4_via_next_hops[j],
+						  sw_if_indices[j],
+						  weights[j]);
+		    dst.as_u32 = clib_host_to_net_u32 (1 + clib_net_to_host_u32 (dst.as_u32));
 		  }
+		t[1] = vlib_time_now (vm);
+		if (count > 1)
+		  vlib_cli_output (vm, "%.6e routes/sec", count / (t[1] - t[0]));
 	      }
 	  }
 	else
@@ -1166,17 +1178,28 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	      }
 	    else if (vec_len (ip4_via_next_hops) > 0)
 	      {
-		u32 i;
-		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		u32 i, j, n, f;
+		ip4_address_t dst = a.dst_address;
+		f64 t[2];
+		n = count;
+		t[0] = vlib_time_now (vm);
+		for (i = 0; i < n; i++)
 		  {
-		    ip4_add_del_route_next_hop (im4,
-						IP4_ROUTE_FLAG_ADD | add_del_flags,
-						&a.dst_address,
-						a.dst_address_length,
-						&ip4_via_next_hops[i],
-						sw_if_indices[i],
-						weights[i]);
+		    f = i + 1 < n ? IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP : 0;
+		    a.dst_address = dst;
+		    for (j = 0; j < vec_len (ip4_via_next_hops); j++)
+		      ip4_add_del_route_next_hop (im4,
+						  IP4_ROUTE_FLAG_ADD | f,
+						  &a.dst_address,
+						  a.dst_address_length,
+						  &ip4_via_next_hops[j],
+						  sw_if_indices[j],
+						  weights[j]);
+		    dst.as_u32 = clib_host_to_net_u32 (1 + clib_net_to_host_u32 (dst.as_u32));
 		  }
+		t[1] = vlib_time_now (vm);
+		if (count > 1)
+		  vlib_cli_output (vm, "%.6e routes/sec", count / (t[1] - t[0]));
 	      }
 	  }
       }
@@ -1277,7 +1300,7 @@ VLIB_CLI_COMMAND (vlib_cli_show_ip6_command) = {
   .parent = &vlib_cli_show_command,
 };
 
-static VLIB_CLI_COMMAND (ip_route_command) = {
+VLIB_CLI_COMMAND (ip_route_command) = {
   .name = "route",
   .short_help = "Add/delete IP routes",
   .function = ip_route,
@@ -1439,7 +1462,7 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   return 0;
 }
 
-static VLIB_CLI_COMMAND (ip4_show_fib_command) = {
+VLIB_CLI_COMMAND (ip4_show_fib_command) = {
   .name = "fib",
   .short_help = "Show IP4 routing table",
   .function = ip4_show_fib,
@@ -1601,7 +1624,7 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   return 0;
 }
 
-static VLIB_CLI_COMMAND (ip6_show_fib_command) = {
+VLIB_CLI_COMMAND (ip6_show_fib_command) = {
   .name = "fib",
   .short_help = "Show IP6 routing table",
   .function = ip6_show_fib,

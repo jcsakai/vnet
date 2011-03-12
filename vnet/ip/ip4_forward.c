@@ -291,7 +291,7 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 
   if (vm->mc_main && ! (a->flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE))
     {
-      u32 multiple_messages_per_vlib_buffer = (a->flags & IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE);
+      u32 multiple_messages_per_vlib_buffer = (a->flags & IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP);
       mc_serialize2 (vm->mc_main, multiple_messages_per_vlib_buffer,
 		     &ip4_add_del_route_msg, a);
       return;
@@ -421,7 +421,7 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
 
   if (vm->mc_main && ! (flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE))
     {
-      u32 multiple_messages_per_vlib_buffer = (flags & IP4_ROUTE_FLAG_REDISTRIBUTE_MULTIPLE);
+      u32 multiple_messages_per_vlib_buffer = (flags & IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP);
       mc_serialize2 (vm->mc_main,
 		     multiple_messages_per_vlib_buffer,
 		     &ip4_add_del_route_next_hop_msg,
@@ -518,7 +518,7 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
       a.flags = ((is_del ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
 		 | IP4_ROUTE_FLAG_FIB_INDEX
 		 | IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY
-		 | (flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE));
+		 | (flags & (IP4_ROUTE_FLAG_NO_REDISTRIBUTE | IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP)));
       a.dst_address = dst_address[0];
       a.dst_address_length = dst_address_length;
       a.adj_index = new_mp ? new_mp->adj_index : dst_adj_index;
