@@ -352,7 +352,10 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
     {
       /* If next hop is already there with the same weight, we have nothing to do. */
       if (i_nh < n_nhs && nhs[i_nh].weight == next_hop_weight)
-	goto done;
+	{
+	  new_mp_adj_index[0] = ~0;
+	  goto done;
+	}
 
       /* Copy old next hops to lookup key vector. */
       if (n_nhs > 0)
