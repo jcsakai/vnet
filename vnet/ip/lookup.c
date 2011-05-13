@@ -572,6 +572,7 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
 
       mhash_unset (&lm->address_to_if_address_index, address, /* old_value */ 0);
       pool_put (lm->if_address_pool, a);
+      lm->if_address_pool_index_by_sw_if_index[sw_if_index] = ~0;
       if (result_if_address_index)
 	*result_if_address_index = ~0;
     }
