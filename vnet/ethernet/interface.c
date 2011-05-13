@@ -220,6 +220,22 @@ ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index)
   pool_put (em->interfaces, ei);
 }
 
+int ethernet_interface_get_address (vlib_main_t * vm, u32 hw_if_index, u8 * address)
+{
+  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_interface_t * ei;
+  vlib_hw_interface_t * hi;
+
+  hi = vlib_get_hw_interface (vm, hw_if_index);
+
+  if (hi->hw_class_index != ethernet_hw_interface_class.index)
+    return 0;
+
+  ei = pool_elt_at_index (em->interfaces, hi->hw_instance);
+  memcpy (address, ei->address, sizeof (ei->address));
+  return 1;
+}
+
 #if DEBUG > 0
 
 #define VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT VLIB_INTERFACE_TX_N_NEXT
