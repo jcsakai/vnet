@@ -306,7 +306,7 @@ set_ip_source_check (vlib_main_t * vm,
   return error;
 }
 
-static VLIB_CLI_COMMAND (set_interface_ip_address_command) = {
+static VLIB_CLI_COMMAND (set_interface_ip_source_check_command) = {
   .name = "source-check",
   .function = set_ip_source_check,
   .short_help = "Set IP4/IP6 interface unicast source check",
