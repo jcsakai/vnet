@@ -268,12 +268,13 @@ ip6_fib_set_adj_index (ip6_main_t * im,
 
       memcpy (&d, dst_address, sizeof (d));
       vec_foreach (cb, im->add_del_route_callbacks)
-	cb->function (im, cb->function_opaque,
-		      fib, flags,
-		      &d, dst_address_length,
-		      fib->old_hash_values,
-		      fib->new_hash_values);
-
+	if ((flags & cb->required_flags) == cb->required_flags)
+	  cb->function (im, cb->function_opaque,
+			fib, flags,
+			&d, dst_address_length,
+			fib->old_hash_values,
+			fib->new_hash_values);
+      
       p = mhash_get (&mh->adj_index_by_dst_address, dst_address);
       memcpy (p, fib->new_hash_values, vec_bytes (fib->new_hash_values));
     }
@@ -329,11 +330,12 @@ void ip6_add_del_route (ip6_main_t * im, ip6_add_del_route_args_t * a)
 	{
 	  fib->new_hash_values[0] = ~0;
 	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, a->flags,
-			  &a->dst_address, dst_address_length,
-			  fib->old_hash_values,
-			  fib->new_hash_values);
+	    if ((a->flags & cb->required_flags) == cb->required_flags)
+	      cb->function (im, cb->function_opaque,
+			    fib, a->flags,
+			    &a->dst_address, dst_address_length,
+			    fib->old_hash_values,
+			    fib->new_hash_values);
 	}
     }
   else
@@ -629,11 +631,12 @@ void ip6_maybe_remap_adjacencies (ip6_main_t * im,
 		fib->new_hash_values[0] = v[0] = m - 1;
 
 		vec_foreach (cb, im->add_del_route_callbacks)
-		  cb->function (im, cb->function_opaque,
-				fib, flags | IP6_ROUTE_FLAG_ADD,
-				k, mh->dst_address_length,
-				fib->old_hash_values,
-				fib->new_hash_values);
+		  if ((flags & cb->required_flags) == cb->required_flags)
+		    cb->function (im, cb->function_opaque,
+				  fib, flags | IP6_ROUTE_FLAG_ADD,
+				  k, mh->dst_address_length,
+				  fib->old_hash_values,
+				  fib->new_hash_values);
 	      }
 	  }
       }));
@@ -643,11 +646,12 @@ void ip6_maybe_remap_adjacencies (ip6_main_t * im,
 	{
 	  mhash_unset (&mh->adj_index_by_dst_address, k, fib->old_hash_values);
 	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, flags | IP6_ROUTE_FLAG_DEL,
-			  k, mh->dst_address_length,
-			  fib->old_hash_values,
-			  fib->new_hash_values);
+	    if ((flags & cb->required_flags) == cb->required_flags)
+	      cb->function (im, cb->function_opaque,
+			    fib, flags | IP6_ROUTE_FLAG_DEL,
+			    k, mh->dst_address_length,
+			    fib->old_hash_values,
+			    fib->new_hash_values);
 	}
     }
 
@@ -2115,6 +2119,70 @@ ip6_discover_neighbor_hw_interface_link_up_down (vlib_main_t * vm,
     = vlib_node_add_next (vm, ip6_discover_neighbor_node.index, hw_if->output_node_index);
 
   return 0;
+}
+
+clib_error_t *
+ip6_probe_neighbor (vlib_main_t * vm, ip6_address_t * dst, u32 sw_if_index)
+{
+  ip6_main_t * im = &ip6_main;
+  icmp6_neighbor_solicitation_for_ethernet_t * h;
+  vlib_hw_interface_t * hi;
+  ethernet_interface_t * eif;
+  u32 bi;
+  u8 * eth_addr;
+  static u8 zero[6];
+  ip6_address_t * src;
+
+  src = ip6_interface_address_matching_destination (im, dst, sw_if_index);
+  if (! src)
+    return clib_error_return (0, "no matching interface address for destination %U (interface %U)",
+			      format_ip6_address, dst,
+			      format_vlib_sw_if_index_name, vm, sw_if_index);
+
+  h = vlib_packet_template_get_packet (vm, &im->discover_neighbor_packet_template, &bi);
+
+  hi = vlib_get_sup_hw_interface (vm, sw_if_index);
+
+  /* Build ethernet header. */
+  eif = ethernet_get_interface (&ethernet_main, hi->hw_if_index);
+  eth_addr = eif ? eif->address : zero;
+  memcpy (h->ethernet.src_address, eth_addr, sizeof (h->ethernet.src_address));
+
+  /* Destination ethernet address is ipv6 multicast 0x3333.ffXX.XXXX where lower
+     24 bits are from target. */
+  h->ethernet.dst_address[3] = dst->as_u8[13];
+  h->ethernet.dst_address[4] = dst->as_u8[14];
+  h->ethernet.dst_address[5] = dst->as_u8[15];
+
+  /* Destination address is a solicited node multicast address.  We need to fill in
+     the low 24 bits with low 24 bits of target's address. */
+  h->ip.dst_address.as_u8[13] = dst->as_u8[13];
+  h->ip.dst_address.as_u8[14] = dst->as_u8[14];
+  h->ip.dst_address.as_u8[15] = dst->as_u8[15];
+
+  h->ip.src_address = src[0];
+  h->neighbor.target_address = dst[0];
+
+  memcpy (h->link_layer_option.ethernet_address, eth_addr,
+	  sizeof (h->link_layer_option.ethernet_address));
+
+  h->neighbor.icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (vm, 0, &h->ip);
+  ASSERT (0 == ip6_tcp_udp_icmp_compute_checksum (vm, 0, &h->ip));
+
+  {
+    vlib_buffer_t * b = vlib_get_buffer (vm, bi);
+    b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX] = sw_if_index;
+  }
+
+  {
+    vlib_frame_t * f = vlib_get_frame_to_node (vm, hi->output_node_index);
+    u32 * to_next = vlib_frame_vector_args (f);
+    to_next[0] = bi;
+    f->n_vectors = 1;
+    vlib_put_frame_to_node (vm, hi->output_node_index, f);
+  }
+
+  return /* no error */ 0;
 }
 
 typedef enum {

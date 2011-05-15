@@ -269,11 +269,12 @@ ip4_fib_set_adj_index (ip4_main_t * im,
 
       d.data_u32 = dst_address_u32;
       vec_foreach (cb, im->add_del_route_callbacks)
-	cb->function (im, cb->function_opaque,
-		      fib, flags,
-		      &d, dst_address_length,
-		      fib->old_hash_values,
-		      fib->new_hash_values);
+	if ((flags & cb->required_flags) == cb->required_flags)
+	  cb->function (im, cb->function_opaque,
+			fib, flags,
+			&d, dst_address_length,
+			fib->old_hash_values,
+			fib->new_hash_values);
 
       p = hash_get (hash, dst_address_u32);
       memcpy (p, fib->new_hash_values, vec_bytes (fib->new_hash_values));
@@ -331,11 +332,12 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 	{
 	  fib->new_hash_values[0] = ~0;
 	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, a->flags,
-			  &a->dst_address, dst_address_length,
-			  fib->old_hash_values,
-			  fib->new_hash_values);
+	    if ((a->flags & cb->required_flags) == cb->required_flags)
+	      cb->function (im, cb->function_opaque,
+			    fib, a->flags,
+			    &a->dst_address, dst_address_length,
+			    fib->old_hash_values,
+			    fib->new_hash_values);
 	}
     }
   else
@@ -613,37 +615,37 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 	_vec_len (to_delete) = 0;
 
       hash_foreach_pair (p, hash, ({
-	    u32 adj_index = p->value[0];
-	    u32 m = vec_elt (lm->adjacency_remap_table, adj_index);
+	u32 adj_index = p->value[0];
+	u32 m = vec_elt (lm->adjacency_remap_table, adj_index);
 
-	    if (m)
+	if (m)
+	  {
+	    /* Record destination address from hash key. */
+	    a.data_u32 = p->key;
+
+	    /* Reset mapping table. */
+	    lm->adjacency_remap_table[adj_index] = 0;
+
+	    /* New adjacency points to nothing: so delete prefix. */
+	    if (m == ~0)
+	      vec_add1 (to_delete, a);
+	    else
 	      {
-		/* Record destination address from hash key. */
-		a.data_u32 = p->key;
+		/* Remap to new adjacency. */
+		memcpy (fib->old_hash_values, p->value, vec_bytes (fib->old_hash_values));
 
-		/* Reset mapping table. */
-		lm->adjacency_remap_table[adj_index] = 0;
+		/* Set new adjacency value. */
+		fib->new_hash_values[0] = p->value[0] = m - 1;
 
-		/* New adjacency points to nothing: so delete prefix. */
-		if (m == ~0)
-		  vec_add1 (to_delete, a);
-		else
-		  {
-
-		    /* Remap to new adjacency. */
-		    memcpy (fib->old_hash_values, p->value, vec_bytes (fib->old_hash_values));
-
-		    /* Set new adjacency value. */
-		    fib->new_hash_values[0] = p->value[0] = m - 1;
-
-		    vec_foreach (cb, im->add_del_route_callbacks)
-		      cb->function (im, cb->function_opaque,
-				    fib, flags | IP4_ROUTE_FLAG_ADD,
-				    &a, l,
-				    fib->old_hash_values,
-				    fib->new_hash_values);
-		  }
+		vec_foreach (cb, im->add_del_route_callbacks)
+		  if ((flags & cb->required_flags) == cb->required_flags)
+		    cb->function (im, cb->function_opaque,
+				  fib, flags | IP4_ROUTE_FLAG_ADD,
+				  &a, l,
+				  fib->old_hash_values,
+				  fib->new_hash_values);
 	      }
+	  }
       }));
 
       fib->new_hash_values[0] = ~0;
@@ -651,11 +653,12 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 	{
 	  hash = _hash_unset (hash, to_delete[i].data_u32, fib->old_hash_values);
 	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, flags | IP4_ROUTE_FLAG_DEL,
-			  &a, l,
-			  fib->old_hash_values,
-			  fib->new_hash_values);
+	    if ((flags & cb->required_flags) == cb->required_flags)
+	      cb->function (im, cb->function_opaque,
+			    fib, flags | IP4_ROUTE_FLAG_DEL,
+			    &a, l,
+			    fib->old_hash_values,
+			    fib->new_hash_values);
 	}
     }
 
@@ -2133,14 +2136,15 @@ ip4_arp (vlib_main_t * vm,
 	    ethernet_and_arp_header_t * h0;
 	    vlib_sw_interface_t * swif0;
 	    ethernet_interface_t * eif0;
-	    u8 * eth_addr0, dummy[6] = { 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, };
+	    u8 * eth_addr0;
+	    static u8 zero[6];
 
 	    h0 = vlib_packet_template_get_packet (vm, &im->ip4_arp_request_packet_template, &bi0);
 
 	    swif0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
 	    ASSERT (swif0->type == VLIB_SW_INTERFACE_TYPE_HARDWARE);
 	    eif0 = ethernet_get_interface (&ethernet_main, swif0->hw_if_index);
-	    eth_addr0 = eif0 ? eif0->address : dummy;
+	    eth_addr0 = eif0 ? eif0->address : zero;
 	    memcpy (h0->ethernet.src_address, eth_addr0, sizeof (h0->ethernet.src_address));
 	    memcpy (h0->arp.ip4_over_ethernet[0].ethernet, eth_addr0, sizeof (h0->arp.ip4_over_ethernet[0].ethernet));
 
@@ -2183,6 +2187,53 @@ VLIB_REGISTER_NODE (ip4_arp_node) = {
     [IP4_ARP_NEXT_DROP] = "error-drop",
   },
 };
+
+/* Send an ARP request to see if given destination is reachable on given interface. */
+clib_error_t *
+ip4_probe_neighbor (vlib_main_t * vm, ip4_address_t * dst, u32 sw_if_index)
+{
+  ip4_main_t * im = &ip4_main;
+  u32 bi;
+  ethernet_and_arp_header_t * h;
+  vlib_hw_interface_t * hi;
+  ethernet_interface_t * eif;
+  u8 * eth_addr;
+  static u8 zero[6];
+  ip4_address_t * src;
+
+  src = ip4_interface_address_matching_destination (im, dst, sw_if_index, 0);
+  if (! src)
+    return clib_error_return (0, "no matching interface address for destination %U (interface %U)",
+			      format_ip4_address, dst,
+			      format_vlib_sw_if_index_name, vm, sw_if_index);
+
+  h = vlib_packet_template_get_packet (vm, &im->ip4_arp_request_packet_template, &bi);
+
+  hi = vlib_get_sup_hw_interface (vm, sw_if_index);
+
+  eif = ethernet_get_interface (&ethernet_main, hi->hw_if_index);
+  eth_addr = eif ? eif->address : zero;
+  memcpy (h->ethernet.src_address, eth_addr, sizeof (h->ethernet.src_address));
+  memcpy (h->arp.ip4_over_ethernet[0].ethernet, eth_addr, sizeof (h->arp.ip4_over_ethernet[0].ethernet));
+
+  h->arp.ip4_over_ethernet[0].ip4 = src[0];
+  h->arp.ip4_over_ethernet[1].ip4 = dst[0];
+
+  {
+    vlib_buffer_t * b = vlib_get_buffer (vm, bi);
+    b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX] = sw_if_index;
+  }
+
+  {
+    vlib_frame_t * f = vlib_get_frame_to_node (vm, hi->output_node_index);
+    u32 * to_next = vlib_frame_vector_args (f);
+    to_next[0] = bi;
+    f->n_vectors = 1;
+    vlib_put_frame_to_node (vm, hi->output_node_index, f);
+  }
+
+  return /* no error */ 0;
+}
 
 typedef enum {
   IP4_REWRITE_NEXT_DROP,

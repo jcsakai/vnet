@@ -139,7 +139,7 @@ set_ethernet_neighbor (vlib_main_t * vm,
       memcpy (eth->dst_address, link_layer_address, sizeof (eth->dst_address));
 
       args.table_index_or_table_id = im->fib_index_by_sw_if_index[sw_if_index];
-      args.flags = IP6_ROUTE_FLAG_FIB_INDEX | IP6_ROUTE_FLAG_ADD;
+      args.flags = IP6_ROUTE_FLAG_FIB_INDEX | IP6_ROUTE_FLAG_ADD | IP6_ROUTE_FLAG_NEIGHBOR;
       args.dst_address = a[0];
       args.dst_address_length = 128;
       args.adj_index = ~0;
@@ -276,6 +276,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	      ip_adjacency_t * adj0 = ip_get_adjacency (&im->lookup_main, src_adj_index0);
 
 	      error0 = (adj0->rewrite_header.sw_if_index != sw_if_index0
+			|| adj0->lookup_next_index != IP_LOOKUP_NEXT_ARP
 			? ICMP6_ERROR_NEIGHBOR_SOLICITATION_SOURCE_NOT_ON_LINK
 			: error0);
 	  }

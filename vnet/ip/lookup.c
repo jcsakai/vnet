@@ -1311,6 +1311,46 @@ VLIB_CLI_COMMAND (ip_route_command) = {
   .parent = &vlib_cli_ip_command,
 };
 
+static clib_error_t *
+probe_neighbor_address (vlib_main_t * vm,
+			unformat_input_t * input,
+			vlib_cli_command_t * cmd)
+{
+  ip4_address_t a4;
+  ip6_address_t a6;
+  clib_error_t * error = 0;
+  u32 sw_if_index;
+
+  sw_if_index = ~0;
+  if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
+    {
+      error = clib_error_return (0, "unknown interface `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+
+  if (unformat (input, "%U", unformat_ip4_address, &a4))
+    error = ip4_probe_neighbor (vm, &a4, sw_if_index);
+  else if (unformat (input, "%U", unformat_ip6_address, &a6))
+    error = ip6_probe_neighbor (vm, &a6, sw_if_index);
+  else
+    {
+      error = clib_error_return (0, "expected IP4/IP6 address/length `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+
+ done:
+  return error;
+}
+
+static VLIB_CLI_COMMAND (ip_probe_neighbor_command) = {
+  .name = "probe-neighbor",
+  .function = probe_neighbor_address,
+  .short_help = "Probe IP4/IP6 address for interface",
+  .parent = &vlib_cli_ip_command,
+};
+
 typedef struct {
   ip4_address_t address;
 

@@ -22,15 +22,12 @@ vnet_main_init (vlib_main_t * vm)
     return error;
 
   if ((error = vlib_call_init_function (vm, ixge_init)))
-    {
-      clib_error_report (error);
-      error = unix_physmem_init (vm, /* physical_memory_required */ 0);
-    }
+    return error;
   if ((error = vlib_call_init_function (vm, ige_init)))
-    {
-      clib_error_report (error);
-      error = unix_physmem_init (vm, /* physical_memory_required */ 0);
-    }
+    return error;
+
+  if ((error = unix_physmem_init (vm, /* physical_memory_required */ 0)))
+    return error;
 
   if ((error = vlib_call_init_function (vm, tuntap_init)))
     return error;
