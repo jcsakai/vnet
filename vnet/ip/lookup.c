@@ -1281,34 +1281,30 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
   return error;
 }
 
-VLIB_CLI_COMMAND (vlib_cli_ip_command) = {
-  .name = "ip",
+static VLIB_CLI_COMMAND (vlib_cli_ip_command) = {
+  .path = "ip",
   .short_help = "Internet protocol (IP) commands",
 };
 
-VLIB_CLI_COMMAND (vlib_cli_show_ip_command) = {
-  .name = "ip",
+static VLIB_CLI_COMMAND (vlib_cli_show_ip_command) = {
+  .path = "show ip",
   .short_help = "Internet protocol (IP) show commands",
-  .parent = &vlib_cli_show_command,
 };
 
-VLIB_CLI_COMMAND (vlib_cli_show_ip4_command) = {
-  .name = "ip4",
+static VLIB_CLI_COMMAND (vlib_cli_show_ip4_command) = {
+  .path = "show ip4",
   .short_help = "Internet protocol version 4 (IP4) show commands",
-  .parent = &vlib_cli_show_command,
 };
 
-VLIB_CLI_COMMAND (vlib_cli_show_ip6_command) = {
-  .name = "ip6",
+static VLIB_CLI_COMMAND (vlib_cli_show_ip6_command) = {
+  .path = "show ip6",
   .short_help = "Internet protocol version 6 (IP6) show commands",
-  .parent = &vlib_cli_show_command,
 };
 
-VLIB_CLI_COMMAND (ip_route_command) = {
-  .name = "route",
+static VLIB_CLI_COMMAND (ip_route_command) = {
+  .path = "ip route",
   .short_help = "Add/delete IP routes",
   .function = ip_route,
-  .parent = &vlib_cli_ip_command,
 };
 
 static clib_error_t *
@@ -1345,10 +1341,9 @@ probe_neighbor_address (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (ip_probe_neighbor_command) = {
-  .name = "probe-neighbor",
+  .path = "ip probe-neighbor",
   .function = probe_neighbor_address,
   .short_help = "Probe IP4/IP6 address for interface",
-  .parent = &vlib_cli_ip_command,
 };
 
 typedef struct {
@@ -1506,11 +1501,10 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   return 0;
 }
 
-VLIB_CLI_COMMAND (ip4_show_fib_command) = {
-  .name = "fib",
+static VLIB_CLI_COMMAND (ip4_show_fib_command) = {
+  .path = "show ip fib",
   .short_help = "Show IP4 routing table",
   .function = ip4_show_fib,
-  .parent = &vlib_cli_show_ip_command,
 };
 
 typedef struct {
@@ -1668,9 +1662,8 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   return 0;
 }
 
-VLIB_CLI_COMMAND (ip6_show_fib_command) = {
-  .name = "fib",
+static VLIB_CLI_COMMAND (ip6_show_fib_command) = {
+  .path = "show ip6 fib",
   .short_help = "Show IP6 routing table",
   .function = ip6_show_fib,
-  .parent = &vlib_cli_show_ip6_command,
 };

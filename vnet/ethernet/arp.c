@@ -592,10 +592,9 @@ show_ip4_arp (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (show_ip4_arp_command) = {
-  .name = "arp",
+  .path = "show ip arp",
   .function = show_ip4_arp,
   .short_help = "Show ARP table",
-  .parent = &vlib_cli_show_ip_command,
 };
 
 typedef struct {

@@ -198,10 +198,9 @@ show_ip6_neighbors (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (show_ip6_neighbors_command) = {
-  .name = "neighbors",
+  .path = "show ip6 neighbors",
   .function = show_ip6_neighbors,
   .short_help = "Show ip6 neighbors",
-  .parent = &vlib_cli_show_ip6_command,
 };
 
 typedef enum {

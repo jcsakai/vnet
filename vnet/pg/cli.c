@@ -31,8 +31,8 @@
 #endif
 
 /* Root of all packet generator cli commands. */
-VLIB_CLI_COMMAND (vlib_cli_pg_command) = {
-  .name = "packet-generator",
+static VLIB_CLI_COMMAND (vlib_cli_pg_command) = {
+  .path = "packet-generator",
   .short_help = "Packet generator commands",
 };
 
@@ -71,19 +71,17 @@ enable_disable_stream (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (enable_streams_cli) = {
-  .name = "enable",
+  .path = "packet-generator enable-stream",
   .short_help = "Enable packet generator streams",
   .function = enable_disable_stream,
   .function_arg = 1,		/* is_enable */
-  .parent = &vlib_cli_pg_command,
 };
 
 static VLIB_CLI_COMMAND (disable_streams_cli) = {
-  .name = "disable",
+  .path = "packet-generator disable-stream",
   .short_help = "Disable packet generator streams",
   .function = enable_disable_stream,
   .function_arg = 0,		/* is_enable */
-  .parent = &vlib_cli_pg_command,
 };
 
 static u8 * format_pg_stream (u8 * s, va_list * va)
@@ -146,10 +144,9 @@ show_streams (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (show_streams_cli) = {
-  .name = "packet-generator",
+  .path = "show packet-generator",
   .short_help = "Show packet generator streams",
   .function = show_streams,
-  .parent = &vlib_cli_show_command,
 };
 
 static clib_error_t *
@@ -339,9 +336,8 @@ new_stream (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (new_stream_cli) = {
-  .name = "new",
+  .path = "packet-generator new",
   .function = new_stream,
-  .parent = &vlib_cli_pg_command,
   .short_help = "Create packet generator stream",
   .long_help =
   "Create packet generator stream\n"
@@ -372,9 +368,8 @@ del_stream (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (del_stream_cli) = {
-  .name = "delete",
+  .path = "packet-generator delete",
   .function = del_stream,
-  .parent = &vlib_cli_pg_command,
   .short_help = "Delete stream with given name",
 };
 
@@ -416,10 +411,9 @@ change_stream_parameters (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (change_stream_parameters_cli) = {
-  .name = "configure",
+  .path = "packet-generator configure",
   .short_help = "Change packet generator stream parameters",
   .function = change_stream_parameters,
-  .parent = &vlib_cli_pg_command,
 };
 
 /* Dummy init function so that we can be linked in. */

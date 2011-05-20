@@ -307,10 +307,9 @@ set_ip_source_check (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (set_interface_ip_source_check_command) = {
-  .name = "source-check",
+  .path = "set interface ip source-check",
   .function = set_ip_source_check,
   .short_help = "Set IP4/IP6 interface unicast source check",
-  .parent = &set_interface_ip_command,
 };
 
 /* Dummy init function to get us linked in. */

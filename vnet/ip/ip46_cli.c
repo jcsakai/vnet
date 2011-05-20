@@ -40,10 +40,9 @@ int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2)
   return 0;
 }
 
-VLIB_CLI_COMMAND (set_interface_ip_command) = {
-  .name = "ip",
+static VLIB_CLI_COMMAND (set_interface_ip_command) = {
+  .path = "set interface ip",
   .short_help = "IP4/IP6 commands",
-  .parent = &vlib_cli_set_interface_command,
 };
 
 static clib_error_t *
@@ -86,10 +85,9 @@ add_del_ip_address (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (set_interface_ip_address_command) = {
-  .name = "address",
+  .path = "set interface ip address",
   .function = add_del_ip_address,
   .short_help = "Add/delete IP4/IP6 address for interface",
-  .parent = &set_interface_ip_command,
 };
 
 /* Dummy init function to get us linked in. */

@@ -330,9 +330,8 @@ create_simulated_ethernet_interfaces (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (create_simulated_ethernet_interface_command) = {
-  .name = "create-ethernet",
+  .path = "ethernet create-interfaces",
   .short_help = "Create simulated ethernet interface",
-  .parent = &vlib_cli_interface_command,
   .function = create_simulated_ethernet_interfaces,
 };
 #endif
