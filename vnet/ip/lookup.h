@@ -385,8 +385,6 @@ do {									\
 
 void ip_lookup_init (ip_lookup_main_t * lm, u32 ip_lookup_node_index);
 
-extern vlib_cli_command_t vlib_cli_ip_command, vlib_cli_show_ip_command;
-
 serialize_function_t serialize_ip_lookup_main, unserialize_ip_lookup_main;
 serialize_function_t serialize_vec_ip_adjacency, unserialize_vec_ip_adjacency;
 

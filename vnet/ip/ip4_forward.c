@@ -104,6 +104,9 @@ ip4_fib_init_adj_index_by_dst_address (ip_lookup_main_t * lm,
   fib->adj_index_by_dst_address[address_length] =
     hash_create (32 /* elts */, lm->fib_result_n_words * sizeof (uword));
 
+  hash_set_flags (fib->adj_index_by_dst_address[address_length],
+                  HASH_FLAG_NO_AUTO_SHRINK);
+
   h = hash_header (fib->adj_index_by_dst_address[address_length]);
   max_index = (hash_value_bytes (h) / sizeof (fib->new_hash_values[0])) - 1;
 
@@ -126,16 +129,44 @@ static void unserialize_ip4_address (serialize_main_t * m, va_list * va)
   memcpy (a->as_u8, p, sizeof (a->as_u8));
 }
 
+static void serialize_ip4_address_and_length (serialize_main_t * m, va_list * va)
+{
+  ip4_address_t * a = va_arg (*va, ip4_address_t *);
+  u32 l = va_arg (*va, u32);
+  u32 n_bytes = (l / 8) + ((l % 8) != 0);
+  u8 * p = serialize_get (m, 1 + n_bytes);
+  ASSERT (l <= 32);
+  p[0] = l;
+  memcpy (p + 1, a->as_u8, n_bytes);
+}
+
+static void unserialize_ip4_address_and_length (serialize_main_t * m, va_list * va)
+{
+  ip4_address_t * a = va_arg (*va, ip4_address_t *);
+  u32 * al = va_arg (*va, u32 *);
+  u8 * p = unserialize_get (m, 1);
+  u32 l, n_bytes;
+
+  al[0] = l = p[0];
+  ASSERT (l <= 32);
+  n_bytes = (l / 8) + ((l % 8) != 0);
+
+  if (n_bytes)
+    {
+      p = unserialize_get (m, n_bytes);
+      memcpy (a->as_u8, p, n_bytes);
+    }
+}
+
 static void serialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * va)
 {
   ip4_add_del_route_args_t * a = va_arg (*va, ip4_add_del_route_args_t *);
     
-  serialize_integer (m, a->table_index_or_table_id, sizeof (a->table_index_or_table_id));
-  serialize_integer (m, a->flags, sizeof (a->flags));
-  serialize (m, serialize_ip4_address, &a->dst_address);
-  serialize_integer (m, a->dst_address_length, sizeof (a->dst_address_length));
-  serialize_integer (m, a->adj_index, sizeof (a->adj_index));
-  serialize_integer (m, a->n_add_adj, sizeof (a->n_add_adj));
+  serialize_likely_small_unsigned_integer (m, a->table_index_or_table_id);
+  serialize_likely_small_unsigned_integer (m, a->flags);
+  serialize (m, serialize_ip4_address_and_length, &a->dst_address, a->dst_address_length);
+  serialize_likely_small_unsigned_integer (m, a->adj_index);
+  serialize_likely_small_unsigned_integer (m, a->n_add_adj);
   if (a->n_add_adj > 0)
     serialize (m, serialize_vec_ip_adjacency, a->add_adj, a->n_add_adj);
 }
@@ -176,12 +207,11 @@ static void unserialize_ip4_add_del_route_msg (serialize_main_t * m, va_list * v
   ip4_main_t * i4m = &ip4_main;
   ip4_add_del_route_args_t a;
     
-  unserialize_integer (m, &a.table_index_or_table_id, sizeof (a.table_index_or_table_id));
-  unserialize_integer (m, &a.flags, sizeof (a.flags));
-  unserialize (m, unserialize_ip4_address, &a.dst_address);
-  unserialize_integer (m, &a.dst_address_length, sizeof (a.dst_address_length));
-  unserialize_integer (m, &a.adj_index, sizeof (a.adj_index));
-  unserialize_integer (m, &a.n_add_adj, sizeof (a.n_add_adj));
+  a.table_index_or_table_id = unserialize_likely_small_unsigned_integer (m);
+  a.flags = unserialize_likely_small_unsigned_integer (m);
+  unserialize (m, unserialize_ip4_address_and_length, &a.dst_address, &a.dst_address_length);
+  a.adj_index = unserialize_likely_small_unsigned_integer (m);
+  a.n_add_adj = unserialize_likely_small_unsigned_integer (m);
   a.add_adj = 0;
   if (a.n_add_adj > 0)
     {
@@ -239,11 +269,12 @@ ip4_fib_set_adj_index (ip4_main_t * im,
 
       d.data_u32 = dst_address_u32;
       vec_foreach (cb, im->add_del_route_callbacks)
-	cb->function (im, cb->function_opaque,
-		      fib, flags,
-		      &d, dst_address_length,
-		      fib->old_hash_values,
-		      fib->new_hash_values);
+	if ((flags & cb->required_flags) == cb->required_flags)
+	  cb->function (im, cb->function_opaque,
+			fib, flags,
+			&d, dst_address_length,
+			fib->old_hash_values,
+			fib->new_hash_values);
 
       p = hash_get (hash, dst_address_u32);
       memcpy (p, fib->new_hash_values, vec_bytes (fib->new_hash_values));
@@ -261,7 +292,9 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 
   if (vm->mc_main && ! (a->flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE))
     {
-      mc_serialize (vm->mc_main, &ip4_add_del_route_msg, a);
+      u32 multiple_messages_per_vlib_buffer = (a->flags & IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP);
+      mc_serialize2 (vm->mc_main, multiple_messages_per_vlib_buffer,
+		     &ip4_add_del_route_msg, a);
       return;
     }
 
@@ -299,11 +332,12 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
 	{
 	  fib->new_hash_values[0] = ~0;
 	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, a->flags,
-			  &a->dst_address, dst_address_length,
-			  fib->old_hash_values,
-			  fib->new_hash_values);
+	    if ((a->flags & cb->required_flags) == cb->required_flags)
+	      cb->function (im, cb->function_opaque,
+			    fib, a->flags,
+			    &a->dst_address, dst_address_length,
+			    fib->old_hash_values,
+			    fib->new_hash_values);
 	}
     }
   else
@@ -329,12 +363,11 @@ static void serialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_l
   u32 next_hop_sw_if_index = va_arg (*va, u32);
   u32 next_hop_weight = va_arg (*va, u32);
 
-  serialize_integer (m, flags, sizeof (flags));
-  serialize (m, serialize_ip4_address, dst_address);
-  serialize_integer (m, dst_address_length, sizeof (dst_address_length));
+  serialize_likely_small_unsigned_integer (m, flags);
+  serialize (m, serialize_ip4_address_and_length, dst_address, dst_address_length);
   serialize (m, serialize_ip4_address, next_hop_address);
-  serialize_integer (m, next_hop_sw_if_index, sizeof (next_hop_sw_if_index));
-  serialize_integer (m, next_hop_weight, sizeof (next_hop_weight));
+  serialize_likely_small_unsigned_integer (m, next_hop_sw_if_index);
+  serialize_likely_small_unsigned_integer (m, next_hop_weight);
 }
 
 static void unserialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_list * va)
@@ -343,12 +376,11 @@ static void unserialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va
   u32 flags, dst_address_length, next_hop_sw_if_index, next_hop_weight;
   ip4_address_t dst_address, next_hop_address;
 
-  unserialize_integer (m, &flags, sizeof (flags));
-  unserialize (m, unserialize_ip4_address, &dst_address);
-  unserialize_integer (m, &dst_address_length, sizeof (dst_address_length));
+  flags = unserialize_likely_small_unsigned_integer (m);
+  unserialize (m, unserialize_ip4_address_and_length, &dst_address, &dst_address_length);
   unserialize (m, unserialize_ip4_address, &next_hop_address);
-  unserialize_integer (m, &next_hop_sw_if_index, sizeof (next_hop_sw_if_index));
-  unserialize_integer (m, &next_hop_weight, sizeof (next_hop_weight));
+  next_hop_sw_if_index = unserialize_likely_small_unsigned_integer (m);
+  next_hop_weight = unserialize_likely_small_unsigned_integer (m);
 
   ip4_add_del_route_next_hop
     (im,
@@ -391,10 +423,13 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
 
   if (vm->mc_main && ! (flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE))
     {
-      mc_serialize (vm->mc_main, &ip4_add_del_route_next_hop_msg,
-		    flags,
-		    dst_address, dst_address_length,
-		    next_hop, next_hop_sw_if_index, next_hop_weight);
+      u32 multiple_messages_per_vlib_buffer = (flags & IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP);
+      mc_serialize2 (vm->mc_main,
+		     multiple_messages_per_vlib_buffer,
+		     &ip4_add_del_route_next_hop_msg,
+		     flags,
+		     dst_address, dst_address_length,
+		     next_hop, next_hop_sw_if_index, next_hop_weight);
       return;
     }
 
@@ -485,7 +520,7 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
       a.flags = ((is_del ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
 		 | IP4_ROUTE_FLAG_FIB_INDEX
 		 | IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY
-		 | (flags & IP4_ROUTE_FLAG_NO_REDISTRIBUTE));
+		 | (flags & (IP4_ROUTE_FLAG_NO_REDISTRIBUTE | IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP)));
       a.dst_address = dst_address[0];
       a.dst_address_length = dst_address_length;
       a.adj_index = new_mp ? new_mp->adj_index : dst_adj_index;
@@ -580,37 +615,37 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 	_vec_len (to_delete) = 0;
 
       hash_foreach_pair (p, hash, ({
-	    u32 adj_index = p->value[0];
-	    u32 m = vec_elt (lm->adjacency_remap_table, adj_index);
+	u32 adj_index = p->value[0];
+	u32 m = vec_elt (lm->adjacency_remap_table, adj_index);
 
-	    if (m)
+	if (m)
+	  {
+	    /* Record destination address from hash key. */
+	    a.data_u32 = p->key;
+
+	    /* Reset mapping table. */
+	    lm->adjacency_remap_table[adj_index] = 0;
+
+	    /* New adjacency points to nothing: so delete prefix. */
+	    if (m == ~0)
+	      vec_add1 (to_delete, a);
+	    else
 	      {
-		/* Record destination address from hash key. */
-		a.data_u32 = p->key;
+		/* Remap to new adjacency. */
+		memcpy (fib->old_hash_values, p->value, vec_bytes (fib->old_hash_values));
 
-		/* Reset mapping table. */
-		lm->adjacency_remap_table[adj_index] = 0;
+		/* Set new adjacency value. */
+		fib->new_hash_values[0] = p->value[0] = m - 1;
 
-		/* New adjacency points to nothing: so delete prefix. */
-		if (m == ~0)
-		  vec_add1 (to_delete, a);
-		else
-		  {
-
-		    /* Remap to new adjacency. */
-		    memcpy (fib->old_hash_values, p->value, vec_bytes (fib->old_hash_values));
-
-		    /* Set new adjacency value. */
-		    fib->new_hash_values[0] = p->value[0] = m - 1;
-
-		    vec_foreach (cb, im->add_del_route_callbacks)
-		      cb->function (im, cb->function_opaque,
-				    fib, flags | IP4_ROUTE_FLAG_ADD,
-				    &a, l,
-				    fib->old_hash_values,
-				    fib->new_hash_values);
-		  }
+		vec_foreach (cb, im->add_del_route_callbacks)
+		  if ((flags & cb->required_flags) == cb->required_flags)
+		    cb->function (im, cb->function_opaque,
+				  fib, flags | IP4_ROUTE_FLAG_ADD,
+				  &a, l,
+				  fib->old_hash_values,
+				  fib->new_hash_values);
 	      }
+	  }
       }));
 
       fib->new_hash_values[0] = ~0;
@@ -618,11 +653,12 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 	{
 	  hash = _hash_unset (hash, to_delete[i].data_u32, fib->old_hash_values);
 	  vec_foreach (cb, im->add_del_route_callbacks)
-	    cb->function (im, cb->function_opaque,
-			  fib, flags | IP4_ROUTE_FLAG_DEL,
-			  &a, l,
-			  fib->old_hash_values,
-			  fib->new_hash_values);
+	    if ((flags & cb->required_flags) == cb->required_flags)
+	      cb->function (im, cb->function_opaque,
+			    fib, flags | IP4_ROUTE_FLAG_DEL,
+			    &a, l,
+			    fib->old_hash_values,
+			    fib->new_hash_values);
 	}
     }
 
@@ -2122,14 +2158,15 @@ ip4_arp (vlib_main_t * vm,
 	    ethernet_and_arp_header_t * h0;
 	    vlib_sw_interface_t * swif0;
 	    ethernet_interface_t * eif0;
-	    u8 * eth_addr0, dummy[6] = { 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, };
+	    u8 * eth_addr0;
+	    static u8 zero[6];
 
 	    h0 = vlib_packet_template_get_packet (vm, &im->ip4_arp_request_packet_template, &bi0);
 
 	    swif0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
 	    ASSERT (swif0->type == VLIB_SW_INTERFACE_TYPE_HARDWARE);
 	    eif0 = ethernet_get_interface (&ethernet_main, swif0->hw_if_index);
-	    eth_addr0 = eif0 ? eif0->address : dummy;
+	    eth_addr0 = eif0 ? eif0->address : zero;
 	    memcpy (h0->ethernet.src_address, eth_addr0, sizeof (h0->ethernet.src_address));
 	    memcpy (h0->arp.ip4_over_ethernet[0].ethernet, eth_addr0, sizeof (h0->arp.ip4_over_ethernet[0].ethernet));
 
@@ -2172,6 +2209,53 @@ VLIB_REGISTER_NODE (ip4_arp_node) = {
     [IP4_ARP_NEXT_DROP] = "error-drop",
   },
 };
+
+/* Send an ARP request to see if given destination is reachable on given interface. */
+clib_error_t *
+ip4_probe_neighbor (vlib_main_t * vm, ip4_address_t * dst, u32 sw_if_index)
+{
+  ip4_main_t * im = &ip4_main;
+  u32 bi;
+  ethernet_and_arp_header_t * h;
+  vlib_hw_interface_t * hi;
+  ethernet_interface_t * eif;
+  u8 * eth_addr;
+  static u8 zero[6];
+  ip4_address_t * src;
+
+  src = ip4_interface_address_matching_destination (im, dst, sw_if_index, 0);
+  if (! src)
+    return clib_error_return (0, "no matching interface address for destination %U (interface %U)",
+			      format_ip4_address, dst,
+			      format_vlib_sw_if_index_name, vm, sw_if_index);
+
+  h = vlib_packet_template_get_packet (vm, &im->ip4_arp_request_packet_template, &bi);
+
+  hi = vlib_get_sup_hw_interface (vm, sw_if_index);
+
+  eif = ethernet_get_interface (&ethernet_main, hi->hw_if_index);
+  eth_addr = eif ? eif->address : zero;
+  memcpy (h->ethernet.src_address, eth_addr, sizeof (h->ethernet.src_address));
+  memcpy (h->arp.ip4_over_ethernet[0].ethernet, eth_addr, sizeof (h->arp.ip4_over_ethernet[0].ethernet));
+
+  h->arp.ip4_over_ethernet[0].ip4 = src[0];
+  h->arp.ip4_over_ethernet[1].ip4 = dst[0];
+
+  {
+    vlib_buffer_t * b = vlib_get_buffer (vm, bi);
+    b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX] = sw_if_index;
+  }
+
+  {
+    vlib_frame_t * f = vlib_get_frame_to_node (vm, hi->output_node_index);
+    u32 * to_next = vlib_frame_vector_args (f);
+    to_next[0] = bi;
+    f->n_vectors = 1;
+    vlib_put_frame_to_node (vm, hi->output_node_index, f);
+  }
+
+  return /* no error */ 0;
+}
 
 typedef enum {
   IP4_REWRITE_NEXT_DROP,

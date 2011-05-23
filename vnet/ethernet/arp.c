@@ -289,7 +289,7 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
       memcpy (eth->dst_address, a->ethernet, sizeof (eth->dst_address));
 
       args.table_index_or_table_id = fib_index;
-      args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD;
+      args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_NEIGHBOR;
       args.dst_address = a->ip4;
       args.dst_address_length = 32;
       args.adj_index = ~0;
@@ -321,6 +321,7 @@ typedef enum {
   _ (l3_type_not_ip4, "L3 type not IP4")				\
   _ (l3_src_address_not_local, "IP4 source address not local to subnet") \
   _ (l3_dst_address_not_local, "IP4 destination address not local to subnet") \
+  _ (l3_src_address_is_local, "IP4 source address matches local interface") \
   _ (replies_received, "ARP replies received")				\
   _ (opcode_not_request, "ARP opcode not request")
 
@@ -367,7 +368,8 @@ arp_input (vlib_main_t * vm,
 	  ethernet_interface_t * eth_if0;
 	  ip_interface_address_t * ifa0;
 	  ip4_address_t * if_addr0;
-	  u32 pi0, error0, next0, sw_if_index0, is_request0;
+	  u32 pi0, error0, next0, sw_if_index0;
+	  u8 is_request0, src_is_local0, dst_is_local0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -393,30 +395,46 @@ arp_input (vlib_main_t * vm,
 
 	  /* Check that IP address is local and matches incoming interface. */
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
-	  ifa0 = ip_get_interface_address (&im4->lookup_main, &arp0->ip4_over_ethernet[1].ip4);
-	  if (! ifa0 || ifa0->sw_if_index != sw_if_index0)
+	  if_addr0 = ip4_interface_address_matching_destination (im4,
+								 &arp0->ip4_over_ethernet[1].ip4,
+								 sw_if_index0,
+								 &ifa0);
+	  if (! if_addr0)
 	    {
 	      error0 = ETHERNET_ARP_ERROR_l3_dst_address_not_local;
 	      goto drop1;
 	    }
 
+	  /* Source must also be local to subnet of matching interface address. */
 	  if (! ip4_destination_matches_interface (im4, &arp0->ip4_over_ethernet[0].ip4, ifa0))
 	    {
 	      error0 = ETHERNET_ARP_ERROR_l3_src_address_not_local;
 	      goto drop1;
 	    }
 
+	  /* Reject requests/replies with our local interface address. */
+	  src_is_local0 = if_addr0->as_u32 == arp0->ip4_over_ethernet[0].ip4.as_u32;
+	  if (src_is_local0)
+	    {
+	      error0 = ETHERNET_ARP_ERROR_l3_src_address_is_local;
+	      goto drop1;
+	    }
+
+	  dst_is_local0 = if_addr0->as_u32 == arp0->ip4_over_ethernet[1].ip4.as_u32;
+
 	  /* Fill in ethernet header. */
 	  eth0 = ethernet_buffer_get_header (p0);
 
 	  is_request0 = arp0->opcode == clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_request);
 
-	  /* Learn or update sender's mapping only for requests or unicasts. */
+	  /* Learn or update sender's mapping only for requests or unicasts
+	     that don't match local interface address. */
 	  if (ethernet_address_cast (eth0->dst_address) == ETHERNET_ADDRESS_UNICAST
 	      || is_request0)
 	    arp_set_ip4_over_ethernet (vm, am, sw_if_index0, &arp0->ip4_over_ethernet[0]);
 
-	  if (! is_request0)
+	  /* Only send a reply for requests sent which match a local interface. */
+	  if (! (is_request0 && dst_is_local0))
 	    {
 	      error0 = (arp0->opcode == clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_reply)
 			? ETHERNET_ARP_ERROR_replies_received
@@ -441,7 +459,6 @@ arp_input (vlib_main_t * vm,
 	  arp0->ip4_over_ethernet[1] = arp0->ip4_over_ethernet[0];
 
 	  memcpy (arp0->ip4_over_ethernet[0].ethernet, eth_if0->address, 6);
-	  if_addr0 = ip_interface_address_get_address (&im4->lookup_main, ifa0);
 	  clib_mem_unaligned (&arp0->ip4_over_ethernet[0].ip4.data_u32, u32) = if_addr0->data_u32;
 
 	  p0->current_data -= sizeof (eth0[0]);
@@ -575,10 +592,9 @@ show_ip4_arp (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (show_ip4_arp_command) = {
-  .name = "arp",
+  .path = "show ip arp",
   .function = show_ip4_arp,
   .short_help = "Show ARP table",
-  .parent = &vlib_cli_show_ip_command,
 };
 
 typedef struct {

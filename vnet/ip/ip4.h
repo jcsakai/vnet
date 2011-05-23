@@ -58,6 +58,7 @@ typedef void (ip4_add_del_route_function_t)
 
 typedef struct {
   ip4_add_del_route_function_t * function;
+  uword required_flags;
   uword function_opaque;
 } ip4_add_del_route_callback_t;
 
@@ -196,6 +197,28 @@ ip4_src_lookup_for_packet (ip4_main_t * im, vlib_buffer_t * p, ip4_header_t * i)
   return o->src_adj_index;
 }
 
+/* Find interface address which matches destination. */
+always_inline ip4_address_t *
+ip4_interface_address_matching_destination (ip4_main_t * im, ip4_address_t * dst, u32 sw_if_index,
+					    ip_interface_address_t ** result_ia)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip_interface_address_t * ia;
+  ip4_address_t * result = 0;
+
+  foreach_ip_interface_address (lm, ia, sw_if_index, ({
+    ip4_address_t * a = ip_interface_address_get_address (lm, ia);
+    if (ip4_destination_matches_route (im, dst, a, ia->address_length))
+      {
+	result = a;
+	break;
+      }
+  }));
+  if (result_ia)
+    *result_ia = result ? ia : 0;
+  return result;
+}
+
 clib_error_t *
 ip4_add_del_interface_address (vlib_main_t * vm, u32 sw_if_index,
 			       ip4_address_t * address, u32 address_length,
@@ -209,8 +232,12 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 #define IP4_ROUTE_FLAG_DEL (1 << 0)
 #define IP4_ROUTE_FLAG_TABLE_ID  (0 << 1)
 #define IP4_ROUTE_FLAG_FIB_INDEX (1 << 1)
-#define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 2)
-#define IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 3)
+#define IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 2)
+#define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
+/* Not last add/del in group.  Facilities batching requests into packets. */
+#define IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP (1 << 4)
+/* Dynamic route created via ARP reply. */
+#define IP4_ROUTE_FLAG_NEIGHBOR (1 << 5)
 
 typedef struct {
   /* IP4_ROUTE_FLAG_* */
@@ -274,6 +301,19 @@ void ip4_adjacency_set_interface_route (vlib_main_t * vm,
 					ip_adjacency_t * adj,
 					u32 sw_if_index,
 					u32 if_address_index);
+
+/* Send an ARP request to see if given destination is reachable on given interface. */
+clib_error_t *
+ip4_probe_neighbor (vlib_main_t * vm, ip4_address_t * dst, u32 sw_if_index);
+
+uword
+ip4_tcp_register_listener (vlib_main_t * vm,
+			   u16 dst_port,
+			   u32 next_node_index);
+uword
+ip4_udp_register_listener (vlib_main_t * vm,
+			   u16 dst_port,
+			   u32 next_node_index);
 
 u16 ip4_tcp_udp_compute_checksum (vlib_main_t * vm, vlib_buffer_t * p0, ip4_header_t * ip0);
 

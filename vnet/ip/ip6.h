@@ -78,6 +78,7 @@ typedef void (ip6_add_del_route_function_t)
 
 typedef struct {
   ip6_add_del_route_function_t * function;
+  uword required_flags;
   uword function_opaque;
 } ip6_add_del_route_callback_t;
 
@@ -221,6 +222,25 @@ ip6_src_lookup_for_packet (ip6_main_t * im, vlib_buffer_t * p, ip6_header_t * i)
   return o->src_adj_index;
 }
 
+/* Find interface address which matches destination. */
+always_inline ip6_address_t *
+ip6_interface_address_matching_destination (ip6_main_t * im, ip6_address_t * dst, u32 sw_if_index)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip_interface_address_t * ia;
+  ip6_address_t * result = 0;
+
+  foreach_ip_interface_address (lm, ia, sw_if_index, ({
+    ip6_address_t * a = ip_interface_address_get_address (lm, ia);
+    if (ip6_destination_matches_route (im, dst, a, ia->address_length))
+      {
+	result = a;
+	break;
+      }
+  }));
+  return result;
+}
+
 clib_error_t *
 ip6_add_del_interface_address (vlib_main_t * vm, u32 sw_if_index,
 			       ip6_address_t * address, u32 address_length,
@@ -234,8 +254,11 @@ int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2);
 #define IP6_ROUTE_FLAG_DEL (1 << 0)
 #define IP6_ROUTE_FLAG_TABLE_ID  (0 << 1)
 #define IP6_ROUTE_FLAG_FIB_INDEX (1 << 1)
-#define IP6_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 2)
-#define IP6_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 3)
+#define IP6_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 2)
+#define IP6_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
+#define IP6_ROUTE_FLAG_NOT_LAST_IN_GROUP (1 << 4)
+/* Dynamic route created via neighbor discovery. */
+#define IP6_ROUTE_FLAG_NEIGHBOR (1 << 5)
 
 typedef struct {
   /* IP6_ROUTE_FLAG_* */
@@ -299,6 +322,9 @@ void ip6_adjacency_set_interface_route (vlib_main_t * vm,
 					ip_adjacency_t * adj,
 					u32 sw_if_index,
 					u32 if_address_index);
+
+clib_error_t *
+ip6_probe_neighbor (vlib_main_t * vm, ip6_address_t * dst, u32 sw_if_index);
 
 uword
 ip6_tcp_register_listener (vlib_main_t * vm,

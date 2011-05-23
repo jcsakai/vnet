@@ -45,6 +45,34 @@ typedef struct {
   ip4_address_t src, dst;
 } ip4_address_pair_t;
 
+/* If address is a valid netmask, return length of mask. */
+always_inline uword
+ip4_address_netmask_length (ip4_address_t * a)
+{
+  uword result = 0;
+  uword i;
+  for (i = 0; i < ARRAY_LEN (a->as_u8); i++)
+    {
+      switch (a->as_u8[i])
+	{
+	case 0xff: result += 8; break;
+	case 0xfe: result += 7; goto done;
+	case 0xfc: result += 6; goto done;
+	case 0xf8: result += 5; goto done;
+	case 0xf0: result += 4; goto done;
+	case 0xe0: result += 3; goto done;
+	case 0xc0: result += 2; goto done;
+	case 0x80: result += 1; goto done;
+	case 0x00: result += 0; goto done;
+	default:
+	  /* Not a valid netmask mask. */
+	  return ~0;
+	}
+    }
+ done:
+  return result;
+}
+
 typedef union {
   struct {
     /* 4 bit packet length (in 32bit units) and version VVVVLLLL.

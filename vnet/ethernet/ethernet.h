@@ -180,6 +180,8 @@ ethernet_register_interface (vlib_main_t * vm,
 
 void ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index);
 
+int ethernet_interface_get_address (vlib_main_t * vm, u32 hw_if_index, u8 * address);
+
 /* Register given node index to take input for given ethernet type. */
 void
 ethernet_register_input_type (vlib_main_t * vm,

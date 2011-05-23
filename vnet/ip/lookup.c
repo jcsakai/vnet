@@ -352,7 +352,10 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
     {
       /* If next hop is already there with the same weight, we have nothing to do. */
       if (i_nh < n_nhs && nhs[i_nh].weight == next_hop_weight)
-	goto done;
+	{
+	  new_mp_adj_index[0] = ~0;
+	  goto done;
+	}
 
       /* Copy old next hops to lookup key vector. */
       if (n_nhs > 0)
@@ -569,6 +572,7 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
 
       mhash_unset (&lm->address_to_if_address_index, address, /* old_value */ 0);
       pool_put (lm->if_address_pool, a);
+      lm->if_address_pool_index_by_sw_if_index[sw_if_index] = ~0;
       if (result_if_address_index)
 	*result_if_address_index = ~0;
     }
@@ -1014,9 +1018,11 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
   u32 dst_address_length, * dst_address_lengths = 0;
   ip_adjacency_t parse_adj, * add_adj = 0;
   unformat_input_t _line_input, * line_input = &_line_input;
+  f64 count;
 
   is_del = 0;
   table_id = 0;
+  count = 1;
 
   /* Get a line of input. */
   if (! unformat_user (main_input, unformat_line_input, line_input))
@@ -1030,6 +1036,8 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	is_del = 1;
       else if (unformat (line_input, "add"))
 	is_del = 0;
+      else if (unformat (line_input, "count %f", &count))
+	;
 
       else if (unformat (line_input, "%U/%d",
 			 unformat_ip4_address, &ip4_addr,
@@ -1158,17 +1166,28 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	      }
 	    else
 	      {
-		u32 i;
-		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		u32 i, j, n, f;
+		ip4_address_t dst = a.dst_address;
+		f64 t[2];
+		n = count;
+		t[0] = vlib_time_now (vm);
+		for (i = 0; i < n; i++)
 		  {
-		    ip4_add_del_route_next_hop (im4,
-						IP4_ROUTE_FLAG_DEL,
-						&a.dst_address,
-						a.dst_address_length,
-						&ip4_via_next_hops[i],
-						sw_if_indices[i],
-						weights[i]);
+		    f = i + 1 < n ? IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP : 0;
+		    a.dst_address = dst;
+		    for (j = 0; j < vec_len (ip4_via_next_hops); j++)
+		      ip4_add_del_route_next_hop (im4,
+						  IP4_ROUTE_FLAG_DEL | f,
+						  &a.dst_address,
+						  a.dst_address_length,
+						  &ip4_via_next_hops[j],
+						  sw_if_indices[j],
+						  weights[j]);
+		    dst.as_u32 = clib_host_to_net_u32 (1 + clib_net_to_host_u32 (dst.as_u32));
 		  }
+		t[1] = vlib_time_now (vm);
+		if (count > 1)
+		  vlib_cli_output (vm, "%.6e routes/sec", count / (t[1] - t[0]));
 	      }
 	  }
 	else
@@ -1183,17 +1202,28 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	      }
 	    else if (vec_len (ip4_via_next_hops) > 0)
 	      {
-		u32 i;
-		for (i = 0; i < vec_len (ip4_via_next_hops); i++)
+		u32 i, j, n, f;
+		ip4_address_t dst = a.dst_address;
+		f64 t[2];
+		n = count;
+		t[0] = vlib_time_now (vm);
+		for (i = 0; i < n; i++)
 		  {
-		    ip4_add_del_route_next_hop (im4,
-						IP4_ROUTE_FLAG_ADD,
-						&a.dst_address,
-						a.dst_address_length,
-						&ip4_via_next_hops[i],
-						sw_if_indices[i],
-						weights[i]);
+		    f = i + 1 < n ? IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP : 0;
+		    a.dst_address = dst;
+		    for (j = 0; j < vec_len (ip4_via_next_hops); j++)
+		      ip4_add_del_route_next_hop (im4,
+						  IP4_ROUTE_FLAG_ADD | f,
+						  &a.dst_address,
+						  a.dst_address_length,
+						  &ip4_via_next_hops[j],
+						  sw_if_indices[j],
+						  weights[j]);
+		    dst.as_u32 = clib_host_to_net_u32 (1 + clib_net_to_host_u32 (dst.as_u32));
 		  }
+		t[1] = vlib_time_now (vm);
+		if (count > 1)
+		  vlib_cli_output (vm, "%.6e routes/sec", count / (t[1] - t[0]));
 	      }
 	  }
       }
@@ -1271,34 +1301,69 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
   return error;
 }
 
-VLIB_CLI_COMMAND (vlib_cli_ip_command) = {
-  .name = "ip",
+static VLIB_CLI_COMMAND (vlib_cli_ip_command) = {
+  .path = "ip",
   .short_help = "Internet protocol (IP) commands",
 };
 
-VLIB_CLI_COMMAND (vlib_cli_show_ip_command) = {
-  .name = "ip",
+static VLIB_CLI_COMMAND (vlib_cli_show_ip_command) = {
+  .path = "show ip",
   .short_help = "Internet protocol (IP) show commands",
-  .parent = &vlib_cli_show_command,
 };
 
-VLIB_CLI_COMMAND (vlib_cli_show_ip4_command) = {
-  .name = "ip4",
+static VLIB_CLI_COMMAND (vlib_cli_show_ip4_command) = {
+  .path = "show ip4",
   .short_help = "Internet protocol version 4 (IP4) show commands",
-  .parent = &vlib_cli_show_command,
 };
 
-VLIB_CLI_COMMAND (vlib_cli_show_ip6_command) = {
-  .name = "ip6",
+static VLIB_CLI_COMMAND (vlib_cli_show_ip6_command) = {
+  .path = "show ip6",
   .short_help = "Internet protocol version 6 (IP6) show commands",
-  .parent = &vlib_cli_show_command,
 };
 
 static VLIB_CLI_COMMAND (ip_route_command) = {
-  .name = "route",
+  .path = "ip route",
   .short_help = "Add/delete IP routes",
   .function = ip_route,
-  .parent = &vlib_cli_ip_command,
+};
+
+static clib_error_t *
+probe_neighbor_address (vlib_main_t * vm,
+			unformat_input_t * input,
+			vlib_cli_command_t * cmd)
+{
+  ip4_address_t a4;
+  ip6_address_t a6;
+  clib_error_t * error = 0;
+  u32 sw_if_index;
+
+  sw_if_index = ~0;
+  if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
+    {
+      error = clib_error_return (0, "unknown interface `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+
+  if (unformat (input, "%U", unformat_ip4_address, &a4))
+    error = ip4_probe_neighbor (vm, &a4, sw_if_index);
+  else if (unformat (input, "%U", unformat_ip6_address, &a6))
+    error = ip6_probe_neighbor (vm, &a6, sw_if_index);
+  else
+    {
+      error = clib_error_return (0, "expected IP4/IP6 address/length `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+
+ done:
+  return error;
+}
+
+static VLIB_CLI_COMMAND (ip_probe_neighbor_command) = {
+  .path = "ip probe-neighbor",
+  .function = probe_neighbor_address,
+  .short_help = "Probe IP4/IP6 address for interface",
 };
 
 typedef struct {
@@ -1457,10 +1522,9 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 }
 
 static VLIB_CLI_COMMAND (ip4_show_fib_command) = {
-  .name = "fib",
+  .path = "show ip fib",
   .short_help = "Show IP4 routing table",
   .function = ip4_show_fib,
-  .parent = &vlib_cli_show_ip_command,
 };
 
 typedef struct {
@@ -1619,8 +1683,7 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 }
 
 static VLIB_CLI_COMMAND (ip6_show_fib_command) = {
-  .name = "fib",
+  .path = "show ip6 fib",
   .short_help = "Show IP6 routing table",
   .function = ip6_show_fib,
-  .parent = &vlib_cli_show_ip6_command,
 };

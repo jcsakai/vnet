@@ -168,8 +168,4 @@ ip_incremental_checksum_buffer (vlib_main_t * vm, vlib_buffer_t * first_buffer,
   return sum;
 }
 
-extern vlib_cli_command_t set_interface_ip_command;
-extern vlib_cli_command_t vlib_cli_ip4_command, vlib_cli_show_ip4_command;
-extern vlib_cli_command_t vlib_cli_ip6_command, vlib_cli_show_ip6_command;
-
 #endif /* included_ip_main_h */
