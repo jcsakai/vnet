@@ -92,6 +92,7 @@ ip4_tcp_udp_address_x4_is_valid (ip4_tcp_udp_address_x4_t * a, u32 i)
 	   && a->ports.as_ports[i].as_u32 == 0);
 }
 
+#ifdef TCP_HAVE_VEC128
 static_always_inline uword
 ip4_tcp_udp_address_x4_match_helper (ip4_tcp_udp_address_x4_t * ax4,
 				     u32x4 src, u32x4 dst, u32x4 ports)
@@ -134,6 +135,54 @@ ip4_tcp_udp_address_x4_empty_mask (ip4_tcp_udp_address_x4_t * ax4)
   u32x4 zero = {0};
   return my_zero_mask (ip4_tcp_udp_address_x4_match_helper (ax4, zero, zero, zero));
 }
+#else /* TCP_HAVE_VEC128 */
+static_always_inline uword
+ip4_tcp_udp_address_x4_match_helper (ip4_tcp_udp_address_x4_t * ax4,
+				     u32 src, u32 dst, u32 ports)
+{
+  u32 r0, r1, r2, r3;
+
+#define _(i)						\
+  r##i = (src == ax4->src.as_ip4_address[i].as_u32	\
+	  && dst == ax4->dst.as_ip4_address[i].as_u32	\
+	  && ports == ax4->ports.as_ports[i].as_u32)
+
+  _ (0);
+  _ (1);
+  _ (2);
+  _ (3);
+
+#undef _
+
+  return (((r0 ? 0xf : 0x0) << 0)
+	  | ((r1 ? 0xf : 0x0) << 4)
+	  | ((r2 ? 0xf : 0x0) << 8)
+	  | ((r3 ? 0xf : 0x0) << 12));
+}
+
+static_always_inline uword
+ip4_tcp_udp_address_x4_match (ip4_tcp_udp_address_x4_t * ax4,
+			      ip4_header_t * ip,
+			      tcp_header_t * tcp)
+{
+  return my_first_set (ip4_tcp_udp_address_x4_match_helper (ax4,
+							    ip->src_address.as_u32,
+							    ip->dst_address.as_u32,
+							    tcp->ports.src_and_dst));
+}
+
+static_always_inline uword
+ip4_tcp_udp_address_x4_first_empty (ip4_tcp_udp_address_x4_t * ax4)
+{
+  return my_first_set (ip4_tcp_udp_address_x4_match_helper (ax4, 0, 0, 0));
+}
+
+static_always_inline uword
+ip4_tcp_udp_address_x4_empty_mask (ip4_tcp_udp_address_x4_t * ax4)
+{
+  return my_zero_mask (ip4_tcp_udp_address_x4_match_helper (ax4, 0, 0, 0));
+}
+#endif
 
 static u8 * format_ip4_tcp_udp_address_x4 (u8 * s, va_list * va)
 {
@@ -213,6 +262,7 @@ ip6_tcp_udp_address_x4_is_valid (ip6_tcp_udp_address_x4_t * a, u32 i)
 	   && a->ports.as_ports[i].as_u32 == 0);
 }
 
+#ifdef TCP_HAVE_VEC128
 static_always_inline uword
 ip6_tcp_udp_address_x4_match_helper (ip6_tcp_udp_address_x4_t * ax4,
 				     u32x4 src0, u32x4 src1, u32x4 src2, u32x4 src3,
@@ -278,6 +328,77 @@ ip6_tcp_udp_address_x4_empty_mask (ip6_tcp_udp_address_x4_t * ax4)
 							    zero, zero, zero, zero,
 							    zero));
 }
+#else /* TCP_HAVE_VEC128 */
+static_always_inline uword
+ip6_tcp_udp_address_x4_match_helper (ip6_tcp_udp_address_x4_t * ax4,
+				     u32 src0, u32 src1, u32 src2, u32 src3,
+				     u32 dst0, u32 dst1, u32 dst2, u32 dst3,
+				     u32 ports)
+{
+  u32 r0, r1, r2, r3;
+
+#define _(i)							\
+  r##i = (src0 == ax4->src.as_u32[i][0]		\
+	  && src1 == ax4->src.as_u32[i][1]	\
+	  && src2 == ax4->src.as_u32[i][2]	\
+	  && src3 == ax4->src.as_u32[i][3]	\
+	  && dst0 == ax4->dst.as_u32[i][0]	\
+	  && dst1 == ax4->dst.as_u32[i][1]	\
+	  && dst2 == ax4->dst.as_u32[i][2]	\
+	  && dst3 == ax4->dst.as_u32[i][3]	\
+	  && ports == ax4->ports.as_ports[i].as_u32)
+
+  _ (0);
+  _ (1);
+  _ (2);
+  _ (3);
+
+#undef _
+
+  return (((r0 ? 0xf : 0x0) << 0)
+	  | ((r1 ? 0xf : 0x0) << 4)
+	  | ((r2 ? 0xf : 0x0) << 8)
+	  | ((r3 ? 0xf : 0x0) << 12));
+}
+
+static_always_inline uword
+ip6_tcp_udp_address_x4_match (ip6_tcp_udp_address_x4_t * ax4,
+			      ip6_header_t * ip,
+			      tcp_header_t * tcp)
+{
+  u32 src0 = ip->src_address.as_u32[0];
+  u32 src1 = ip->src_address.as_u32[1];
+  u32 src2 = ip->src_address.as_u32[2];
+  u32 src3 = ip->src_address.as_u32[3];
+  u32 dst0 = ip->dst_address.as_u32[0];
+  u32 dst1 = ip->dst_address.as_u32[1];
+  u32 dst2 = ip->dst_address.as_u32[2];
+  u32 dst3 = ip->dst_address.as_u32[3];
+  u32 ports = tcp->ports.src_and_dst;
+  return my_first_set (ip6_tcp_udp_address_x4_match_helper (ax4,
+							    src0, src1, src2, src3,
+							    dst0, dst1, dst2, dst3,
+							    ports));
+}
+
+static_always_inline uword
+ip6_tcp_udp_address_x4_first_empty (ip6_tcp_udp_address_x4_t * ax4)
+{
+  return my_first_set (ip6_tcp_udp_address_x4_match_helper (ax4,
+							    0, 0, 0, 0,
+							    0, 0, 0, 0,
+							    0));
+}
+
+static_always_inline uword
+ip6_tcp_udp_address_x4_empty_mask (ip6_tcp_udp_address_x4_t * ax4)
+{
+  return my_zero_mask (ip6_tcp_udp_address_x4_match_helper (ax4,
+							    0, 0, 0, 0,
+							    0, 0, 0, 0,
+							    0));
+}
+#endif /* ! TCP_HAVE_VEC128 */
 
 static u8 * format_ip6_tcp_udp_address_x4 (u8 * s, va_list * va)
 {
@@ -497,6 +618,7 @@ typedef enum {
   TCP_N_ERROR,
 } tcp_error_t;
 
+#ifdef TCP_HAVE_VEC128
 static_always_inline u32x4 u32x4_splat_x2 (u32 x)
 {
   u32x4 r = u32x4_set0 (x);
@@ -513,6 +635,8 @@ static_always_inline u32x4 u32x4_set_x2 (u32 x, u32 y)
 /* FIXME */
 #define u32x4_get(x,i)					\
   __builtin_ia32_vec_ext_v4si ((i32x4) (x), (int) (i))
+#else /* TCP_HAVE_VEC128 */
+#endif /* TCP_HAVE_VEC128 */
 
 /* Dispatching on tcp/udp listeners (by dst port)
    and tcp/udp connections (by src/dst address/port). */
@@ -564,6 +688,7 @@ ip46_tcp_lookup (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, bi0);
 	  pi0 = vlib_get_buffer_opaque (p0);
 
+#ifdef TCP_HAVE_VEC128
 	  {
 	    u32x4 a0, b0, c0;
 
@@ -609,6 +734,72 @@ ip46_tcp_lookup (vlib_main_t * vm,
 	    imin0 = u32x4_get0 (c0);
 	    iest0 = u32x4_get (c0, 1);
 	  }
+#else
+	  {
+	    u32 a00, a01, b00, b01, c00, c01;
+
+	    a00 = tm->connection_hash_seeds[is_ip6][0].as_u32[0];
+	    a01 = tm->connection_hash_seeds[is_ip6][0].as_u32[1];
+	    b00 = tm->connection_hash_seeds[is_ip6][1].as_u32[0];
+	    b01 = tm->connection_hash_seeds[is_ip6][1].as_u32[1];
+	    c00 = tm->connection_hash_seeds[is_ip6][2].as_u32[0];
+	    c01 = tm->connection_hash_seeds[is_ip6][2].as_u32[1];
+
+	    if (is_ip6)
+	      {
+		ip60 = vlib_buffer_get_current (p0);
+		tcp0 = ip6_next_header (ip60);
+
+		a00 ^= ip60->src_address.as_u32[0];
+		a01 ^= ip60->src_address.as_u32[0];
+		b00 ^= ip60->src_address.as_u32[1];
+		b01 ^= ip60->src_address.as_u32[1];
+		c00 ^= ip60->src_address.as_u32[2];
+		c01 ^= ip60->src_address.as_u32[2];
+
+		hash_v3_mix32 (a00, b00, c00);
+		hash_v3_mix32 (a01, b01, c01);
+
+		a00 ^= ip60->src_address.as_u32[3];
+		a01 ^= ip60->src_address.as_u32[3];
+		b00 ^= ip60->dst_address.as_u32[0];
+		b01 ^= ip60->dst_address.as_u32[0];
+		c00 ^= ip60->dst_address.as_u32[1];
+		c01 ^= ip60->dst_address.as_u32[1];
+
+		hash_v3_mix32 (a00, b00, c00);
+		hash_v3_mix32 (a01, b01, c01);
+
+		a00 ^= ip60->dst_address.as_u32[2];
+		a01 ^= ip60->dst_address.as_u32[2];
+		b00 ^= ip60->dst_address.as_u32[3];
+		b01 ^= ip60->dst_address.as_u32[3];
+		c00 ^= tcp0->ports.src_and_dst;
+		c01 ^= tcp0->ports.src_and_dst;
+	      }
+	    else
+	      {
+		ip40 = vlib_buffer_get_current (p0);
+		tcp0 = ip4_next_header (ip40);
+
+		a00 ^= ip40->src_address.as_u32;
+		a01 ^= ip40->src_address.as_u32;
+		b00 ^= ip40->dst_address.as_u32;
+		b01 ^= ip40->dst_address.as_u32;
+		c00 ^= tcp0->ports.src_and_dst;
+		c01 ^= tcp0->ports.src_and_dst;
+	      }
+
+	    hash_v3_finalize32 (a00, b00, c00);
+	    hash_v3_finalize32 (a01, b01, c01);
+
+	    c00 &= tm->connection_hash_masks[is_ip6].as_u32[0];
+	    c01 &= tm->connection_hash_masks[is_ip6].as_u32[1];
+
+	    imin0 = c00;
+	    iest0 = c01;
+	  }
+#endif
 
 	  if (is_ip6)
 	    {
@@ -775,9 +966,8 @@ ip46_tcp_lookup_init (vlib_main_t * vm, tcp_main_t * tm, int is_ip6)
 			    m->established_connection_hash_mask / 4,
 			    CLIB_CACHE_LINE_BYTES);
     }
-  tm->connection_hash_masks[is_ip6].as_u32x4 =
-    u32x4_set_x2 (m->mini_connection_hash_mask / 4,
-		  m->established_connection_hash_mask / 4);
+  tm->connection_hash_masks[is_ip6].as_u32[0] = m->mini_connection_hash_mask / 4;
+  tm->connection_hash_masks[is_ip6].as_u32[1] = m->established_connection_hash_mask / 4;
 }
 
 static void
@@ -789,9 +979,12 @@ tcp_lookup_init (vlib_main_t * vm, tcp_main_t * tm)
   for (is_ip6 = 0; is_ip6 < 2; is_ip6++)
     {
       u32 * r = clib_random_buffer_get_data (&vm->random_buffer, 3 * 2 * sizeof (r[0]));
-      tm->connection_hash_seeds[is_ip6][0].as_u32x4 = u32x4_set_x2 (r[0], r[1]);
-      tm->connection_hash_seeds[is_ip6][1].as_u32x4 = u32x4_set_x2 (r[2], r[3]);
-      tm->connection_hash_seeds[is_ip6][2].as_u32x4 = u32x4_set_x2 (r[4], r[5]);
+      tm->connection_hash_seeds[is_ip6][0].as_u32[0] = r[0];
+      tm->connection_hash_seeds[is_ip6][0].as_u32[1] = r[1];
+      tm->connection_hash_seeds[is_ip6][1].as_u32[0] = r[2];
+      tm->connection_hash_seeds[is_ip6][1].as_u32[1] = r[3];
+      tm->connection_hash_seeds[is_ip6][2].as_u32[0] = r[4];
+      tm->connection_hash_seeds[is_ip6][2].as_u32[1] = r[5];
 
       ip46_tcp_lookup_init (vm, tm, is_ip6);
     }

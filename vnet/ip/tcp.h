@@ -26,6 +26,13 @@
 #ifndef included_tcp_protocol_h
 #define included_tcp_protocol_h
 
+#include <clib/vector.h>
+
+/* No support for e.g. Altivec. */
+#if defined (__SSE2__)
+#define TCP_HAVE_VEC128
+#endif
+
 typedef union {
   struct {
     u16 src, dst;
@@ -34,13 +41,17 @@ typedef union {
 } tcp_udp_ports_t;
 
 typedef union {
+#ifdef TCP_HAVE_VEC128
   u32x4 as_u32x4;
+#endif
   tcp_udp_ports_t as_ports[4];
 } tcp_udp_ports_x4_t;
 
 typedef struct {
   union {
+#ifdef TCP_HAVE_VEC128
     u32x4 as_u32x4;
+#endif
     ip4_address_t as_ip4_address[4];
   } src, dst;
   tcp_udp_ports_x4_t ports;
@@ -48,7 +59,9 @@ typedef struct {
 
 typedef struct {
   union {
+#ifdef TCP_HAVE_VEC128
     u32x4 as_u32x4[4];
+#endif
     u32   as_u32[4][4];
   } src, dst;
   tcp_udp_ports_x4_t ports;
