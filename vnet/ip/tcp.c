@@ -2606,10 +2606,9 @@ static u8 * format_ip6_tcp_established_connection (u8 * s, va_list * va)
   return s;
 }
 
-VLIB_CLI_COMMAND (vlib_cli_show_tcp_command) = {
-  .name = "tcp",
+static VLIB_CLI_COMMAND (vlib_cli_show_tcp_command) = {
+  .path = "show tcp",
   .short_help = "Transmission control protocol (TCP) show commands",
-  .parent = &vlib_cli_show_command,
 };
 
 static clib_error_t *
@@ -2664,9 +2663,8 @@ show_mini_connections (vlib_main_t * vm, unformat_input_t * input, vlib_cli_comm
 }
 
 VLIB_CLI_COMMAND (vlib_cli_show_tcp_mini_connections_command) = {
-  .name = "mini-connections",
+  .path = "show tcp mini-connections",
   .short_help = "Show not-yet established TCP connections",
-  .parent = &vlib_cli_show_tcp_command,
   .function = show_mini_connections,
 };
 
@@ -2721,10 +2719,9 @@ show_established_connections (vlib_main_t * vm, unformat_input_t * input, vlib_c
   return error;
 }
 
-VLIB_CLI_COMMAND (vlib_cli_show_tcp_established_connections_command) = {
-  .name = "connections",
+static VLIB_CLI_COMMAND (vlib_cli_show_tcp_established_connections_command) = {
+  .path = "show tcp connections",
   .short_help = "Show established TCP connections",
-  .parent = &vlib_cli_show_tcp_command,
   .function = show_established_connections,
 };
 

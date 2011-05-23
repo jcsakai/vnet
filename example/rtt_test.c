@@ -687,10 +687,9 @@ rtt_test_command (vlib_main_t * vm,
   return 0;
 }
 
-VLIB_CLI_COMMAND (rtt_test_cli_command) = {
-  .name = "rtt",
+static VLIB_CLI_COMMAND (rtt_test_cli_command) = {
+  .path = "test rtt",
   .short_help = "Measure RTT test protocol",
-  .parent = &vlib_cli_test_command,
   .function = rtt_test_command,
 };
 
@@ -745,10 +744,9 @@ rtt_show_command (vlib_main_t * vm,
   return 0;
 }
 
-VLIB_CLI_COMMAND (rtt_show_cli_command) = {
-  .name = "rtt",
+static VLIB_CLI_COMMAND (rtt_show_cli_command) = {
+  .path = "show rtt",
   .short_help = "Show RTT measurements",
-  .parent = &vlib_cli_show_command,
   .function = rtt_show_command,
 };
 

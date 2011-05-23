@@ -2556,10 +2556,9 @@ add_del_interface_table (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (set_interface_ip_table_command) = {
-  .name = "table",
+  .path = "set interface ip table",
   .function = add_del_interface_table,
   .short_help = "Add/delete FIB table id for interface",
-  .parent = &set_interface_ip_command,
 };
 
 static uword
