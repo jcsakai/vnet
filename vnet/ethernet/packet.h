@@ -47,11 +47,11 @@ typedef struct {
 /* I/G bit: individual (unicast)/group (broadcast/multicast). */
 always_inline uword
 ethernet_address_cast (u8 * a)
-{ return a[0] & (1 << 0); }
+{ return (a[0] >> 0) & 1; }
 
 always_inline uword
 ethernet_address_is_locally_administered (u8 * a)
-{ return (a[0] & (1 << 1)) != 0; }
+{ return (a[0] >> 1) & 1; }
 
 always_inline void
 ethernet_address_set_locally_administered (u8 * a)
