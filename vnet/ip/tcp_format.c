@@ -41,7 +41,6 @@ u8 * format_tcp_header (u8 * s, va_list * args)
 {
   tcp_header_t * tcp = va_arg (*args, tcp_header_t *);
   u32 max_header_bytes = va_arg (*args, u32);
-  u16 data_offset_and_flags;
   u32 header_bytes;
   uword indent;
 
@@ -56,15 +55,15 @@ u8 * format_tcp_header (u8 * s, va_list * args)
 	      clib_net_to_host_u16 (tcp->ports.src),
 	      clib_net_to_host_u16 (tcp->ports.dst));
 
-  data_offset_and_flags = clib_net_to_host_u16 (tcp->data_offset_and_flags);
   s = format (s, "\n%Useq. tx 0x%08x rx 0x%08x",
 	      format_white_space, indent,
 	      clib_net_to_host_u32 (tcp->seq_number),
 	      clib_net_to_host_u32 (tcp->ack_number));
 
-  s = format (s, "\n%Uflags %U",
+  s = format (s, "\n%Uflags %U, tcp header: %d bytes",
 	      format_white_space, indent,
-	      format_tcp_flags, data_offset_and_flags);
+	      format_tcp_flags, tcp->flags,
+	      (tcp->tcp_header_u32s_and_reserved >> 4) * sizeof (u32));
 
   s = format (s, "\n%Uwindow %d, checksum 0x%04x",
 	      format_white_space, indent,

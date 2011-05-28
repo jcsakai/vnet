@@ -28,9 +28,15 @@
 
 u8 * format_ethernet_address (u8 * s, va_list * args)
 {
+  ethernet_main_t * em = &ethernet_main;
   u8 * a = va_arg (*args, u8 *);
-  return format (s, "%02x:%02x:%02x:%02x:%02x:%02x",
-		 a[0], a[1], a[2], a[3], a[4], a[5]);
+
+  if (em->format_ethernet_address_16bit)
+    return format (s, "%02x%02x.%02x%02x.%02x%02x",
+		   a[0], a[1], a[2], a[3], a[4], a[5]);
+  else
+    return format (s, "%02x:%02x:%02x:%02x:%02x:%02x",
+		   a[0], a[1], a[2], a[3], a[4], a[5]);
 }
 
 u8 * format_ethernet_type (u8 * s, va_list * args)
@@ -91,11 +97,14 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
 	s = format (s, " cfi");
     }
 
-  if (max_header_bytes != 0 && header_bytes > max_header_bytes)
+  if (max_header_bytes != 0 && header_bytes < max_header_bytes)
     {
-      ethernet_type_info_t * ti = ethernet_get_type_info (em, type);
-      vlib_node_t * node = vlib_get_node (em->vlib_main, ti->node_index);
-      if (node->format_buffer)
+      ethernet_type_info_t * ti;
+      vlib_node_t * node;
+
+      ti = ethernet_get_type_info (em, type);
+      node = ti ? vlib_get_node (em->vlib_main, ti->node_index) : 0;
+      if (node && node->format_buffer)
 	s = format (s, "\n%U%U",
 		    format_white_space, indent,
 		    node->format_buffer, (void *) m + header_bytes,

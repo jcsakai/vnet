@@ -27,6 +27,7 @@
 #define included_ip4_packet_h
 
 #include <vnet/ip/ip_packet.h>	/* for ip_csum_t */
+#include <vnet/ip/tcp_packet.h>	/* for tcp_header_t */
 #include <clib/byte_order.h>	/* for clib_net_to_host_u16 */
 
 /* IP4 address which can be accessed either as 4 bytes
@@ -34,7 +35,43 @@
 typedef union {
   u8 data[4];
   u32 data_u32;
+  /* Aliases. */
+  u8 as_u8[4];
+  u32 as_u32;
 } ip4_address_t;
+
+/* (src,dst) pair of addresses as found in packet header. */
+typedef struct {
+  ip4_address_t src, dst;
+} ip4_address_pair_t;
+
+/* If address is a valid netmask, return length of mask. */
+always_inline uword
+ip4_address_netmask_length (ip4_address_t * a)
+{
+  uword result = 0;
+  uword i;
+  for (i = 0; i < ARRAY_LEN (a->as_u8); i++)
+    {
+      switch (a->as_u8[i])
+	{
+	case 0xff: result += 8; break;
+	case 0xfe: result += 7; goto done;
+	case 0xfc: result += 6; goto done;
+	case 0xf8: result += 5; goto done;
+	case 0xf0: result += 4; goto done;
+	case 0xe0: result += 3; goto done;
+	case 0xc0: result += 2; goto done;
+	case 0x80: result += 1; goto done;
+	case 0x00: result += 0; goto done;
+	default:
+	  /* Not a valid netmask mask. */
+	  return ~0;
+	}
+    }
+ done:
+  return result;
+}
 
 typedef union {
   struct {
@@ -68,7 +105,12 @@ typedef union {
     u16 checksum;
 
     /* Source and destination address. */
-    ip4_address_t src_address, dst_address;
+    union {
+      struct {
+	ip4_address_t src_address, dst_address;
+      };
+      ip4_address_pair_t address_pair;
+    };      
   };
 
   /* For checksumming we'll want to access IP header in word sized chunks. */
@@ -117,6 +159,11 @@ ip4_header_checksum (ip4_header_t * i)
   csum = ~ip_csum_fold (sum);
 
   i->checksum = save;
+
+  /* Make checksum agree for special case where either
+     0 or 0xffff would give same 1s complement sum. */
+  if (csum == 0 && save == 0xffff)
+    csum = save;
 
   return csum;
 }
@@ -169,11 +216,56 @@ do {									\
     }									\
 } while (0)
 
-/* VLIB buffer flags for ip4 packets.  Set by input interfaces for ip4
-   tcp/udp packets with hardware computed checksums. */
-#define LOG2_IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED LOG2_VLIB_BUFFER_FLAG_USER1
-#define LOG2_IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT  LOG2_VLIB__BUFFER_FLAG_USER2
-#define IP4_BUFFER_TCP_UDP_CHECKSUM_COMPUTED VLIB_BUFFER_FLAG_USER1
-#define IP4_BUFFER_TCP_UDP_CHECKSUM_CORRECT  VLIB_BUFFER_FLAG_USER2
+always_inline uword
+ip4_address_is_multicast (ip4_address_t * a)
+{ return (a->data[0] & 0xf0) == 0xe0; }
+
+always_inline void
+ip4_multicast_address_set_for_group (ip4_address_t * a, ip_multicast_group_t g)
+{
+  ASSERT (g < (1 << 28));
+  a->as_u32 = clib_host_to_net_u32 ((0xe << 28) + g);
+}
+
+always_inline void
+ip4_tcp_reply_x1 (ip4_header_t * ip0, tcp_header_t * tcp0)
+{
+  u32 src0, dst0;
+
+  src0 = ip0->src_address.data_u32;
+  dst0 = ip0->dst_address.data_u32;
+  ip0->src_address.data_u32 = dst0;
+  ip0->dst_address.data_u32 = src0;
+
+  src0 = tcp0->ports.src;
+  dst0 = tcp0->ports.dst;
+  tcp0->ports.src = dst0;
+  tcp0->ports.dst = src0;
+}
+
+always_inline void
+ip4_tcp_reply_x2 (ip4_header_t * ip0, ip4_header_t * ip1,
+		  tcp_header_t * tcp0, tcp_header_t * tcp1)
+{
+  u32 src0, dst0, src1, dst1;
+
+  src0 = ip0->src_address.data_u32;
+  src1 = ip1->src_address.data_u32;
+  dst0 = ip0->dst_address.data_u32;
+  dst1 = ip1->dst_address.data_u32;
+  ip0->src_address.data_u32 = dst0;
+  ip1->src_address.data_u32 = dst1;
+  ip0->dst_address.data_u32 = src0;
+  ip1->dst_address.data_u32 = src1;
+
+  src0 = tcp0->ports.src;
+  src1 = tcp1->ports.src;
+  dst0 = tcp0->ports.dst;
+  dst1 = tcp1->ports.dst;
+  tcp0->ports.src = dst0;
+  tcp1->ports.src = dst1;
+  tcp0->ports.dst = src0;
+  tcp1->ports.dst = src1;
+}
 
 #endif /* included_ip4_packet_h */

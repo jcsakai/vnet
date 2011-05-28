@@ -62,7 +62,7 @@ typedef struct {
   uword * protocol_info_by_name, * protocol_info_by_protocol;
 } ppp_main_t;
 
-static inline ppp_protocol_info_t *
+always_inline ppp_protocol_info_t *
 ppp_get_protocol_info (ppp_main_t * em, ppp_protocol_t protocol)
 {
   uword * p = hash_get (em->protocol_info_by_protocol, protocol);
@@ -103,14 +103,6 @@ ppp_setup_node (vlib_main_t * vm, u32 node_index)
   n->format_buffer = format_ppp_header_with_length;
   n->unformat_buffer = unformat_ppp_header;
   pn->unformat_edit = unformat_pg_ppp_header;
-}
-
-always_inline uword
-is_ppp_interface (vlib_main_t * vm, u32 hw_if_index)
-{
-  vlib_hw_interface_t * hi = vlib_get_hw_interface (vm, hw_if_index);
-  vlib_hw_interface_class_t * c = vlib_get_hw_interface_class (vm, hi->hw_class_index);
-  return ! strcmp (c->name, ppp_hw_interface_class.name);
 }
 
 void

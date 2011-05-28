@@ -26,8 +26,8 @@
 #include <vlib/vlib.h>
 #include <vnet/ethernet/ethernet.h>
 
-VLIB_CLI_COMMAND (vlib_cli_ethernet_command) = {
-  .name = "ethernet",
+static VLIB_CLI_COMMAND (vlib_cli_ethernet_command) = {
+  .path = "ethernet",
   .short_help = "Ethernet commands",
 };
 
@@ -59,10 +59,9 @@ set_media (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 }
 
 static VLIB_CLI_COMMAND (ethernet_set_media_command) = {
-  .name = "set-media",
+  .path = "ethernet set-media",
   .short_help = "Set PHY media",
   .function = set_media,
-  .parent = &vlib_cli_ethernet_command,
 };
 
 static clib_error_t *
@@ -97,10 +96,9 @@ phy_status (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd
 }
 
 static VLIB_CLI_COMMAND (ethernet_status_command) = {
-  .name = "status",
-  .short_help = "PHY status\n",
+  .path = "ethernet status",
+  .short_help = "PHY status",
   .function = phy_status,
-  .parent = &vlib_cli_ethernet_command,
 };
 
 static clib_error_t *
@@ -138,10 +136,9 @@ negotiate (vlib_main_t * vm,
 { return helper (vm, input, cmd, ethernet_phy_negotiate_media); }
 
 static VLIB_CLI_COMMAND (ethernet_negotiate_media_command) = {
-  .name = "negotiate-media",
+  .path = "ethernet negotiate-media",
   .short_help = "Negotiate PHY media",
   .function = negotiate,
-  .parent = &vlib_cli_ethernet_command,
 };
 
 static clib_error_t *
@@ -151,8 +148,7 @@ reset (vlib_main_t * vm,
 { return helper (vm, input, cmd, ethernet_phy_reset); }
 
 static VLIB_CLI_COMMAND (ethernet_reset_media_command) = {
-  .name = "reset-media",
+  .path = "ethernet reset-media",
   .short_help = "Reset PHY media",
   .function = reset,
-  .parent = &vlib_cli_ethernet_command,
 };

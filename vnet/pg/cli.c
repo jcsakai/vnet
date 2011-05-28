@@ -26,9 +26,13 @@
 #include <vlib/vlib.h>
 #include <vnet/pg/pg.h>
 
+#ifdef CLIB_UNIX
+#include <vnet/unix/pcap.h>
+#endif
+
 /* Root of all packet generator cli commands. */
-VLIB_CLI_COMMAND (vlib_cli_pg_command) = {
-  .name = "packet-generator",
+static VLIB_CLI_COMMAND (vlib_cli_pg_command) = {
+  .path = "packet-generator",
   .short_help = "Packet generator commands",
 };
 
@@ -67,19 +71,17 @@ enable_disable_stream (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (enable_streams_cli) = {
-  .name = "enable",
+  .path = "packet-generator enable-stream",
   .short_help = "Enable packet generator streams",
   .function = enable_disable_stream,
   .function_arg = 1,		/* is_enable */
-  .parent = &vlib_cli_pg_command,
 };
 
 static VLIB_CLI_COMMAND (disable_streams_cli) = {
-  .name = "disable",
+  .path = "packet-generator disable-stream",
   .short_help = "Disable packet generator streams",
   .function = enable_disable_stream,
   .function_arg = 0,		/* is_enable */
-  .parent = &vlib_cli_pg_command,
 };
 
 static u8 * format_pg_stream (u8 * s, va_list * va)
@@ -142,11 +144,31 @@ show_streams (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (show_streams_cli) = {
-  .name = "packet-generator",
+  .path = "show packet-generator",
   .short_help = "Show packet generator streams",
   .function = show_streams,
-  .parent = &vlib_cli_show_command,
 };
+
+static clib_error_t *
+pg_pcap_read (pg_stream_t * s, char * file_name)
+{
+#ifndef CLIB_UNIX
+  return clib_error_return (0, "no pcap support");
+#else
+  pcap_main_t pm;
+  clib_error_t * error;
+  memset (&pm, 0, sizeof (pm));
+  pm.file_name = file_name;
+  error = pcap_read (&pm);
+  s->replay_packet_templates = pm.packets_read;
+  s->min_packet_bytes = pm.min_packet_bytes;
+  s->max_packet_bytes = pm.max_packet_bytes;
+  s->buffer_bytes = pm.max_packet_bytes;
+  /* For PCAP buffers we never re-use buffers. */
+  s->flags |= PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE;
+  return error;
+#endif /* CLIB_UNIX */
+}
 
 static uword
 unformat_pg_stream_parameter (unformat_input_t * input, va_list * args)
@@ -183,8 +205,8 @@ validate_stream (pg_stream_t * s)
   if (s->max_packet_bytes < s->min_packet_bytes)
     return clib_error_create ("max-size < min-size");
 
-  if (s->buffer_bytes >= 4096)
-    return clib_error_create ("buffer-size limited to 4096, given %d",
+  if (s->buffer_bytes >= 4096 || s->buffer_bytes == 0)
+    return clib_error_create ("buffer-size must be positive and < 4096, given %d",
 			      s->buffer_bytes);
 
   if (s->rate_packets_per_second < 0)
@@ -205,10 +227,13 @@ new_stream (vlib_main_t * vm,
   int sub_input_given = 0;
   pg_main_t * pg = &pg_main;
   pg_stream_t s = {0};
+  char * pcap_file_name;
   
   s.sw_if_index[VLIB_RX] = s.sw_if_index[VLIB_TX] = ~0;
   s.node_index = ~0;
   s.max_packet_bytes = s.min_packet_bytes = 64;
+  s.buffer_bytes = VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
+  pcap_file_name = 0;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "name %v", &tmp))
@@ -235,6 +260,9 @@ new_stream (vlib_main_t * vm,
 			 unformat_vlib_sw_interface, vm, &s.sw_if_index[VLIB_RX]))
 	;
 
+      else if (unformat (input, "pcap %s", &pcap_file_name))
+	;
+
       else if (! sub_input_given
 	       && unformat (input, "data %U", unformat_input, &sub_input))
 	sub_input_given++;
@@ -257,7 +285,7 @@ new_stream (vlib_main_t * vm,
   if (error)
     return error;
 
-  if (! sub_input_given)
+  if (! sub_input_given && ! pcap_file_name)
     {
       error = clib_error_create ("no packet data given");
       goto done;
@@ -277,7 +305,15 @@ new_stream (vlib_main_t * vm,
     else
       n = 0;
 
-    if (n && n->unformat_edit
+    if (pcap_file_name != 0)
+      {
+	error = pg_pcap_read (&s, pcap_file_name);
+	if (error)
+	  goto done;
+	vec_free (pcap_file_name);
+      }
+
+    else if (n && n->unformat_edit
 	&& unformat_user (&sub_input, n->unformat_edit, &s))
       ;
 
@@ -300,9 +336,8 @@ new_stream (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (new_stream_cli) = {
-  .name = "new",
+  .path = "packet-generator new",
   .function = new_stream,
-  .parent = &vlib_cli_pg_command,
   .short_help = "Create packet generator stream",
   .long_help =
   "Create packet generator stream\n"
@@ -333,9 +368,8 @@ del_stream (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (del_stream_cli) = {
-  .name = "delete",
+  .path = "packet-generator delete",
   .function = del_stream,
-  .parent = &vlib_cli_pg_command,
   .short_help = "Delete stream with given name",
 };
 
@@ -377,10 +411,9 @@ change_stream_parameters (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (change_stream_parameters_cli) = {
-  .name = "configure",
+  .path = "packet-generator configure",
   .short_help = "Change packet generator stream parameters",
   .function = change_stream_parameters,
-  .parent = &vlib_cli_pg_command,
 };
 
 /* Dummy init function so that we can be linked in. */

@@ -57,9 +57,11 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
 				? VLIB_SW_INTERFACE_FLAG_ADMIN_UP
 				: 0));
 			       
-  vlib_node_enable_disable (pg->vlib_main,
-			    pg_input_node.index,
-			    ! clib_bitmap_is_zero (pg->enabled_streams));
+  vlib_node_set_state (pg->vlib_main,
+		       pg_input_node.index,
+		       (clib_bitmap_is_zero (pg->enabled_streams)
+			? VLIB_NODE_STATE_DISABLED
+			: VLIB_NODE_STATE_POLLING));
 
   s->packet_accumulator = 0;
   s->time_last_generate = 0;
@@ -83,8 +85,24 @@ static VLIB_DEVICE_CLASS (pg_dev_class) = {
   .format_device_name = format_pg_interface_name,
 };
 
+static uword pg_set_rewrite (vlib_main_t * vm,
+			     u32 sw_if_index,
+			     u32 l3_type,
+			     void * rewrite,
+			     uword max_rewrite_bytes)
+{
+  u16 * h = rewrite;
+
+  if (max_rewrite_bytes < sizeof (h[0]))
+    return 0;
+
+  h[0] = clib_host_to_net_u16 (l3_type);
+  return sizeof (h[0]);
+}
+
 static VLIB_HW_INTERFACE_CLASS (pg_interface_class) = {
   .name = "Packet generator",
+  .set_rewrite = pg_set_rewrite,
 };
 
 u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
@@ -307,7 +325,8 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
     default:
       /* Get packet size from fixed edits. */
       s->packet_size_edit_type = PG_EDIT_FIXED;
-      s->min_packet_bytes = s->max_packet_bytes = vec_len (s->fixed_packet_data);
+      if (! s->replay_packet_templates)
+	s->min_packet_bytes = s->max_packet_bytes = vec_len (s->fixed_packet_data);
       break;
     }
 
@@ -328,7 +347,10 @@ void pg_stream_add (pg_main_t * pg, pg_stream_t * s_init)
     vec_resize (s->buffer_indices, n);
 
     vec_foreach (bi, s->buffer_indices)
-      bi->free_list_index = vlib_buffer_create_free_list (vm, s->buffer_bytes);
+      bi->free_list_index = vlib_buffer_create_free_list (vm, s->buffer_bytes,
+							  "pg stream %d buffer #%d",
+							  s - pg->streams,
+							  1 + (bi - s->buffer_indices));
   }
 
   /* Find an interface to use. */

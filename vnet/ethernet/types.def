@@ -29,7 +29,7 @@
 ethernet_type (0x600, LLC_LENGTH)
 
 ethernet_type (0x600, XNS_IDP)
-ethernet_type (0x800, IP)
+ethernet_type (0x800, IP4)
 ethernet_type (0x806, ARP)
 ethernet_type (0x0BAD, VINES_IP)
 ethernet_type (0x0BAE, VINES_LOOPBACK)

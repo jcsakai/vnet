@@ -51,12 +51,19 @@ tcp_pg_edit_function (pg_main_t * pg,
       n_packets -= 1;
       packets += 1;
 
+      ASSERT (p0->current_data == 0);
       ip0 = (void *) (p0->data + ip_offset);
       tcp0 = (void *) (p0->data + tcp_offset);
-      tcp_len0 = p0->current_length - tcp_offset;
+      tcp_len0 = clib_net_to_host_u16 (ip0->length) - sizeof (ip0[0]);
 
       /* Initialize checksum with header. */
-      sum0 = clib_mem_unaligned (&ip0->src_address, u64);
+      if (BITS (sum0) == 32)
+	{
+	  sum0 = clib_mem_unaligned (&ip0->src_address, u32);
+	  sum0 = ip_csum_with_carry (sum0, clib_mem_unaligned (&ip0->dst_address, u32));
+	}
+      else
+	sum0 = clib_mem_unaligned (&ip0->src_address, u64);
 
       sum0 = ip_csum_with_carry
 	(sum0, clib_host_to_net_u32 (tcp_len0 + (ip0->protocol << 16)));
@@ -64,7 +71,7 @@ tcp_pg_edit_function (pg_main_t * pg,
       /* Invalidate possibly old checksum. */
       tcp0->checksum = 0;
 
-      sum0 = ip_incremental_checksum (sum0, tcp0, tcp_len0);
+      sum0 = ip_incremental_checksum_buffer (vm, p0, tcp_offset, tcp_len0, sum0);
 
       tcp0->checksum = ~ ip_csum_fold (sum0);
     }
@@ -73,7 +80,7 @@ tcp_pg_edit_function (pg_main_t * pg,
 typedef struct {
   struct { pg_edit_t src, dst; } ports;
   pg_edit_t seq_number, ack_number;
-  pg_edit_t data_offset;
+  pg_edit_t tcp_header_u32s;
 #define _(f) pg_edit_t f##_flag;
   foreach_tcp_flag
 #undef _
@@ -99,15 +106,15 @@ pg_tcp_header_init (pg_tcp_header_t * p)
   /* Initialize bit fields. */
 #define _(f)						\
   pg_edit_init_bitfield (&p->f##_flag, tcp_header_t,	\
-			 data_offset_and_flags,		\
+			 flags,				\
 			 TCP_FLAG_BIT_##f, 1);
 
   foreach_tcp_flag
 #undef _
 
-  pg_edit_init_bitfield (&p->data_offset, tcp_header_t,
-			 data_offset_and_flags,
-			 12, 4);
+  pg_edit_init_bitfield (&p->tcp_header_u32s, tcp_header_t,
+			 tcp_header_u32s_and_reserved,
+			 4, 4);
 }
 
 uword
@@ -125,7 +132,7 @@ unformat_pg_tcp_header (unformat_input_t * input, va_list * args)
   pg_edit_set_fixed (&p->seq_number, 0);
   pg_edit_set_fixed (&p->ack_number, 0);
 
-  pg_edit_set_fixed (&p->data_offset, sizeof (tcp_header_t) / sizeof (u32));
+  pg_edit_set_fixed (&p->tcp_header_u32s, sizeof (tcp_header_t) / sizeof (u32));
 
   pg_edit_set_fixed (&p->window, 4096);
   pg_edit_set_fixed (&p->urgent_pointer, 0);

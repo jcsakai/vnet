@@ -27,18 +27,10 @@
 #define included_vnet_rewrite_h
 
 #include <vlib/vlib.h>
+#include <vnet/vnet/l3_types.h>
 
-/* Not worth using vector unit for unaligned stores for Altivec. */
-#if defined (__ALTIVEC__)
-#undef CLIB_HAVE_VEC128
-#endif
-
-/* Basic data type for painting rewrite strings. */
-#ifdef CLIB_HAVE_VEC128
-typedef u8x16 vnet_rewrite_data_t;
-#else
+/* Consider using vector types for speed? */
 typedef uword vnet_rewrite_data_t;
-#endif
 
 typedef PACKED (struct {
   /* Interface to mark re-written packets with. */
@@ -53,9 +45,9 @@ typedef PACKED (struct {
   /* Number of bytes in rewrite data. */
   u16 data_bytes;
 
-  /* Max packet size layer 2 (MTU) for output interface.
+  /* Max packet size layer 3 (MTU) for output interface.
      Used for MTU check after packet rewrite. */
-  u16 max_packet_bytes;
+  u16 max_l3_packet_bytes;
 
   /* Rewrite string starting at end and going backwards. */
   u8 data[0];
@@ -113,11 +105,7 @@ vnet_rewrite_get_data_internal (vnet_rewrite_header_t * rw, int max_size)
 always_inline void
 vnet_rewrite_copy_one (vnet_rewrite_data_t * p0, vnet_rewrite_data_t * rw0, int i)
 {
-#ifdef CLIB_HAVE_VEC128
-  u8x16_store_unaligned (rw0[-i], p0 - i);
-#else
   p0[-i] = rw0[-i];
-#endif
 }
 
 always_inline void
@@ -234,10 +222,19 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
 			     sizeof ((rw0).rewrite_data),		\
 			     (most_likely_size))
 
+void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
+				    vnet_l3_packet_type_t packet_type,
+				    u32 sw_if_index,
+				    u32 node_index,
+				    vnet_rewrite_header_t * rw,
+				    u32 max_rewrite_bytes);
+
 /* Parser for unformat header & rewrite string. */
 unformat_function_t unformat_vnet_rewrite;
 
 format_function_t format_vnet_rewrite;
 format_function_t format_vnet_rewrite_header;
+
+serialize_function_t serialize_vnet_rewrite, unserialize_vnet_rewrite;
 
 #endif /* included_vnet_rewrite_h */

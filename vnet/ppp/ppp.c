@@ -1,5 +1,5 @@
 /*
- * ppp_init.c: ppp initialization
+ * ppp.c: ppp support
  *
  * Copyright (c) 2010 Eliot Dresselhaus
  *
@@ -25,6 +25,7 @@
 
 #include <vlib/vlib.h>
 #include <vnet/ppp/ppp.h>
+#include <vnet/vnet/l3_types.h>
 
 /* Global main structure. */
 ppp_main_t ppp_main;
@@ -153,25 +154,42 @@ unformat_ppp_header (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-vlib_hw_interface_class_t ppp_hw_interface_class = {
+static uword ppp_set_rewrite (vlib_main_t * vm,
+			      u32 sw_if_index,
+			      u32 l3_type,
+			      void * rewrite,
+			      uword max_rewrite_bytes)
+{
+  ppp_header_t * h = rewrite;
+  ppp_protocol_t protocol;
+
+  if (max_rewrite_bytes < sizeof (h[0]))
+    return 0;
+
+  switch (l3_type) {
+#define _(a,b) case VNET_L3_PACKET_TYPE_##a: protocol = PPP_PROTOCOL_##b; break
+    _ (IP4, ip4);
+    _ (IP6, ip6);
+    _ (MPLS_UNICAST, mpls_unicast);
+    _ (MPLS_MULTICAST, mpls_multicast);
+#undef _
+  default:
+    return 0;
+  }
+
+  h->address = 0xff;
+  h->control = 0x03;
+  h->protocol = clib_host_to_net_u16 (protocol);
+		     
+  return sizeof (h[0]);
+}
+
+VLIB_HW_INTERFACE_CLASS (ppp_hw_interface_class) = {
   .name = "PPP",
   .format_header = format_ppp_header_with_length,
   .unformat_header = unformat_ppp_header,
+  .set_rewrite = ppp_set_rewrite,
 };
-
-void ppp_set_adjacency (vnet_rewrite_header_t * rw,
-			uword max_data_bytes,
-			ppp_protocol_t protocol)
-{
-  ppp_header_t h = {
-    .address = 0xff,
-    .control = 0x03,
-  };
-  h.protocol = clib_host_to_net_u16 (protocol);
-		     
-  ASSERT (max_data_bytes >= sizeof (h));
-  vnet_rewrite_set_data_internal (rw, max_data_bytes, &h, sizeof (h));
-}
 
 static void add_protocol (ppp_main_t * pm,
 			  ppp_protocol_t protocol,
@@ -202,10 +220,10 @@ static clib_error_t * ppp_init (vlib_main_t * vm)
   pm->protocol_info_by_protocol = hash_create (0, sizeof (uword));
 
 #define _(n,s) add_protocol (pm, PPP_PROTOCOL_##s, #s);
-  foreach_ppp_protocol
+  foreach_ppp_protocol;
 #undef _
 
-  return /* no error */ 0;
+  return vlib_call_init_function (vm, ppp_input_init);
 }
 
 VLIB_INIT_FUNCTION (ppp_init);

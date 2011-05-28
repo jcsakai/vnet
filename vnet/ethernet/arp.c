@@ -36,7 +36,10 @@ typedef struct {
 typedef struct {
   ethernet_arp_ip4_key_t key;
   u8 ethernet_address[6];
-  u8 pad[2];
+
+  u16 flags;
+#define ETHERNET_ARP_IP4_ENTRY_FLAG_STATIC (1 << 0)
+
   u64 cpu_time_last_updated;
 } ethernet_arp_ip4_entry_t;
 
@@ -150,7 +153,7 @@ static u8 * format_ethernet_arp_header (u8 * s, va_list * va)
 	      a->n_l2_address_bytes, a->n_l3_address_bytes);
 	      
   if (l2_type == ETHERNET_ARP_HARDWARE_TYPE_ethernet
-      && l3_type == ETHERNET_TYPE_IP)
+      && l3_type == ETHERNET_TYPE_IP4)
     {
       s = format (s, "\n%U%U/%U -> %U/%U",
 		  format_white_space, indent,
@@ -249,7 +252,6 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
   ethernet_arp_ip4_key_t k;
   ethernet_arp_ip4_entry_t * e;
   ip4_main_t * im = &ip4_main;
-  ip_lookup_main_t * lm = &im->lookup_main;
   uword * p, fib_index;
 
   fib_index = im->fib_index_by_sw_if_index[sw_if_index];
@@ -259,39 +261,42 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
 
   p = mhash_get (&am->ip4_entry_by_key, &k);
   if (p)
-    e = pool_elt_at_index (am->ip4_entry_pool, p[0]);
+    {
+      e = pool_elt_at_index (am->ip4_entry_pool, p[0]);
+
+      /* Refuse to over-write static arp. */
+      if (e->flags & ETHERNET_ARP_IP4_ENTRY_FLAG_STATIC)
+	return;
+    }
   else
     {
-      u32 adj_index;
-      ip_adjacency_t * adj;
-      vnet_rewrite_header_t * rw;
-      vlib_sw_interface_t * sw = vlib_get_sup_sw_interface (vm, sw_if_index);
-      vlib_hw_interface_t * hw = vlib_get_hw_interface (vm, sw->hw_if_index);
-      ethernet_interface_t * ethif = ethernet_get_interface (&ethernet_main, sw->hw_if_index);
-      ethernet_header_t eth_rw;
+      ip4_add_del_route_args_t args;
+      ip_adjacency_t adj;
+      ethernet_header_t * eth;
 
-      adj = ip_add_adjacency (lm, /* template */ 0, /* block_size */ 1,
-			      &adj_index);
+      adj.lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
 
-      adj->lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
+      vnet_rewrite_for_sw_interface
+	(vm,
+	 VNET_L3_PACKET_TYPE_IP4,
+	 sw_if_index,
+	 ip4_rewrite_node.index,
+	 &adj.rewrite_header,
+	 sizeof (adj.rewrite_data));
 
-      rw = &adj->rewrite_header;
-      rw->sw_if_index = sw_if_index;
-      rw->max_packet_bytes = hw->max_packet_bytes[VLIB_TX];
-      rw->node_index = ip4_rewrite_node.index;
-      rw->next_index = vlib_node_add_next (vm, rw->node_index, hw->output_node_index);
+      /* Copy in destination ethernet address from ARP. */
+      eth = vnet_rewrite_get_data (adj);
+      memcpy (eth->dst_address, a->ethernet, sizeof (eth->dst_address));
 
-      if (ethif)
-	memcpy (&eth_rw.src_address, ethif->address, sizeof (eth_rw.src_address));
-      memcpy (&eth_rw.dst_address, a->ethernet, sizeof (eth_rw.dst_address));
-      eth_rw.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP);
+      args.table_index_or_table_id = fib_index;
+      args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_NEIGHBOR;
+      args.dst_address = a->ip4;
+      args.dst_address_length = 32;
+      args.adj_index = ~0;
+      args.add_adj = &adj;
+      args.n_add_adj = 1;
 
-      vnet_rewrite_set_data (adj[0], &eth_rw, sizeof (eth_rw));
-
-      ip4_add_del_route (im, fib_index, IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD,
-			 &a->ip4,
-			 /* address_length */ 32,
-			 adj_index);
+      ip4_add_del_route (im, &args);
       pool_get (am->ip4_entry_pool, e);
       mhash_set (&am->ip4_entry_by_key, &k,
                  e - am->ip4_entry_pool,
@@ -316,6 +321,7 @@ typedef enum {
   _ (l3_type_not_ip4, "L3 type not IP4")				\
   _ (l3_src_address_not_local, "IP4 source address not local to subnet") \
   _ (l3_dst_address_not_local, "IP4 destination address not local to subnet") \
+  _ (l3_src_address_is_local, "IP4 source address matches local interface") \
   _ (replies_received, "ARP replies received")				\
   _ (opcode_not_request, "ARP opcode not request")
 
@@ -360,8 +366,10 @@ arp_input (vlib_main_t * vm,
 	  ethernet_arp_header_t * arp0;
 	  ethernet_header_t * eth0;
 	  ethernet_interface_t * eth_if0;
+	  ip_interface_address_t * ifa0;
 	  ip4_address_t * if_addr0;
-	  u32 pi0, error0, next0, sw_if_index0, if_addr_length0;
+	  u32 pi0, error0, next0, sw_if_index0;
+	  u8 is_request0, src_is_local0, dst_is_local0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -378,7 +386,7 @@ arp_input (vlib_main_t * vm,
 	  error0 = (arp0->l2_type != clib_net_to_host_u16 (ETHERNET_ARP_HARDWARE_TYPE_ethernet)
 		    ? ETHERNET_ARP_ERROR_l2_type_not_ethernet
 		    : error0);
-	  error0 = (arp0->l3_type != clib_net_to_host_u16 (ETHERNET_TYPE_IP)
+	  error0 = (arp0->l3_type != clib_net_to_host_u16 (ETHERNET_TYPE_IP4)
 		    ? ETHERNET_ARP_ERROR_l3_type_not_ip4
 		    : error0);
 
@@ -387,26 +395,46 @@ arp_input (vlib_main_t * vm,
 
 	  /* Check that IP address is local and matches incoming interface. */
 	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
-	  if_addr0 = ip4_get_interface_address (im4, sw_if_index0);
-	  if (! ip4_interface_address_is_valid (if_addr0)
-	      || if_addr0->data_u32 != clib_mem_unaligned (&arp0->ip4_over_ethernet[1].ip4.data_u32, u32))
+	  if_addr0 = ip4_interface_address_matching_destination (im4,
+								 &arp0->ip4_over_ethernet[1].ip4,
+								 sw_if_index0,
+								 &ifa0);
+	  if (! if_addr0)
 	    {
 	      error0 = ETHERNET_ARP_ERROR_l3_dst_address_not_local;
 	      goto drop1;
 	    }
 
-	  if_addr_length0 = ip4_get_interface_address_length (im4, sw_if_index0);
-	  if (! ip4_destination_matches_route (im4, &arp0->ip4_over_ethernet[0].ip4,
-					       if_addr0, if_addr_length0))
+	  /* Source must also be local to subnet of matching interface address. */
+	  if (! ip4_destination_matches_interface (im4, &arp0->ip4_over_ethernet[0].ip4, ifa0))
 	    {
 	      error0 = ETHERNET_ARP_ERROR_l3_src_address_not_local;
 	      goto drop1;
 	    }
 
-	  /* Learn or update sender's mapping. */
-	  arp_set_ip4_over_ethernet (vm, am, sw_if_index0, &arp0->ip4_over_ethernet[0]);
+	  /* Reject requests/replies with our local interface address. */
+	  src_is_local0 = if_addr0->as_u32 == arp0->ip4_over_ethernet[0].ip4.as_u32;
+	  if (src_is_local0)
+	    {
+	      error0 = ETHERNET_ARP_ERROR_l3_src_address_is_local;
+	      goto drop1;
+	    }
 
-	  if (arp0->opcode != clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_request))
+	  dst_is_local0 = if_addr0->as_u32 == arp0->ip4_over_ethernet[1].ip4.as_u32;
+
+	  /* Fill in ethernet header. */
+	  eth0 = ethernet_buffer_get_header (p0);
+
+	  is_request0 = arp0->opcode == clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_request);
+
+	  /* Learn or update sender's mapping only for requests or unicasts
+	     that don't match local interface address. */
+	  if (ethernet_address_cast (eth0->dst_address) == ETHERNET_ADDRESS_UNICAST
+	      || is_request0)
+	    arp_set_ip4_over_ethernet (vm, am, sw_if_index0, &arp0->ip4_over_ethernet[0]);
+
+	  /* Only send a reply for requests sent which match a local interface. */
+	  if (! (is_request0 && dst_is_local0))
 	    {
 	      error0 = (arp0->opcode == clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_reply)
 			? ETHERNET_ARP_ERROR_replies_received
@@ -431,11 +459,7 @@ arp_input (vlib_main_t * vm,
 	  arp0->ip4_over_ethernet[1] = arp0->ip4_over_ethernet[0];
 
 	  memcpy (arp0->ip4_over_ethernet[0].ethernet, eth_if0->address, 6);
-	  clib_mem_unaligned (&arp0->ip4_over_ethernet[0].ip4.data_u32, u32)
-	    = if_addr0->data_u32;
-
-	  /* Fill in ethernet header. */
-	  eth0 = (void *) arp0 - sizeof (eth0[0]);
+	  clib_mem_unaligned (&arp0->ip4_over_ethernet[0].ip4.data_u32, u32) = if_addr0->data_u32;
 
 	  p0->current_data -= sizeof (eth0[0]);
 	  p0->current_length += sizeof (eth0[0]);
@@ -457,24 +481,17 @@ arp_input (vlib_main_t * vm,
 	  continue;
 
 	drop1:
-	  {
-            vlib_error_t * e;
-              
-            next0 = ARP_INPUT_NEXT_DROP;
-            if (next0 != next_index)
-              {
-                vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
-
-                next_index = next0;
-                vlib_get_next_frame (vm, node, next_index,
-                                     to_next, n_left_to_next);
-                to_next[0] = pi0;
-                n_left_to_next -= 1;
-              }
-
-            e = vlib_error_for_transpose_buffer_pointer (to_next - 1);
-            e[0] = vlib_error_set (node->node_index, error0);
-	  }
+	  next0 = ARP_INPUT_NEXT_DROP;
+	  p0->error = node->errors[error0];
+	  if (next0 != next_index)
+	    {
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
+	      next_index = next0;
+	      vlib_get_next_frame (vm, node, next_index,
+				   to_next, n_left_to_next);
+	      to_next[0] = pi0;
+	      n_left_to_next -= 1;
+	    }
 	}
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
@@ -507,7 +524,7 @@ static VLIB_REGISTER_NODE (arp_input_node) = {
 
   .n_next_nodes = ARP_INPUT_N_NEXT,
   .next_nodes = {
-    [ARP_INPUT_NEXT_DROP] = "error-drop-transpose",
+    [ARP_INPUT_NEXT_DROP] = "error-drop",
   },
 
   .format_buffer = format_ethernet_arp_header,
@@ -575,10 +592,9 @@ show_ip4_arp (vlib_main_t * vm,
 }
 
 static VLIB_CLI_COMMAND (show_ip4_arp_command) = {
-  .name = "arp",
+  .path = "show ip arp",
   .function = show_ip4_arp,
   .short_help = "Show ARP table",
-  .parent = &vlib_cli_show_ip_command,
 };
 
 typedef struct {
@@ -621,7 +637,7 @@ unformat_pg_arp_header (unformat_input_t * input, va_list * args)
 
   /* Defaults. */
   pg_edit_set_fixed (&p->l2_type, ETHERNET_ARP_HARDWARE_TYPE_ethernet);
-  pg_edit_set_fixed (&p->l3_type, ETHERNET_TYPE_IP);
+  pg_edit_set_fixed (&p->l3_type, ETHERNET_TYPE_IP4);
   pg_edit_set_fixed (&p->n_l2_address_bytes, 6);
   pg_edit_set_fixed (&p->n_l3_address_bytes, 4);
 

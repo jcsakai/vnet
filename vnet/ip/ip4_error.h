@@ -26,35 +26,34 @@
 #ifndef included_ip_ip4_error_h
 #define included_ip_ip4_error_h
 
-#define foreach_ip4_error				\
-  /* Must be first. */					\
-  _ (NONE, "valid ip4 packets")				\
-							\
-  /* Errors signalled by ip4-input */			\
-  _ (TOO_SHORT, "ip4 length < 20 bytes")		\
-  _ (BAD_LENGTH, "ip4 length > l2 length")		\
-  _ (BAD_CHECKSUM, "bad ip4 checksum")			\
-  _ (VERSION, "ip4 version != 4")			\
-  _ (OPTIONS, "ip4 options present")			\
-  _ (FRAGMENT_OFFSET_ONE, "ip4 fragment offset == 1")	\
-  _ (TIME_EXPIRED, "ip4 ttl <= 1")			\
-							\
-  /* Errors signalled by ip4-rewrite. */		\
-  _ (MTU_EXCEEDED, "ip4 MTU exceeded and DF set")	\
-  _ (DST_LOOKUP_MISS, "ip4 destination lookup miss")	\
-  _ (SRC_LOOKUP_MISS, "ip4 source lookup miss")		\
-  _ (ADJACENCY_DROP, "ip4 adjacency drop")		\
-  _ (ADJACENCY_PUNT, "ip4 adjacency punt")		\
-							\
-  /* Errors signalled by ip4-local. */			\
-  _ (UNKNOWN_PROTOCOL, "unknown ip protocol")		\
-  _ (TCP_CHECKSUM, "bad tcp checksum")			\
-  _ (UDP_CHECKSUM, "bad udp checksum")			\
-  _ (UDP_LENGTH, "inconsistent udp/ip lengths")		\
-							\
-  /* Errors signalled by {tcp4,udp4}-lookup. */		\
-  _ (UNKNOWN_UDP_PORT, "no listener for udp port")	\
-  _ (UNKNOWN_TCP_PORT, "no listener for tcp port")
+#define foreach_ip4_error						\
+  /* Must be first. */							\
+  _ (NONE, "valid ip4 packets")						\
+									\
+  /* Errors signalled by ip4-input */					\
+  _ (TOO_SHORT, "ip4 length < 20 bytes")				\
+  _ (BAD_LENGTH, "ip4 length > l2 length")				\
+  _ (BAD_CHECKSUM, "bad ip4 checksum")					\
+  _ (VERSION, "ip4 version != 4")					\
+  _ (OPTIONS, "ip4 options present")					\
+  _ (FRAGMENT_OFFSET_ONE, "ip4 fragment offset == 1")			\
+  _ (TIME_EXPIRED, "ip4 ttl <= 1")					\
+									\
+  /* Errors signalled by ip4-rewrite. */				\
+  _ (MTU_EXCEEDED, "ip4 MTU exceeded and DF set")			\
+  _ (DST_LOOKUP_MISS, "ip4 destination lookup miss")			\
+  _ (SRC_LOOKUP_MISS, "ip4 source lookup miss")				\
+  _ (ADJACENCY_DROP, "ip4 adjacency drop")				\
+  _ (ADJACENCY_PUNT, "ip4 adjacency punt")				\
+									\
+  /* Errors signalled by ip4-local. */					\
+  _ (UNKNOWN_PROTOCOL, "unknown ip protocol")				\
+  _ (TCP_CHECKSUM, "bad tcp checksum")					\
+  _ (UDP_CHECKSUM, "bad udp checksum")					\
+  _ (UDP_LENGTH, "inconsistent udp/ip lengths")				\
+									\
+  /* Errors signalled by ip4-source-check. */				\
+  _ (UNICAST_SOURCE_CHECK_FAILS, "ip4 unicast source check fails")
 
 typedef enum {
 #define _(sym,str) IP4_ERROR_##sym,

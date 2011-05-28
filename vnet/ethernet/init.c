@@ -62,6 +62,8 @@ static clib_error_t * ethernet_init (vlib_main_t * vm)
 #include "types.def"
 #undef ethernet_type
 
+  if ((error = vlib_call_init_function (vm, llc_init)))
+    return error;
   if ((error = vlib_call_init_function (vm, ethernet_input_init)))
     return error;
   if ((error = vlib_call_init_function (vm, ethernet_phy_main_init)))

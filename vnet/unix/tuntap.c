@@ -55,17 +55,17 @@ typedef struct {
   /* Interface MTU in bytes and # of default sized buffers. */
   u32 mtu_bytes, mtu_buffers;
 
-  /* epoll call says we are ready to readv from socket. */
-  u32 read_ready;
-
   /* Linux interface name for tun device. */
   char * tun_name;
 
   u32 unix_file_index;
+
+  /* VLIB hardware/software interfaces for tuntap interface. */
+  u32 hw_if_index, sw_if_index;
 } tuntap_main_t;
 
 static tuntap_main_t tuntap_main = {
-  .tun_name = "fabric",
+  .tun_name = "vnet",
 
   /* Suitable defaults for an Ethernet-like tun/tap device */
   .mtu_bytes = 4096 + 256,
@@ -121,8 +121,7 @@ tuntap_tx (vlib_main_t * vm,
 	clib_unix_warning ("writev");
     }
     
-  vlib_buffer_free (vm, buffers, /* next buffer stride */ 1, n_packets,
-		    /* follow_buffer_next */ 1);
+  vlib_buffer_free (vm, buffers, n_packets);
     
   return n_packets;
 }
@@ -135,16 +134,11 @@ static VLIB_REGISTER_NODE (tuntap_tx_node) = {
 };
 
 enum {
-  TUNTAP_PUNT_NEXT_ETHERNET_INPUT, 
+  TUNTAP_RX_NEXT_IP4_INPUT, 
+  TUNTAP_RX_NEXT_IP6_INPUT, 
+  TUNTAP_RX_NEXT_DROP,
+  TUNTAP_RX_N_NEXT,
 };
-
-/* Gets called when file descriptor is ready from epoll. */
-static clib_error_t * tuntap_read_ready (unix_file_t * uf)
-{
-  tuntap_main_t * tm = &tuntap_main;
-  tm->read_ready = 1;
-  return 0;
-}
 
 static uword
 tuntap_rx (vlib_main_t * vm,
@@ -155,12 +149,6 @@ tuntap_rx (vlib_main_t * vm,
   vlib_buffer_t * b;
   u32 bi;
   const uword buffer_size = VLIB_BUFFER_DEFAULT_FREE_LIST_BYTES;
-
-  /* Work to do? */
-  if (! tm->read_ready)
-    return 0;
-
-  tm->read_ready = 0;
 
   /* Make sure we have some RX buffers. */
   {
@@ -183,7 +171,7 @@ tuntap_rx (vlib_main_t * vm,
   {
     uword i_rx = vec_len (tm->rx_buffers) - 1;
     vlib_buffer_t * b;
-    word i, n_bytes_left;
+    word i, n_bytes_left, n_bytes_in_packet;
 
     /* We should have enough buffers left for an MTU sized packet. */
     ASSERT (vec_len (tm->rx_buffers) >= tm->mtu_buffers);
@@ -197,9 +185,11 @@ tuntap_rx (vlib_main_t * vm,
       }
 
     n_bytes_left = readv (tm->dev_net_tun_fd, tm->iovecs, tm->mtu_buffers);
+    n_bytes_in_packet = n_bytes_left;
     if (n_bytes_left <= 0)
       {
-	clib_unix_warning ("readv %d", n_bytes_left);
+        if (errno != EAGAIN)
+          clib_unix_warning ("readv %d", n_bytes_left);
 	return 0;
       }
 
@@ -222,6 +212,12 @@ tuntap_rx (vlib_main_t * vm,
 	b->next_buffer = tm->rx_buffers[i_rx];
       }
 
+    /* Interface counters for tuntap interface. */
+    vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
+				     + VLIB_INTERFACE_COUNTER_RX,
+				     tm->sw_if_index,
+				     1, n_bytes_in_packet);
+
     _vec_len (tm->rx_buffers) = i_rx;
   }
 
@@ -229,48 +225,72 @@ tuntap_rx (vlib_main_t * vm,
     {
       u8 * msg = vlib_validate_buffer (vm, bi, /* follow_buffer_next */ 1);
       if (msg)
-	clib_warning ("%v", msg);
+        ASSERT (0);
     }
 
   b = vlib_get_buffer (vm, bi);
 
-  /* 
-   * If it's a TUN device, add (space for) dst + src MAC address, 
-   * to the left of the protocol number. Linux shim hdr: 
-   * (u16 flags, u16 protocol-id). Overwrite flags; use 10 octets of
-   * the pre-data area.
-   */
-  b->current_data -= 10;
-  b->current_length += 10;
-
   {
+    u32 next_index;
     uword n_trace = vlib_get_trace_count (vm, node);
-    if (n_trace > 0) {
-      vlib_trace_buffer (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT,
-			 b, /* follow_chain */ 1);
-      vlib_set_trace_count (vm, node, n_trace - 1);
-    }
-  }
 
-  /* Enqueue to ethernet-input. */
-  {
-    u32 * to_next = vlib_set_next_frame (vm, node, TUNTAP_PUNT_NEXT_ETHERNET_INPUT);
-    to_next[0] = bi;
+    b->sw_if_index[VLIB_RX] = tm->sw_if_index;
+    b->error = node->errors[0];
+
+    switch (b->data[0] & 0xf0)
+      {
+      case 0x40:
+        next_index = TUNTAP_RX_NEXT_IP4_INPUT;
+        break;
+      case 0x60:
+        next_index = TUNTAP_RX_NEXT_IP6_INPUT;
+        break;
+      default:
+        next_index = TUNTAP_RX_NEXT_DROP;
+        break;
+      }
+
+    vlib_set_next_frame_buffer (vm, node, next_index, bi);
+
+    if (n_trace > 0)
+      {
+        vlib_trace_buffer (vm, node, next_index,
+                           b, /* follow_chain */ 1);
+        vlib_set_trace_count (vm, node, n_trace - 1);
+      }
   }
 
   return 1;
 }
 
+static char * tuntap_rx_error_strings[] = {
+  "unknown packet type",
+};
+
 static VLIB_REGISTER_NODE (tuntap_rx_node) = {
   .function = tuntap_rx,
   .name = "tuntap-rx",
   .type = VLIB_NODE_TYPE_INPUT,
+  .state = VLIB_NODE_STATE_INTERRUPT,
   .vector_size = 4,
-  .n_next_nodes = 1,
+  .n_errors = 1,
+  .error_strings = tuntap_rx_error_strings,
+
+  .n_next_nodes = TUNTAP_RX_N_NEXT,
   .next_nodes = {
-    [TUNTAP_PUNT_NEXT_ETHERNET_INPUT] = "ethernet-input",
+    [TUNTAP_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
+    [TUNTAP_RX_NEXT_IP6_INPUT] = "ip6-input",
+    [TUNTAP_RX_NEXT_DROP] = "error-drop",
   },
 };
+
+/* Gets called when file descriptor is ready from epoll. */
+static clib_error_t * tuntap_read_ready (unix_file_t * uf)
+{
+  vlib_main_t * vm = &vlib_global_main;
+  vlib_node_set_interrupt_pending (vm, tuntap_rx_node.index);
+  return 0;
+}
 
 /*
  * tuntap_exit
@@ -285,7 +305,7 @@ tuntap_exit (vlib_main_t * vm)
   int sfd;
 
   /* Not present. */
-  if (! tm->dev_net_tun_fd)
+  if (! tm->dev_net_tun_fd || tm->dev_net_tun_fd < 0)
     return 0;
 
   sfd = socket (AF_INET, SOCK_STREAM, 0);
@@ -323,26 +343,32 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
   clib_error_t * error = 0;
   struct ifreq ifr;
   struct sockaddr_in *sin;
-  int flags = IFF_TUN;
+  int flags = IFF_TUN | IFF_NO_PI;
+  int disabled = 0;
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "mtu %d", &tm->mtu_bytes))
 	;
+      else if (unformat (input, "disable"))
+        disabled = 1;
 
       else
 	return clib_error_return (0, "unknown input `%U'",
 				  format_unformat_error, input);
     }
 
+  tm->dev_net_tun_fd = -1;
+  tm->dev_tap_fd = -1;
+
+  if (disabled)
+    return 0;
+
   if (geteuid()) 
     {
       clib_warning ("tuntap disabled: must be superuser");
       return 0;
     }    
-
-  tm->dev_net_tun_fd = -1;
-  tm->dev_tap_fd = -1;
 
   if ((tm->dev_net_tun_fd = open ("/dev/net/tun", O_RDWR)) < 0)
     {
@@ -404,7 +430,7 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
   /* non-blocking I/O on /dev/tapX */
   {
     int one = 1;
-    if (ioctl (tm->dev_tap_fd, FIONBIO, &one) < 0)
+    if (ioctl (tm->dev_net_tun_fd, FIONBIO, &one) < 0)
       {
 	error = clib_error_return_unix (0, "ioctl FIONBIO");
 	goto done;
@@ -459,17 +485,20 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 VLIB_CONFIG_FUNCTION (tuntap_config, "tuntap");
 
 static void
-tuntap_ip4_set_interface_address (ip4_main_t * im,
-				  uword opaque,
-				  u32 sw_if_index,
-				  ip4_address_t * address,
-				  u32 address_length)
+tuntap_ip4_add_del_interface_address (ip4_main_t * im,
+				      uword opaque,
+				      u32 sw_if_index,
+				      ip4_address_t * address,
+				      u32 address_length,
+				      u32 if_address_index,
+				      u32 is_delete)
 {
   tuntap_main_t * tm = &tuntap_main;
-  uword is_delete;
   struct ifreq ifr;
 
-  is_delete = ! ip4_interface_address_is_valid (address);
+  /* Tuntap disabled. */
+  if (tm->dev_tap_fd < 0)
+    return;
 
   /* Use VLIB sw_if_index to select alias device. */
   memset (&ifr, 0, sizeof (ifr));
@@ -505,20 +534,75 @@ tuntap_ip4_set_interface_address (ip4_main_t * im,
     clib_unix_warning ("ioctl SIOCSIFFLAGS");
 }
 
+static void
+tuntap_punt_frame (vlib_main_t * vm,
+                   vlib_node_runtime_t * node,
+                   vlib_frame_t * frame)
+{
+  tuntap_tx (vm, node, frame);
+  vlib_frame_free (vm, node, frame);
+}
+
+static VLIB_HW_INTERFACE_CLASS (tuntap_interface_class) = {
+  .name = "Linux punt/inject (tuntap)",
+};
+
+static u8 * format_tuntap_interface_name (u8 * s, va_list * args)
+{
+  /* Calling it "tuntap" makes 2 nodes called tuntap-tx. */
+  s = format (s, "tuntap-0");
+  return s;
+}
+
+static uword
+tuntap_dummy_tx (vlib_main_t * vm,
+		 vlib_node_runtime_t * node,
+		 vlib_frame_t * frame)
+{
+  u32 * buffers = vlib_frame_args (frame);
+  uword n_buffers = frame->n_vectors;
+  vlib_buffer_free (vm, buffers, n_buffers);
+  return n_buffers;
+}
+
+static VLIB_DEVICE_CLASS (tuntap_dev_class) = {
+  .name = "tuntap",
+  .tx_function = tuntap_dummy_tx,
+  .format_device_name = format_tuntap_interface_name,
+};
+
 static clib_error_t *
 tuntap_init (vlib_main_t * vm)
 {
   clib_error_t * error;
   ip4_main_t * im = &ip4_main;
-  ip4_set_interface_address_callback_t cb;
+  ip4_add_del_interface_address_callback_t cb;
+  tuntap_main_t * tm = &tuntap_main;
 
   error = vlib_call_init_function (vm, ip4_init);
   if (error)
     return error;
 
-  cb.function = tuntap_ip4_set_interface_address;
+  cb.function = tuntap_ip4_add_del_interface_address;
   cb.function_opaque = 0;
-  vec_add1 (im->set_interface_address_callbacks, cb);
+  vec_add1 (im->add_del_interface_address_callbacks, cb);
+
+  vm->os_punt_frame = tuntap_punt_frame;
+
+  {
+    vlib_hw_interface_t * hi;
+
+    tm->hw_if_index = vlib_register_interface
+      (vm,
+       tuntap_dev_class.index, 0,
+       tuntap_interface_class.index, 0);
+    hi = vlib_get_hw_interface (vm, tm->hw_if_index);
+    tm->sw_if_index = hi->sw_if_index;
+
+    /* Interface is always up. */
+    vlib_hw_interface_set_flags (vm, tm->hw_if_index, VLIB_HW_INTERFACE_FLAG_LINK_UP);
+    vlib_sw_interface_set_flags (vm, tm->sw_if_index, VLIB_SW_INTERFACE_FLAG_ADMIN_UP);
+  }
 
   return 0;
 }

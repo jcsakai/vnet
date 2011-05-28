@@ -86,7 +86,7 @@ typedef enum {
 } ethernet_error_t;
 
 typedef struct {
-  i32 * vlan_to_sw_if_index;
+  u32 * vlan_to_sw_if_index;
 } ethernet_vlan_mapping_t;
 
 /* Per VLAN state. */
@@ -96,6 +96,12 @@ typedef struct {
 
 typedef struct {
   vlib_main_t * vlib_main;
+
+  /* Sparse vector mapping ethernet type in network byte order
+     to next index. */
+  u16 * input_next_by_type;
+
+  u32 * sparse_index_by_input_next_index;
 
   /* Pool of ethernet interface instances. */
   ethernet_interface_t * interfaces;
@@ -119,6 +125,9 @@ typedef struct {
 
   /* Hash indexed by 24 bits of (inner << 12) | outer VLAN IDs. */
   uword * vlan_index_by_2_vlan_id;
+
+  /* Set to one to use AB.CD.EF instead of A:B:C:D:E:F as ethernet format. */
+  int format_ethernet_address_16bit;
 } ethernet_main_t;
 
 always_inline ethernet_type_info_t *
@@ -169,6 +178,10 @@ ethernet_register_interface (vlib_main_t * vm,
 			     ethernet_phy_t * phy,
 			     u32 * hw_if_index_return);
 
+void ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index);
+
+int ethernet_interface_get_address (vlib_main_t * vm, u32 hw_if_index, u8 * address);
+
 /* Register given node index to take input for given ethernet type. */
 void
 ethernet_register_input_type (vlib_main_t * vm,
@@ -212,6 +225,18 @@ ethernet_setup_node (vlib_main_t * vm, u32 node_index)
   n->format_buffer = format_ethernet_header_with_length;
   n->unformat_buffer = unformat_ethernet_header;
   pn->unformat_edit = unformat_pg_ethernet_header;
+}
+
+typedef struct {
+  /* Saved value of current header by ethernet-input. */
+  u32 start_of_ethernet_header;
+} ethernet_buffer_opaque_t;
+
+always_inline ethernet_header_t *
+ethernet_buffer_get_header (vlib_buffer_t * b)
+{
+  ethernet_buffer_opaque_t * o = vlib_get_buffer_opaque (b);
+  return (void *) (b->data + o->start_of_ethernet_header);
 }
 
 #endif /* included_ethernet_h */

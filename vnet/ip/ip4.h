@@ -26,11 +26,16 @@
 #ifndef included_ip_ip4_h
 #define included_ip_ip4_h
 
+#include <vlib/mc.h>
 #include <vnet/ip/ip4_packet.h>
+#include <vnet/ip/lookup.h>
 
 typedef struct {
   /* Hash table for each prefix length mapping. */
   uword * adj_index_by_dst_address[33];
+
+  /* Temporary vectors for holding new/old values for hash_set. */
+  uword * new_hash_values, * old_hash_values;
 
   /* Table ID (hash key) for this FIB. */
   u32 table_id;
@@ -48,24 +53,44 @@ typedef void (ip4_add_del_route_function_t)
    u32 flags,
    ip4_address_t * address,
    u32 address_length,
-   void * lookup_result);
+   void * old_result,
+   void * new_result);
 
 typedef struct {
   ip4_add_del_route_function_t * function;
+  uword required_flags;
   uword function_opaque;
 } ip4_add_del_route_callback_t;
 
-typedef void (ip4_set_interface_address_function_t)
+typedef void (ip4_add_del_interface_address_function_t)
   (struct ip4_main_t * im,
    uword opaque,
    u32 sw_if_index,
    ip4_address_t * address,
-   u32 address_length);
+   u32 address_length,
+   u32 if_address_index,
+   u32 is_del);
 
 typedef struct {
-  ip4_set_interface_address_function_t * function;
+  ip4_add_del_interface_address_function_t * function;
   uword function_opaque;
-} ip4_set_interface_address_callback_t;
+} ip4_add_del_interface_address_callback_t;
+
+typedef enum {
+  /* First check access list to either permit or deny this
+     packet based on classification. */
+  IP4_RX_FEATURE_CHECK_ACCESS,
+
+  /* RPF check: verify that source address is reachable via
+     RX interface or via any interface. */
+  IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_RX,
+  IP4_RX_FEATURE_SOURCE_CHECK_REACHABLE_VIA_ANY,
+
+  /* Must be last: perform forwarding lookup. */
+  IP4_RX_FEATURE_LOOKUP,
+
+  IP4_N_RX_FEATURE,
+} ip4_rx_feature_type_t;
 
 typedef struct ip4_main_t {
   ip_lookup_main_t lookup_main;
@@ -75,25 +100,37 @@ typedef struct ip4_main_t {
 
   u32 fib_masks[33];
 
-  /* Table id indexed by software interface. */
-  u16 * fib_index_by_sw_if_index;
+  /* Table index indexed by software interface. */
+  u32 * fib_index_by_sw_if_index;
 
-  /* Hash table mapping table id to fib index. */
+  /* Hash table mapping table id to fib index.
+     ID space is not necessarily dense; index space is dense. */
   uword * fib_index_by_table_id;
-
-  /* IP4 address and length (e.g. netmask) for interfaces.
-     Address of ~0 means interface has no IP4 address. */
-  ip4_address_t * ip4_address_by_sw_if_index;
-  u8 * ip4_address_length_by_sw_if_index;
-
-  /* Template used to generate IP4 ARP packets. */
-  vlib_packet_template_t ip4_arp_request_packet_template;
 
   /* Vector of functions to call when routes are added/deleted. */
   ip4_add_del_route_callback_t * add_del_route_callbacks;
 
+  /* Hash table mapping interface route rewrite adjacency index by sw if index. */
+  uword * interface_route_adj_index_by_sw_if_index;
+
   /* Functions to call when interface address changes. */
-  ip4_set_interface_address_callback_t * set_interface_address_callbacks;
+  ip4_add_del_interface_address_callback_t * add_del_interface_address_callbacks;
+
+  /* Template used to generate IP4 ARP packets. */
+  vlib_packet_template_t ip4_arp_request_packet_template;
+
+  /* Seed for Jenkins hash used to compute ip4 flow hash. */
+  u32 flow_hash_seed;
+
+  struct {
+    /* TTL to use for host generated packets. */
+    u8 ttl;
+
+    /* TOS byte to use for host generated packets. */
+    u8 tos;
+
+    u8 pad[2];
+  } host_config;
 } ip4_main_t;
 
 /* Global ip4 main structure. */
@@ -104,20 +141,18 @@ extern vlib_node_registration_t ip4_input_node;
 extern vlib_node_registration_t ip4_rewrite_node;
 extern vlib_node_registration_t ip4_arp_node;
 
-ip_lookup_next_t
-ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst, u32 * adj_index);
+u32 ip4_fib_lookup_with_table (ip4_main_t * im, u32 fib_index, ip4_address_t * dst,
+			       u32 disable_default_route);
 
-always_inline ip4_address_t *
-ip4_get_interface_address (ip4_main_t * im, u32 sw_if_index)
-{ return vec_elt_at_index (im->ip4_address_by_sw_if_index, sw_if_index); }
-
-always_inline uword
-ip4_get_interface_address_length (ip4_main_t * im, u32 sw_if_index)
-{ return vec_elt (im->ip4_address_length_by_sw_if_index, sw_if_index); }
-
-always_inline uword
-ip4_interface_address_is_valid (ip4_address_t * a)
-{ return a->data_u32 != ~0; }
+always_inline u32
+ip4_fib_lookup (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst,
+		vlib_buffer_t * b)
+{
+  u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
+  fib_index = (b->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index;
+  return ip4_fib_lookup_with_table (im, fib_index, dst,
+				    /* disable_default_route */ 0);
+}
 
 always_inline uword
 ip4_destination_matches_route (ip4_main_t * im,
@@ -125,6 +160,15 @@ ip4_destination_matches_route (ip4_main_t * im,
 			       ip4_address_t * dest,
 			       uword dest_length)
 { return 0 == ((key->data_u32 ^ dest->data_u32) & im->fib_masks[dest_length]); }
+
+always_inline uword
+ip4_destination_matches_interface (ip4_main_t * im,
+				   ip4_address_t * key,
+				   ip_interface_address_t * ia)
+{
+  ip4_address_t * a = ip_interface_address_get_address (&im->lookup_main, ia);
+  return ip4_destination_matches_route (im, key, a, ia->address_length);
+}
 
 /* As above but allows for unaligned destinations (e.g. works right from IP header of packet). */
 always_inline uword
@@ -134,9 +178,51 @@ ip4_unaligned_destination_matches_route (ip4_main_t * im,
 					 uword dest_length)
 { return 0 == ((clib_mem_unaligned (&key->data_u32, u32) ^ dest->data_u32) & im->fib_masks[dest_length]); }
 
-void
-ip4_set_interface_address (vlib_main_t * vm, u32 sw_if_index,
-			   ip4_address_t * to_set, uword to_set_length);
+always_inline void
+ip4_src_address_for_packet (ip4_main_t * im, vlib_buffer_t * p, ip4_address_t * src, u32 sw_if_index)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip_interface_address_t * ia = ip_interface_address_for_packet (lm, p, sw_if_index);
+  ip4_address_t * a = ip_interface_address_get_address (lm, ia);
+  *src = a[0];
+}
+
+always_inline u32
+ip4_src_lookup_for_packet (ip4_main_t * im, vlib_buffer_t * p, ip4_header_t * i)
+{
+  ip_buffer_opaque_t * o = vlib_get_buffer_opaque (p);
+  if (o->src_adj_index == ~0)
+    o->src_adj_index =
+      ip4_fib_lookup (im, p->sw_if_index[VLIB_RX], &i->src_address, p);
+  return o->src_adj_index;
+}
+
+/* Find interface address which matches destination. */
+always_inline ip4_address_t *
+ip4_interface_address_matching_destination (ip4_main_t * im, ip4_address_t * dst, u32 sw_if_index,
+					    ip_interface_address_t ** result_ia)
+{
+  ip_lookup_main_t * lm = &im->lookup_main;
+  ip_interface_address_t * ia;
+  ip4_address_t * result = 0;
+
+  foreach_ip_interface_address (lm, ia, sw_if_index, ({
+    ip4_address_t * a = ip_interface_address_get_address (lm, ia);
+    if (ip4_destination_matches_route (im, dst, a, ia->address_length))
+      {
+	result = a;
+	break;
+      }
+  }));
+  if (result_ia)
+    *result_ia = result ? ia : 0;
+  return result;
+}
+
+clib_error_t *
+ip4_add_del_interface_address (vlib_main_t * vm, u32 sw_if_index,
+			       ip4_address_t * address, u32 address_length,
+			       u32 is_del);
 
 int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 
@@ -146,13 +232,44 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 #define IP4_ROUTE_FLAG_DEL (1 << 0)
 #define IP4_ROUTE_FLAG_TABLE_ID  (0 << 1)
 #define IP4_ROUTE_FLAG_FIB_INDEX (1 << 1)
+#define IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 2)
+#define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
+/* Not last add/del in group.  Facilities batching requests into packets. */
+#define IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP (1 << 4)
+/* Dynamic route created via ARP reply. */
+#define IP4_ROUTE_FLAG_NEIGHBOR (1 << 5)
 
-u32 ip4_add_del_route (ip4_main_t * im,
-		       u32 fib_index_or_table_id,
-		       u32 flags,
-		       ip4_address_t * address,
-		       u32 address_length,
-		       u32 adj_index);
+typedef struct {
+  /* IP4_ROUTE_FLAG_* */
+  u32 flags;
+
+  /* Either index of fib or table_id to hash and get fib.
+     IP4_ROUTE_FLAG_FIB_INDEX specifies index; otherwise table_id is assumed. */
+  u32 table_index_or_table_id;
+
+  /* Destination address (prefix) and length. */
+  ip4_address_t dst_address;
+  u32 dst_address_length;
+
+  /* Adjacency to use for this destination. */
+  u32 adj_index;
+
+  /* If specified adjacencies to add and then
+     use for this destination.  add_adj/n_add_adj
+     are override adj_index if specified. */
+  ip_adjacency_t * add_adj;
+  u32 n_add_adj;
+} ip4_add_del_route_args_t;
+
+void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * args);
+
+void ip4_add_del_route_next_hop (ip4_main_t * im,
+				 u32 flags,
+				 ip4_address_t * dst_address,
+				 u32 dst_address_length,
+				 ip4_address_t * next_hop,
+				 u32 next_hop_sw_if_index,
+				 u32 next_hop_weight);
 
 void *
 ip4_get_route (ip4_main_t * im,
@@ -161,20 +278,33 @@ ip4_get_route (ip4_main_t * im,
 	       u8 * address,
 	       u32 address_length);
 
-ip4_address_t *
+void
 ip4_foreach_matching_route (ip4_main_t * im,
 			    u32 table_index_or_table_id,
 			    u32 flags,
-			    u8 * address,
+			    ip4_address_t * address,
 			    u32 address_length,
-			    u32 * result_length,
-			    ip4_address_t * results);
+			    ip4_address_t ** results,
+			    u8 ** result_lengths);
 
 void ip4_delete_matching_routes (ip4_main_t * im,
 				 u32 table_index_or_table_id,
 				 u32 flags,
-				 u8 * address,
+				 ip4_address_t * address,
 				 u32 address_length);
+
+void ip4_maybe_remap_adjacencies (ip4_main_t * im,
+				  u32 table_index_or_table_id,
+				  u32 flags);
+
+void ip4_adjacency_set_interface_route (vlib_main_t * vm,
+					ip_adjacency_t * adj,
+					u32 sw_if_index,
+					u32 if_address_index);
+
+/* Send an ARP request to see if given destination is reachable on given interface. */
+clib_error_t *
+ip4_probe_neighbor (vlib_main_t * vm, ip4_address_t * dst, u32 sw_if_index);
 
 uword
 ip4_tcp_register_listener (vlib_main_t * vm,
@@ -184,5 +314,11 @@ uword
 ip4_udp_register_listener (vlib_main_t * vm,
 			   u16 dst_port,
 			   u32 next_node_index);
+
+u16 ip4_tcp_udp_compute_checksum (vlib_main_t * vm, vlib_buffer_t * p0, ip4_header_t * ip0);
+
+void ip4_register_protocol (u32 protocol, u32 node_index);
+
+serialize_function_t serialize_vnet_ip4_main, unserialize_vnet_ip4_main;
 
 #endif /* included_ip_ip4_h */
