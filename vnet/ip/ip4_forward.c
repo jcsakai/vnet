@@ -773,8 +773,8 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
-	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
+	  adj_index0 = ip4_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index1 = ip4_fib_lookup_buffer (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -861,7 +861,7 @@ ip4_lookup (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index0 = ip4_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
@@ -2613,8 +2613,8 @@ ip4_lookup_multicast (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
-	  adj_index1 = ip4_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
+	  adj_index0 = ip4_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index1 = ip4_fib_lookup_buffer (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -2701,7 +2701,7 @@ ip4_lookup_multicast (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  adj_index0 = ip4_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index0 = ip4_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 

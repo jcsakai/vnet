@@ -972,9 +972,9 @@ static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 
       dummy.flags = VNET_BUFFER_LOCALLY_GENERATED;
       if (is_ip6)
-	adj_index = ip6_fib_lookup (&ip6_main, sw_if_index, &a46.ip6, &dummy);
+	adj_index = ip6_fib_lookup_buffer (&ip6_main, sw_if_index, &a46.ip6, &dummy);
       else
-	adj_index = ip4_fib_lookup (&ip4_main, sw_if_index, &a46.ip4, &dummy);
+	adj_index = ip4_fib_lookup_buffer (&ip4_main, sw_if_index, &a46.ip4, &dummy);
 
       a_adj = ip_get_adjacency (lm, adj_index);
 
