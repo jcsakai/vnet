@@ -189,6 +189,7 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
+PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -325,31 +326,36 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/devices/i2c/i2c.c vnet/devices/pci/ige.c \
 	vnet/devices/pci/ixge.c vnet/devices/optics/sfp.c \
 	vnet/devices/xge/xge.c vnet/unix/pcap.c vnet/unix/tuntap.c
+
+########################################
+# Layer 2 protocol: SRP
+########################################
+# libvnet_la_SOURCES +=
 nobase_include_HEADERS = vnet/vnet/buffer.h vnet/vnet/config.h \
 	vnet/vnet/l3_types.h vnet/vnet/rewrite.h vnet/vnet/vnet.h \
 	vnet/ethernet/error.def vnet/ethernet/ethernet.h \
 	vnet/ethernet/packet.h vnet/ethernet/phy.h \
 	vnet/ethernet/phy_reg.h vnet/ethernet/types.def \
-	vnet/ppp/error.def vnet/ppp/ppp.h vnet/ppp/packet.h \
-	vnet/hdlc/error.def vnet/hdlc/hdlc.h vnet/hdlc/packet.h \
-	vnet/llc/llc.h vnet/snap/snap.h vnet/ip/format.h \
-	vnet/ip/icmp46_packet.h vnet/ip/icmp6.h vnet/ip/igmp_packet.h \
-	vnet/ip/ip.h vnet/ip/ip4.h vnet/ip/ip4_error.h \
-	vnet/ip/ip4_packet.h vnet/ip/ip6.h vnet/ip/ip6_error.h \
-	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
-	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp.h \
-	vnet/ip/tcp_packet.h vnet/ip/udp_packet.h vnet/osi/osi.h \
-	vnet/pg/pg.h vnet/pg/edit.h vnet/devices/i2c/i2c.h \
-	vnet/devices/optics/sfp.h vnet/devices/pci/ige.h \
-	vnet/devices/pci/ixge.h vnet/devices/xge/xge.h \
-	vnet/unix/pcap.h vnet/unix/tuntap.h
+	vnet/srp/packet.h vnet/ppp/error.def vnet/ppp/ppp.h \
+	vnet/ppp/packet.h vnet/hdlc/error.def vnet/hdlc/hdlc.h \
+	vnet/hdlc/packet.h vnet/llc/llc.h vnet/snap/snap.h \
+	vnet/ip/format.h vnet/ip/icmp46_packet.h vnet/ip/icmp6.h \
+	vnet/ip/igmp_packet.h vnet/ip/ip.h vnet/ip/ip4.h \
+	vnet/ip/ip4_error.h vnet/ip/ip4_packet.h vnet/ip/ip6.h \
+	vnet/ip/ip6_error.h vnet/ip/ip6_packet.h vnet/ip/lookup.h \
+	vnet/ip/ip_packet.h vnet/ip/ports.def vnet/ip/protocols.def \
+	vnet/ip/tcp.h vnet/ip/tcp_packet.h vnet/ip/udp_packet.h \
+	vnet/osi/osi.h vnet/pg/pg.h vnet/pg/edit.h \
+	vnet/devices/i2c/i2c.h vnet/devices/optics/sfp.h \
+	vnet/devices/pci/ige.h vnet/devices/pci/ixge.h \
+	vnet/devices/xge/xge.h vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = \
   example/main_stub.c				\
   example/rtt_test.c
 
 vnet_unix_LDFLAGS = -static
-vnet_unix_LDADD = libvnet.la -lvlib_unix -lvlib -lclib -lpthread -lm -ldl
+vnet_unix_LDADD = libvnet.la -l:libvlib_unix.a -l:libvlib.a -l:libclib.a -lpthread -lm -ldl
 all: all-am
 
 .SUFFIXES:
