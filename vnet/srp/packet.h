@@ -31,7 +31,7 @@
 
 /* SRP version 2. */
 
-#define foreach_srp_packet_mode			\
+#define foreach_srp_mode			\
   _ (reserved0)					\
   _ (reserved1)					\
   _ (reserved2)					\
@@ -43,7 +43,7 @@
 
 typedef enum {
 #define _(f) SRP_MODE_##f,
-  foreach_srp_packet_mode
+  foreach_srp_mode
 #undef _
   SRP_N_MODE,
 } srp_mode_t;
@@ -69,6 +69,11 @@ typedef union {
 #endif
   };
 } srp_header_t;
+
+typedef struct {
+  srp_header_t srp;
+  ethernet_header_t ethernet;
+} srp_and_ethernet_header_t;
 
 #define foreach_srp_control_packet_type		\
   _ (reserved)					\

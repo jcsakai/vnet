@@ -48,7 +48,8 @@ nobase_include_HEADERS +=			\
 ########################################
 # Layer 2 protocol: SRP
 ########################################
-# libvnet_la_SOURCES +=
+libvnet_la_SOURCES +=				\
+ vnet/srp/format.c
 
 nobase_include_HEADERS +=			\
  vnet/srp/packet.h

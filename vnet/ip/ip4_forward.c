@@ -2152,6 +2152,7 @@ ip4_arp (vlib_main_t * vm,
 	  if (drop0)
 	    continue;
 
+	  /* FIXME SRP VLAN SNAP etc. */
 	  {
 	    u32 bi0;
 	    vlib_buffer_t * b0;
