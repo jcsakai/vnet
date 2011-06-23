@@ -46,6 +46,15 @@ nobase_include_HEADERS +=			\
  vnet/ethernet/types.def
 
 ########################################
+# Layer 2 protocol: SRP
+########################################
+libvnet_la_SOURCES +=				\
+ vnet/srp/format.c
+
+nobase_include_HEADERS +=			\
+ vnet/srp/packet.h
+
+########################################
 # Layer 2 protocol: PPP
 ########################################
 libvnet_la_SOURCES +=				\
