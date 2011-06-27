@@ -211,8 +211,8 @@ typedef struct ip_lookup_main_t {
      size is accepted. */
   f64 multipath_next_hop_error_tolerance;
 
-  /* Adjacency index for routing table misses and drops. */
-  u32 miss_adj_index, drop_adj_index;
+  /* Adjacency index for routing table misses, local punts, and drops. */
+  u32 miss_adj_index, drop_adj_index, local_adj_index;
 
   ip_add_del_adjacency_callback_t * add_del_adjacency_callbacks;
 
