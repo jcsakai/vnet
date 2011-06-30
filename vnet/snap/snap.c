@@ -167,9 +167,7 @@ static clib_error_t * snap_init (vlib_main_t * vm)
   mhash_init (&sm->protocol_hash, sizeof (uword), sizeof (snap_oui_and_protocol_t));
 
   sm->protocol_info_by_name
-    = hash_create_vec (/* elts */ 0,
-		       /* key_bytes */ sizeof (u8),
-		       /* value_bytes */ sizeof (uword));
+    = hash_create_string (/* elts */ 0, sizeof (uword));
 
   return vlib_call_init_function (vm, snap_input_init);
 }
