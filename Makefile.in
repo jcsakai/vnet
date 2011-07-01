@@ -81,12 +81,12 @@ am_libvnet_la_OBJECTS = vnet/vnet/config.lo vnet/vnet/rewrite.lo \
 	vnet/ethernet/format.lo vnet/ethernet/init.lo \
 	vnet/ethernet/interface.lo vnet/ethernet/node.lo \
 	vnet/ethernet/pg.lo vnet/ethernet/phy.lo vnet/srp/format.lo \
-	vnet/ppp/node.lo vnet/ppp/pg.lo vnet/ppp/ppp.lo \
-	vnet/hdlc/node.lo vnet/hdlc/pg.lo vnet/hdlc/hdlc.lo \
-	vnet/llc/llc.lo vnet/llc/node.lo vnet/llc/pg.lo \
-	vnet/snap/snap.lo vnet/snap/node.lo vnet/snap/pg.lo \
-	vnet/ip/format.lo vnet/ip/icmp4.lo vnet/ip/icmp6.lo \
-	vnet/ip/ip46_cli.lo vnet/ip/ip4_format.lo \
+	vnet/srp/interface.lo vnet/ppp/node.lo vnet/ppp/pg.lo \
+	vnet/ppp/ppp.lo vnet/hdlc/node.lo vnet/hdlc/pg.lo \
+	vnet/hdlc/hdlc.lo vnet/llc/llc.lo vnet/llc/node.lo \
+	vnet/llc/pg.lo vnet/snap/snap.lo vnet/snap/node.lo \
+	vnet/snap/pg.lo vnet/ip/format.lo vnet/ip/icmp4.lo \
+	vnet/ip/icmp6.lo vnet/ip/ip46_cli.lo vnet/ip/ip4_format.lo \
 	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo vnet/ip/ip4_pg.lo \
 	vnet/ip/ip4_source_check.lo vnet/ip/ip6_format.lo \
 	vnet/ip/ip6_forward.lo vnet/ip/ip6_input.lo \
@@ -189,7 +189,6 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
-PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -312,14 +311,15 @@ libvnet_la_SOURCES = vnet/vnet/config.c vnet/vnet/rewrite.c \
 	vnet/ethernet/arp.c vnet/ethernet/cli.c vnet/ethernet/format.c \
 	vnet/ethernet/init.c vnet/ethernet/interface.c \
 	vnet/ethernet/node.c vnet/ethernet/pg.c vnet/ethernet/phy.c \
-	vnet/srp/format.c vnet/ppp/node.c vnet/ppp/pg.c vnet/ppp/ppp.c \
-	vnet/hdlc/node.c vnet/hdlc/pg.c vnet/hdlc/hdlc.c \
-	vnet/llc/llc.c vnet/llc/node.c vnet/llc/pg.c vnet/snap/snap.c \
-	vnet/snap/node.c vnet/snap/pg.c vnet/ip/format.c \
-	vnet/ip/icmp4.c vnet/ip/icmp6.c vnet/ip/ip46_cli.c \
-	vnet/ip/ip4_format.c vnet/ip/ip4_forward.c vnet/ip/ip4_input.c \
-	vnet/ip/ip4_pg.c vnet/ip/ip4_source_check.c \
-	vnet/ip/ip6_format.c vnet/ip/ip6_forward.c vnet/ip/ip6_input.c \
+	vnet/srp/format.c vnet/srp/interface.c vnet/ppp/node.c \
+	vnet/ppp/pg.c vnet/ppp/ppp.c vnet/hdlc/node.c vnet/hdlc/pg.c \
+	vnet/hdlc/hdlc.c vnet/llc/llc.c vnet/llc/node.c vnet/llc/pg.c \
+	vnet/snap/snap.c vnet/snap/node.c vnet/snap/pg.c \
+	vnet/ip/format.c vnet/ip/icmp4.c vnet/ip/icmp6.c \
+	vnet/ip/ip46_cli.c vnet/ip/ip4_format.c vnet/ip/ip4_forward.c \
+	vnet/ip/ip4_input.c vnet/ip/ip4_pg.c \
+	vnet/ip/ip4_source_check.c vnet/ip/ip6_format.c \
+	vnet/ip/ip6_forward.c vnet/ip/ip6_input.c \
 	vnet/ip/ip6_neighbor.c vnet/ip/ip6_pg.c vnet/ip/ip_checksum.c \
 	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c vnet/ip/tcp.c \
 	vnet/ip/tcp_format.c vnet/ip/tcp_init.c vnet/ip/tcp_pg.c \
@@ -463,6 +463,8 @@ vnet/srp/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) vnet/srp/$(DEPDIR)
 	@: > vnet/srp/$(DEPDIR)/$(am__dirstamp)
 vnet/srp/format.lo: vnet/srp/$(am__dirstamp) \
+	vnet/srp/$(DEPDIR)/$(am__dirstamp)
+vnet/srp/interface.lo: vnet/srp/$(am__dirstamp) \
 	vnet/srp/$(DEPDIR)/$(am__dirstamp)
 vnet/ppp/$(am__dirstamp):
 	@$(MKDIR_P) vnet/ppp
@@ -797,6 +799,8 @@ mostlyclean-compile:
 	-rm -f vnet/snap/snap.lo
 	-rm -f vnet/srp/format.$(OBJEXT)
 	-rm -f vnet/srp/format.lo
+	-rm -f vnet/srp/interface.$(OBJEXT)
+	-rm -f vnet/srp/interface.lo
 	-rm -f vnet/unix/pcap.$(OBJEXT)
 	-rm -f vnet/unix/pcap.lo
 	-rm -f vnet/unix/tuntap.$(OBJEXT)
@@ -871,6 +875,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/snap/$(DEPDIR)/pg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/snap/$(DEPDIR)/snap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/srp/$(DEPDIR)/format.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/srp/$(DEPDIR)/interface.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/pcap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/tuntap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/vnet/$(DEPDIR)/config.Plo@am__quote@
