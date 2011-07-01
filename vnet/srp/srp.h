@@ -27,28 +27,8 @@
 #define included_srp_h
 
 #include <vnet/srp/packet.h>
+#include <vnet/ethernet/ethernet.h>
 #include <vnet/pg/pg.h>
-
-/* SRP sends packets down 2 counter rotating rings outer and inner.
-   A side is rx outer plus tx inner.
-   B side is rx inner plus tx outer. */
-typedef enum {
-  SRP_SIDE_A,
-  SRP_SIDE_B,
-  SRP_N_SIDE,
-} srp_side_t;
-
-/* SRP interface instance. */
-typedef struct {
-  /* MAC address for this interface. */
-  u8 address[6];
-
-  /* Side of this interface. */
-  srp_side_t side;
-
-  /* Index of ring mate (other side). */
-  u32 mate_hw_if_index;
-} srp_interface_t;
 
 extern vlib_hw_interface_class_t srp_hw_interface_class;
 
@@ -66,43 +46,11 @@ typedef enum {
 typedef struct {
   vlib_main_t * vlib_main;
 
-  /* Pool of srp interface instances. */
-  srp_interface_t * interfaces;
-
   /* TTL to use for outgoing data packets. */
   u32 default_data_ttl;
 } srp_main_t;
 
 srp_main_t srp_main;
-
-always_inline uword
-is_srp_interface (u32 hw_if_index)
-{
-  srp_main_t * em = &srp_main;
-  vlib_hw_interface_t * i = vlib_get_hw_interface (em->vlib_main, hw_if_index);
-  vlib_hw_interface_class_t * c = vlib_get_hw_interface_class (em->vlib_main, i->hw_class_index);
-  return ! strcmp (c->name, srp_hw_interface_class.name);
-}
-
-always_inline srp_interface_t *
-srp_get_interface (srp_main_t * em, u32 hw_if_index)
-{
-  vlib_hw_interface_t * i = vlib_get_hw_interface (em->vlib_main, hw_if_index);
-  return (is_srp_interface (hw_if_index)
-	  ? pool_elt_at_index (em->interfaces, i->hw_instance)
-	  : 0);
-}
-
-clib_error_t *
-srp_register_interface (vlib_main_t * vm,
-			u32 dev_class_index,
-			u32 dev_instance,
-			u8 * address,
-			u32 * hw_if_index_return);
-
-void srp_delete_interface (vlib_main_t * vm, u32 hw_if_index);
-
-int srp_interface_get_address (vlib_main_t * vm, u32 hw_if_index, u8 * address);
 
 u8 * format_srp_header (u8 * s, va_list * args);
 u8 * format_srp_header_with_length (u8 * s, va_list * args);
@@ -110,9 +58,6 @@ u8 * format_srp_header_with_length (u8 * s, va_list * args);
 /* Parse srp header. */
 uword
 unformat_srp_header (unformat_input_t * input, va_list * args);
-
-/* Parse srp interface name; return hw_if_index. */
-uword unformat_srp_interface (unformat_input_t * input, va_list * args);
 
 uword unformat_pg_srp_header (unformat_input_t * input, va_list * args);
 

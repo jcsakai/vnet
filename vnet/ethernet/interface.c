@@ -98,7 +98,6 @@ VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
   .format_address = format_ethernet_address,
   .format_header = format_ethernet_header_with_length,
   .format_device = format_ethernet_interface,
-  .hw_address_len = 6,
   .unformat_hw_address = unformat_ethernet_address,
   .unformat_header = unformat_ethernet_header,
   .set_rewrite = ethernet_set_rewrite,
@@ -195,6 +194,8 @@ ethernet_register_interface (vlib_main_t * vm,
   ethernet_interface_update_media (ei, hi);
 
   memcpy (ei->address, address, sizeof (ei->address));
+  vec_free (hi->hw_address);
+  vec_add (hi->hw_address, address, sizeof (ei->address));
 
  done:
   if (error)
@@ -221,22 +222,6 @@ ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index)
 
   vlib_delete_hw_interface (vm, hw_if_index);
   pool_put (em->interfaces, ei);
-}
-
-int ethernet_interface_get_address (vlib_main_t * vm, u32 hw_if_index, u8 * address)
-{
-  ethernet_main_t * em = ethernet_get_main (vm);
-  ethernet_interface_t * ei;
-  vlib_hw_interface_t * hi;
-
-  hi = vlib_get_hw_interface (vm, hw_if_index);
-
-  if (hi->hw_class_index != ethernet_hw_interface_class.index)
-    return 0;
-
-  ei = pool_elt_at_index (em->interfaces, hi->hw_instance);
-  memcpy (address, ei->address, sizeof (ei->address));
-  return 1;
 }
 
 #if DEBUG > 0
