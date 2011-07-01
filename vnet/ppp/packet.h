@@ -86,7 +86,7 @@ _ (0x00fd, compressed_datagram)			\
 _ (0x0201, 802_1d_hello)			\
 _ (0x0203, ibm_source_routing)			\
 _ (0x0205, dec_lanbridge)			\
-_ (0x0207, cisco_discovery)			\
+_ (0x0207, cdp)					\
 _ (0x0209, netcs)				\
 _ (0x020b, stp)					\
 _ (0x020d, edp)					\

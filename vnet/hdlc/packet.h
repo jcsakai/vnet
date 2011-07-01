@@ -28,6 +28,7 @@
 
 #define foreach_hdlc_protocol			\
   _ (0x0800, ip4)				\
+  _ (0x2000, cdp)				\
   _ (0x8035, slarp)				\
   _ (0x8847, mpls_unicast)			\
   _ (0x8848, mpls_multicast)			\
