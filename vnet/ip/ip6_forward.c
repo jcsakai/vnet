@@ -933,7 +933,7 @@ void ip6_adjacency_set_interface_route (vlib_main_t * vm,
       n = IP_LOOKUP_NEXT_ARP;
       node_index = ip6_discover_neighbor_node.index;
       adj->if_address_index = if_address_index;
-    }
+  }
   else
     {
       n = IP_LOOKUP_NEXT_REWRITE;
@@ -946,8 +946,9 @@ void ip6_adjacency_set_interface_route (vlib_main_t * vm,
     VNET_L3_PACKET_TYPE_IP6,
     sw_if_index,
     node_index,
+    VNET_REWRITE_FOR_SW_INTERFACE_ADDRESS_BROADCAST,
     &adj->rewrite_header,
-    n == IP_LOOKUP_NEXT_REWRITE ? sizeof (adj->rewrite_data) : 0);
+    sizeof (adj->rewrite_data));
 }
 
 static void
@@ -971,6 +972,7 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
   x.n_add_adj = 0;
   x.add_adj = 0;
 
+  a->neighbor_probe_adj_index = ~0;
   if (a->address_length < 128)
     {
       adj = ip_add_adjacency (lm, /* template */ 0, /* block size */ 1,
@@ -978,6 +980,7 @@ ip6_add_interface_routes (vlib_main_t * vm, u32 sw_if_index,
       ip6_adjacency_set_interface_route (vm, adj, sw_if_index, a - lm->if_address_pool);
       ip_call_add_del_adjacency_callbacks (lm, x.adj_index, /* is_del */ 0);
       ip6_add_del_route (im, &x);
+      a->neighbor_probe_adj_index = x.adj_index;
     }
 
   /* Add e.g. ::1/128 as local to this host. */
@@ -2053,26 +2056,14 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
 	  {
 	    u32 bi0;
+	    icmp6_neighbor_solicitation_header_t * h0;
+	    vlib_hw_interface_t * hw_if0;
 	    vlib_buffer_t * b0;
-	    icmp6_neighbor_solicitation_for_ethernet_t * h0;
-	    vlib_sw_interface_t * swif0;
-	    ethernet_interface_t * eif0;
-	    u8 * eth_addr0, dummy[6] = { 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, };
 
 	    h0 = vlib_packet_template_get_packet (vm, &im->discover_neighbor_packet_template, &bi0);
 
 	    /* Build ethernet header. */
-	    swif0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
-	    ASSERT (swif0->type == VLIB_SW_INTERFACE_TYPE_HARDWARE);
-	    eif0 = ethernet_get_interface (&ethernet_main, swif0->hw_if_index);
-	    eth_addr0 = eif0 ? eif0->address : dummy;
-	    memcpy (h0->ethernet.src_address, eth_addr0, sizeof (h0->ethernet.src_address));
-
-	    /* Destination ethernet address is ipv6 multicast 0x3333.ffXX.XXXX where lower
-	       24 bits are from target. */
-	    h0->ethernet.dst_address[3] = ip0->dst_address.as_u8[13];
-	    h0->ethernet.dst_address[4] = ip0->dst_address.as_u8[14];
-	    h0->ethernet.dst_address[5] = ip0->dst_address.as_u8[15];
+	    hw_if0 = vlib_get_sup_hw_interface (vm, sw_if_index0);
 
 	    /* Choose source address based on destination lookup adjacency. */
 	    ip6_src_address_for_packet (im, p0, &h0->ip.src_address, sw_if_index0);
@@ -2085,8 +2076,8 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
 	    h0->neighbor.target_address = ip0->dst_address;
 
-	    memcpy (h0->link_layer_option.ethernet_address, eth_addr0,
-		    sizeof (h0->link_layer_option.ethernet_address));
+	    memcpy (h0->link_layer_option.ethernet_address, hw_if0->hw_address,
+		    vec_len (hw_if0->hw_address));
 
 	    h0->neighbor.icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (vm, 0, &h0->ip);
 	    ASSERT (0 == ip6_tcp_udp_icmp_compute_checksum (vm, 0, &h0->ip));
@@ -2095,7 +2086,11 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	    b0 = vlib_get_buffer (vm, bi0);
 	    b0->sw_if_index[VLIB_TX] = p0->sw_if_index[VLIB_TX];
 
-	    next0 = vec_elt (im->discover_neighbor_next_index_by_hw_if_index, swif0->hw_if_index);
+	    /* Add rewrite/encap string. */
+	    vnet_rewrite_one_header (adj0[0], h0, sizeof (ethernet_header_t));
+	    vlib_buffer_advance (b0, -adj0->rewrite_header.data_bytes);
+
+	    next0 = vec_elt (im->discover_neighbor_next_index_by_hw_if_index, hw_if0->hw_if_index);
 
 	    vlib_set_next_frame_buffer (vm, node, next0, bi0);
 	  }
@@ -2156,15 +2151,15 @@ clib_error_t *
 ip6_probe_neighbor (vlib_main_t * vm, ip6_address_t * dst, u32 sw_if_index)
 {
   ip6_main_t * im = &ip6_main;
-  icmp6_neighbor_solicitation_for_ethernet_t * h;
-  vlib_hw_interface_t * hi;
-  ethernet_interface_t * eif;
-  u32 bi;
-  u8 * eth_addr;
-  static u8 zero[6];
+  icmp6_neighbor_solicitation_header_t * h;
   ip6_address_t * src;
+  ip_interface_address_t * ia;
+  ip_adjacency_t * adj;
+  vlib_hw_interface_t * hi;
+  vlib_buffer_t * b;
+  u32 bi;
 
-  src = ip6_interface_address_matching_destination (im, dst, sw_if_index);
+  src = ip6_interface_address_matching_destination (im, dst, sw_if_index, &ia);
   if (! src)
     return clib_error_return (0, "no matching interface address for destination %U (interface %U)",
 			      format_ip6_address, dst,
@@ -2173,17 +2168,6 @@ ip6_probe_neighbor (vlib_main_t * vm, ip6_address_t * dst, u32 sw_if_index)
   h = vlib_packet_template_get_packet (vm, &im->discover_neighbor_packet_template, &bi);
 
   hi = vlib_get_sup_hw_interface (vm, sw_if_index);
-
-  /* Build ethernet header. */
-  eif = ethernet_get_interface (&ethernet_main, hi->hw_if_index);
-  eth_addr = eif ? eif->address : zero;
-  memcpy (h->ethernet.src_address, eth_addr, sizeof (h->ethernet.src_address));
-
-  /* Destination ethernet address is ipv6 multicast 0x3333.ffXX.XXXX where lower
-     24 bits are from target. */
-  h->ethernet.dst_address[3] = dst->as_u8[13];
-  h->ethernet.dst_address[4] = dst->as_u8[14];
-  h->ethernet.dst_address[5] = dst->as_u8[15];
 
   /* Destination address is a solicited node multicast address.  We need to fill in
      the low 24 bits with low 24 bits of target's address. */
@@ -2194,16 +2178,18 @@ ip6_probe_neighbor (vlib_main_t * vm, ip6_address_t * dst, u32 sw_if_index)
   h->ip.src_address = src[0];
   h->neighbor.target_address = dst[0];
 
-  memcpy (h->link_layer_option.ethernet_address, eth_addr,
-	  sizeof (h->link_layer_option.ethernet_address));
+  memcpy (h->link_layer_option.ethernet_address, hi->hw_address, vec_len (hi->hw_address));
 
   h->neighbor.icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (vm, 0, &h->ip);
   ASSERT (0 == ip6_tcp_udp_icmp_compute_checksum (vm, 0, &h->ip));
 
-  {
-    vlib_buffer_t * b = vlib_get_buffer (vm, bi);
-    b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX] = sw_if_index;
-  }
+  b = vlib_get_buffer (vm, bi);
+  b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX] = sw_if_index;
+
+  /* Add encapsulation string for software interface (e.g. ethernet header). */
+  adj = ip_get_adjacency (&im->lookup_main, ia->neighbor_probe_adj_index);
+  vnet_rewrite_one_header (adj[0], h, sizeof (ethernet_header_t));
+  vlib_buffer_advance (b, -adj->rewrite_header.data_bytes);
 
   {
     vlib_frame_t * f = vlib_get_frame_to_node (vm, hi->output_node_index);
@@ -2475,17 +2461,13 @@ ip6_lookup_init (vlib_main_t * vm)
   }
 
   {
-    icmp6_neighbor_solicitation_for_ethernet_t p;
+    icmp6_neighbor_solicitation_header_t p;
 
     memset (&p, 0, sizeof (p));
 
-    /* Send to broadcast address 0x3333.ffXX.XXXX.  XX will be filled in later. */
-    ip6_multicast_ethernet_address (p.ethernet.dst_address, 0xff000000);
-    p.ethernet.type = clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
-
     p.ip.ip_version_traffic_class_and_flow_label = clib_host_to_net_u32 (0x6 << 28);
     p.ip.payload_length = clib_host_to_net_u16 (sizeof (p)
-						- STRUCT_OFFSET_OF (icmp6_neighbor_solicitation_for_ethernet_t, neighbor));
+						- STRUCT_OFFSET_OF (icmp6_neighbor_solicitation_header_t, neighbor));
     p.ip.protocol = IP_PROTOCOL_ICMP6;
     p.ip.hop_limit = 255;
     ip6_set_solicited_node_multicast_address (&p.ip.dst_address, 0);

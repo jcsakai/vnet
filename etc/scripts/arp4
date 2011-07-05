@@ -1,11 +1,11 @@
 packet-generator new {
   name x
   limit 1
-  node ip6-input
+  node ip4-input
   size 64-64
   no-recycle
   data {
-    ICMP6: 2000::2 -> 2001::2
+    ICMP: 1.0.0.2 -> 2.0.0.2
     ICMP echo_request
     incrementing 100
   }
@@ -17,5 +17,5 @@ ethernet create-interfaces
 set int state fake-eth0 up
 set int state fake-eth1 up
 
-set int ip address fake-eth0 2000::1/64
-set int ip address fake-eth1 2001::1/64
+set int ip address fake-eth0 1.0.0.1/24
+set int ip address fake-eth1 2.0.0.1/24

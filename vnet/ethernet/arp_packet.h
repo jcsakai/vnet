@@ -126,9 +126,4 @@ typedef struct {
   };
 } ethernet_arp_header_t;
 
-typedef PACKED (struct {
-  ethernet_header_t ethernet;
-  ethernet_arp_header_t arp;
-}) ethernet_and_arp_header_t;
-
 #endif /* included_ethernet_arp_packet_h */

@@ -105,13 +105,13 @@ set_ethernet_neighbor (vlib_main_t * vm,
 		       ip6_neighbor_main_t * nm,
 		       u32 sw_if_index,
 		       ip6_address_t * a,
-		       u8 * link_layer_address)
+		       u8 * link_layer_address,
+		       uword n_bytes_link_layer_address)
 {
   ip6_neighbor_key_t k;
   ip6_neighbor_t * n;
   ip6_main_t * im = &ip6_main;
   uword * p;
-  ethernet_header_t * eth;
 
   k.sw_if_index = sw_if_index;
   k.ip6_address = a[0];
@@ -131,12 +131,9 @@ set_ethernet_neighbor (vlib_main_t * vm,
 	 VNET_L3_PACKET_TYPE_IP6,
 	 sw_if_index,
 	 ip6_rewrite_node.index,
+	 link_layer_address,
 	 &adj.rewrite_header,
 	 sizeof (adj.rewrite_data));
-
-      /* Copy in destination ethernet address from ARP. */
-      eth = vnet_rewrite_get_data (adj);
-      memcpy (eth->dst_address, link_layer_address, sizeof (eth->dst_address));
 
       args.table_index_or_table_id = im->fib_index_by_sw_if_index[sw_if_index];
       args.flags = IP6_ROUTE_FLAG_FIB_INDEX | IP6_ROUTE_FLAG_ADD | IP6_ROUTE_FLAG_NEIGHBOR;
@@ -154,7 +151,7 @@ set_ethernet_neighbor (vlib_main_t * vm,
     }
 
   /* Update time stamp and ethernet address. */
-  memcpy (n->link_layer_address, link_layer_address, sizeof (eth->dst_address));
+  memcpy (n->link_layer_address, link_layer_address, n_bytes_link_layer_address);
   n->cpu_time_last_updated = clib_cpu_time_now ();
 }
 
@@ -291,7 +288,8 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	  if (PREDICT_TRUE (error0 == ICMP6_ERROR_NONE && o0 != 0))
 	    set_ethernet_neighbor (vm, nm, sw_if_index0,
 				   is_solicitation ? &ip0->src_address : &h0->target_address,
-				   o0->ethernet_address);
+				   o0->ethernet_address,
+				   sizeof (o0->ethernet_address));
 
 	  if (is_solicitation && error0 == ICMP6_ERROR_NONE)
 	    {

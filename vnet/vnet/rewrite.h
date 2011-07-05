@@ -222,10 +222,12 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
 			     sizeof ((rw0).rewrite_data),		\
 			     (most_likely_size))
 
+#define VNET_REWRITE_FOR_SW_INTERFACE_ADDRESS_BROADCAST ((void *) 0)
 void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
 				    vnet_l3_packet_type_t packet_type,
 				    u32 sw_if_index,
 				    u32 node_index,
+				    void * dst_address,
 				    vnet_rewrite_header_t * rw,
 				    u32 max_rewrite_bytes);
 

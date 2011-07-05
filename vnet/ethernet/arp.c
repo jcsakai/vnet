@@ -272,7 +272,6 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
     {
       ip4_add_del_route_args_t args;
       ip_adjacency_t adj;
-      ethernet_header_t * eth;
 
       adj.lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
 
@@ -281,12 +280,9 @@ arp_set_ip4_over_ethernet (vlib_main_t * vm,
 	 VNET_L3_PACKET_TYPE_IP4,
 	 sw_if_index,
 	 ip4_rewrite_node.index,
+	 a->ethernet,		/* destination address */
 	 &adj.rewrite_header,
 	 sizeof (adj.rewrite_data));
-
-      /* Copy in destination ethernet address from ARP. */
-      eth = vnet_rewrite_get_data (adj);
-      memcpy (eth->dst_address, a->ethernet, sizeof (eth->dst_address));
 
       args.table_index_or_table_id = fib_index;
       args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_NEIGHBOR;
@@ -339,7 +335,6 @@ arp_input (vlib_main_t * vm,
 {
   ethernet_arp_main_t * am = &ethernet_arp_main;
   ip4_main_t * im4 = &ip4_main;
-  ethernet_main_t * em = &ethernet_main;
   u32 n_left_from, next_index, * from, * to_next;
   u32 n_replies_sent = 0;
 
@@ -362,10 +357,9 @@ arp_input (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  vlib_sw_interface_t * sw_if0;
+	  vlib_hw_interface_t * hw_if0;
 	  ethernet_arp_header_t * arp0;
 	  ethernet_header_t * eth0;
-	  ethernet_interface_t * eth_if0;
 	  ip_interface_address_t * ifa0;
 	  ip4_address_t * if_addr0;
 	  u32 pi0, error0, next0, sw_if_index0;
@@ -443,29 +437,23 @@ arp_input (vlib_main_t * vm,
 	    }
 
 	  /* Send a reply. */
-	  sw_if0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
-	  ASSERT (sw_if0->type == VLIB_SW_INTERFACE_TYPE_HARDWARE);
-	  next0 = vec_elt (am->arp_input_next_index_by_hw_if_index, sw_if0->hw_if_index);
-
-	  eth_if0 = ethernet_get_interface (em, sw_if0->hw_if_index);
-	  if (! eth_if0)
-	    {
-	      static ethernet_interface_t dummy;
-	      eth_if0 = &dummy;
-	    }
+	  hw_if0 = vlib_get_sup_hw_interface (vm, sw_if_index0);
+	  next0 = vec_elt (am->arp_input_next_index_by_hw_if_index, hw_if0->hw_if_index);
 
 	  arp0->opcode = clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply);
 
 	  arp0->ip4_over_ethernet[1] = arp0->ip4_over_ethernet[0];
 
-	  memcpy (arp0->ip4_over_ethernet[0].ethernet, eth_if0->address, 6);
+	  memcpy (arp0->ip4_over_ethernet[0].ethernet, hw_if0->hw_address, 6);
 	  clib_mem_unaligned (&arp0->ip4_over_ethernet[0].ip4.data_u32, u32) = if_addr0->data_u32;
 
-	  p0->current_data -= sizeof (eth0[0]);
-	  p0->current_length += sizeof (eth0[0]);
+	  /* Hardware must be ethernet-like. */
+	  ASSERT (vec_len (hw_if0->hw_address) == 6);
 
 	  memcpy (eth0->dst_address, eth0->src_address, 6);
-	  memcpy (eth0->src_address, eth_if0->address, 6);
+	  memcpy (eth0->src_address, hw_if0->hw_address, 6);
+
+	  vlib_buffer_reset (p0);
 
 	  if (next0 != next_index)
 	    {

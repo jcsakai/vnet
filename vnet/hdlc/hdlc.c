@@ -157,6 +157,7 @@ unformat_hdlc_header (unformat_input_t * input, va_list * args)
 static uword hdlc_set_rewrite (vlib_main_t * vm,
 			       u32 sw_if_index,
 			       u32 l3_type,
+			       void * dst_address,
 			       void * rewrite,
 			       uword max_rewrite_bytes)
 {

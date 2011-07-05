@@ -1,4 +1,4 @@
-int create-ethernet
+ethernet create-interfaces
 set int state fake-eth0 up
 set int ip address fake-eth0 1.0.0.1/24
 comment { error }

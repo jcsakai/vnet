@@ -156,31 +156,29 @@ void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
 				    vnet_l3_packet_type_t packet_type,
 				    u32 sw_if_index,
 				    u32 node_index,
+				    void * dst_address,
 				    vnet_rewrite_header_t * rw,
 				    u32 max_rewrite_bytes)
 {
   vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
   vlib_hw_interface_class_t * hc = vlib_get_hw_interface_class (vm, hw->hw_class_index);
+  static u8 * rw_tmp = 0;
+  uword n_rw_tmp;
 
   rw->sw_if_index = sw_if_index;
   rw->node_index = node_index;
   rw->next_index = vlib_node_add_next (vm, node_index, hw->output_node_index);
   rw->max_l3_packet_bytes = hw->max_l3_packet_bytes[VLIB_TX];
 
-  if (max_rewrite_bytes)
-    {
-      u8 * rw_tmp = 0;
-      uword n_rw_tmp;
+  ASSERT (max_rewrite_bytes > 0);
+  vec_reset_length (rw_tmp);
+  vec_validate (rw_tmp, max_rewrite_bytes - 1);
 
-      vec_resize (rw_tmp, max_rewrite_bytes);
+  ASSERT (hc->set_rewrite);
+  n_rw_tmp = hc->set_rewrite (vm, sw_if_index, packet_type, dst_address, rw_tmp, max_rewrite_bytes);
 
-      ASSERT (hc->set_rewrite);
-      n_rw_tmp = hc->set_rewrite (vm, sw_if_index, packet_type, rw_tmp, max_rewrite_bytes);
-
-      ASSERT (n_rw_tmp > 0 && n_rw_tmp < max_rewrite_bytes);
-      vnet_rewrite_set_data_internal (rw, max_rewrite_bytes, rw_tmp, n_rw_tmp);
-      vec_free (rw_tmp);
-    }
+  ASSERT (n_rw_tmp > 0 && n_rw_tmp < max_rewrite_bytes);
+  vnet_rewrite_set_data_internal (rw, max_rewrite_bytes, rw_tmp, n_rw_tmp);
 }
 
 void serialize_vnet_rewrite (serialize_main_t * m, va_list * va)

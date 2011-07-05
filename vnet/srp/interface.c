@@ -31,6 +31,7 @@
 static uword srp_set_rewrite (vlib_main_t * vm,
 			      u32 sw_if_index,
 			      u32 l3_type,
+			      void * dst_address,
 			      void * rewrite,
 			      uword max_rewrite_bytes)
 {
@@ -49,13 +50,18 @@ static uword srp_set_rewrite (vlib_main_t * vm,
     _ (IP6, IP6);
     _ (MPLS_UNICAST, MPLS_UNICAST);
     _ (MPLS_MULTICAST, MPLS_MULTICAST);
+    _ (ARP, ARP);
 #undef _
   default:
     return 0;
   }
 
   memcpy (h->ethernet.src_address, hw->hw_address, sizeof (h->ethernet.src_address));
-  memset (h->ethernet.dst_address, 0, sizeof (h->ethernet.dst_address));
+  if (dst_address)
+    memcpy (h->ethernet.dst_address, dst_address, sizeof (h->ethernet.dst_address));
+  else
+    memset (h->ethernet.dst_address, ~0, sizeof (h->ethernet.dst_address)); /* broadcast */
+
   h->ethernet.type = clib_host_to_net_u16 (type);
 
   h->srp.as_u16 = 0;

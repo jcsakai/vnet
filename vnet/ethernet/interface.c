@@ -31,6 +31,7 @@
 static uword ethernet_set_rewrite (vlib_main_t * vm,
 				   u32 sw_if_index,
 				   u32 l3_type,
+				   void * dst_address,
 				   void * rewrite,
 				   uword max_rewrite_bytes)
 {
@@ -55,6 +56,7 @@ static uword ethernet_set_rewrite (vlib_main_t * vm,
     _ (IP6, IP6);
     _ (MPLS_UNICAST, MPLS_UNICAST);
     _ (MPLS_MULTICAST, MPLS_MULTICAST);
+    _ (ARP, ARP);
 #undef _
   default:
     return 0;
@@ -62,7 +64,10 @@ static uword ethernet_set_rewrite (vlib_main_t * vm,
 
   ei = pool_elt_at_index (em->interfaces, hw->hw_instance);
   memcpy (h->src_address, ei->address, sizeof (h->src_address));
-  memset (h->dst_address, 0, sizeof (h->dst_address));
+  if (dst_address)
+    memcpy (h->dst_address, dst_address, sizeof (h->dst_address));
+  else
+    memset (h->dst_address, ~0, sizeof (h->dst_address)); /* broadcast */
 
   if (sub_sw != sup_sw)
     {

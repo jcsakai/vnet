@@ -317,7 +317,7 @@ typedef PACKED (struct {
 
   u32 reserved_must_be_zero;
 
-  /* Better next hopt to use for given destination. */
+  /* Better next hop to use for given destination. */
   ip6_address_t better_next_hop_address;
 
   ip6_address_t dst_address;
@@ -328,13 +328,11 @@ typedef PACKED (struct {
 
 /* Solicitation/advertisement packet format for ethernet. */
 typedef PACKED (struct {
-  ethernet_header_t ethernet;
-
   ip6_header_t ip;
 
   icmp6_neighbor_solicitation_or_advertisement_header_t neighbor;
 
   icmp6_neighbor_discovery_ethernet_link_layer_address_option_t link_layer_option;
-}) icmp6_neighbor_solicitation_for_ethernet_t;
+}) icmp6_neighbor_solicitation_header_t;
 
 #endif /* included_vnet_icmp46_packet_h */

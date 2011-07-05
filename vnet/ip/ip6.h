@@ -225,7 +225,8 @@ ip6_src_lookup_for_packet (ip6_main_t * im, vlib_buffer_t * p, ip6_header_t * i)
 
 /* Find interface address which matches destination. */
 always_inline ip6_address_t *
-ip6_interface_address_matching_destination (ip6_main_t * im, ip6_address_t * dst, u32 sw_if_index)
+ip6_interface_address_matching_destination (ip6_main_t * im, ip6_address_t * dst, u32 sw_if_index,
+					    ip_interface_address_t ** result_ia)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
   ip_interface_address_t * ia;
@@ -239,6 +240,8 @@ ip6_interface_address_matching_destination (ip6_main_t * im, ip6_address_t * dst
 	break;
       }
   }));
+  if (result_ia)
+    *result_ia = result ? ia : 0;
   return result;
 }
 

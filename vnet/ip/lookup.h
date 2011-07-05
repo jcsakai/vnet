@@ -60,6 +60,9 @@ typedef struct {
   /* Handle for this adjacency in adjacency heap. */
   u32 heap_handle;
 
+  /* Interface address index for this local/arp adjacency. */
+  u32 if_address_index;
+
   /* Number of adjecencies in block.  Greater than 1 means multipath;
      otherwise equal to 1. */
   u16 n_adj;
@@ -70,19 +73,7 @@ typedef struct {
     u16 lookup_next_index_as_int;
   };
 
-  union {
-    /* IP_LOOKUP_NEXT_REWRITE adjacencies. */
-    vnet_declare_rewrite (64 - 2*sizeof(u32));
-
-    /* IP_LOOKUP_NEXT_{LOCAL,ARP} */
-    struct {
-      vnet_rewrite_header_t local_arp_dummy_header;
-
-      /* Interface address index for this local/arp adjacency follows rewrite header.
-	 No rewrite data is used for these rewrites. */
-      u32 if_address_index;
-    };
-  };
+  vnet_declare_rewrite (128 - 3*sizeof(u32));
 } ip_adjacency_t;
 
 /* Index into adjacency table. */
@@ -162,6 +153,9 @@ typedef struct {
 
   /* Interface which has this address. */
   u32 sw_if_index;
+
+  /* Adjacency for neighbor probe (ARP) for this interface address. */
+  u32 neighbor_probe_adj_index;
 
   /* Address (prefix) length for this interface. */
   u16 address_length;
