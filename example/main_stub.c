@@ -21,6 +21,8 @@ vnet_main_init (vlib_main_t * vm)
     return error;
   if ((error = vlib_call_init_function (vm, osi_init)))
     return error;
+  if ((error = vlib_call_init_function (vm, srp_init)))
+    return error;
 
   if ((error = vlib_call_init_function (vm, ixge_init)))
     return error;

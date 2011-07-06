@@ -25,6 +25,24 @@
 
 #include <vnet/vnet/rewrite.h>
 
+void vnet_rewrite_copy_slow_path (vnet_rewrite_data_t * p0,
+				  vnet_rewrite_data_t * rw0,
+				  word n_left,
+				  uword most_likely_size)
+{
+  uword n_done = round_pow2 (most_likely_size, sizeof (rw0[0])) / sizeof (rw0[0]);
+
+  p0 -= n_done;
+  rw0 -= n_done;
+  while (n_left > 0)
+    {
+      vnet_rewrite_copy_one (p0, rw0, 0);
+      p0--;
+      rw0--;
+      n_left--;
+    }
+}
+
 u8 * format_vnet_rewrite (u8 * s, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);

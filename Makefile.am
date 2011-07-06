@@ -50,10 +50,12 @@ nobase_include_HEADERS +=			\
 ########################################
 libvnet_la_SOURCES +=				\
  vnet/srp/format.c				\
- vnet/srp/interface.c
+ vnet/srp/interface.c				\
+ vnet/srp/node.c
 
 nobase_include_HEADERS +=			\
- vnet/srp/packet.h
+ vnet/srp/packet.h				\
+ vnet/srp/srp.h
 
 ########################################
 # Layer 2 protocol: PPP

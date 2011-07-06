@@ -27,6 +27,7 @@
 #include <vnet/ethernet/ethernet.h>	/* for ethernet_header_t */
 #include <vnet/ethernet/arp_packet.h>	/* for ethernet_arp_header_t */
 #include <vnet/ppp/ppp.h>
+#include <vnet/srp/srp.h>	/* for srp_hw_interface_class */
 #include <vnet/vnet/l3_types.h>
 
 /* This is really, really simple but stupid fib. */
@@ -913,7 +914,8 @@ void ip4_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj,
   vnet_l3_packet_type_t packet_type;
   u32 node_index;
 
-  if (is_ethernet_interface (hw->hw_if_index))
+  if (hw->hw_class_index == ethernet_hw_interface_class.index
+      || hw->hw_class_index == srp_hw_interface_class.index)
     {
       n = IP_LOOKUP_NEXT_ARP;
       node_index = ip4_arp_node.index;

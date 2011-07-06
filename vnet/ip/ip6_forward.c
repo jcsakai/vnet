@@ -25,6 +25,7 @@
 
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h> /* for ethernet_header_t */
+#include <vnet/srp/srp.h>	/* for srp_hw_interface_class */
 #include <vnet/vnet/l3_types.h>
 
 always_inline u32
@@ -928,7 +929,8 @@ void ip6_adjacency_set_interface_route (vlib_main_t * vm,
   ip_lookup_next_t n;
   u32 node_index;
 
-  if (is_ethernet_interface (hw->hw_if_index))
+  if (hw->hw_class_index == ethernet_hw_interface_class.index
+      || hw->hw_class_index == srp_hw_interface_class.index)
     {
       n = IP_LOOKUP_NEXT_ARP;
       node_index = ip6_discover_neighbor_node.index;

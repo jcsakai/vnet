@@ -108,6 +108,11 @@ vnet_rewrite_copy_one (vnet_rewrite_data_t * p0, vnet_rewrite_data_t * rw0, int 
   p0[-i] = rw0[-i];
 }
 
+void vnet_rewrite_copy_slow_path (vnet_rewrite_data_t * p0,
+				  vnet_rewrite_data_t * rw0,
+				  word n_left,
+				  uword most_likely_size);
+
 always_inline void
 _vnet_rewrite_one_header (vnet_rewrite_header_t * h0,
 			  void * packet0,
@@ -116,6 +121,7 @@ _vnet_rewrite_one_header (vnet_rewrite_header_t * h0,
 {
   vnet_rewrite_data_t * p0 = packet0;
   vnet_rewrite_data_t * rw0 = (vnet_rewrite_data_t *) (h0->data + max_size);
+  word n_left0;
 
 #define _(i)								\
   do {									\
@@ -130,21 +136,9 @@ _vnet_rewrite_one_header (vnet_rewrite_header_t * h0,
 
 #undef _
     
-  if (PREDICT_FALSE (h0->data_bytes > most_likely_size))
-    {
-      int n_done, n_left;
-
-      n_done = round_pow2 (most_likely_size, sizeof (rw0[0]));
-      n_left = round_pow2 (h0->data_bytes, sizeof (rw0[0])) - n_done;
-      p0 -= n_done;
-      rw0 -= n_done;
-      do {
-	vnet_rewrite_copy_one (p0, rw0, 0);
-	p0--;
-	rw0--;
-	n_left--;
-      } while (n_left != 0);
-    }
+  n_left0 = (h0->data_bytes - most_likely_size) / sizeof (rw0[0]);
+  if (PREDICT_FALSE (n_left0 > 0))
+    vnet_rewrite_copy_slow_path (p0, rw0, n_left0, most_likely_size);
 }
 
 always_inline void
@@ -159,6 +153,7 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
   vnet_rewrite_data_t * p1 = packet1;
   vnet_rewrite_data_t * rw0 = (vnet_rewrite_data_t *) (h0->data + max_size);
   vnet_rewrite_data_t * rw1 = (vnet_rewrite_data_t *) (h1->data + max_size);
+  word n_left0, n_left1;
 
 #define _(i)								\
   do {									\
@@ -176,38 +171,13 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
 
 #undef _
     
-  if (PREDICT_FALSE (h0->data_bytes > most_likely_size
-		     || h1->data_bytes > most_likely_size))
+  n_left0 = (h0->data_bytes - most_likely_size) / sizeof (rw0[0]);
+  n_left1 = (h1->data_bytes - most_likely_size) / sizeof (rw1[0]);
+
+  if (PREDICT_FALSE (n_left0 > 0 || n_left1 > 0))
     {
-      int n_done, n_left;
-
-      if (h0->data_bytes > most_likely_size)
-	{
-	  n_done = round_pow2 (most_likely_size, sizeof (rw0[0]));
-	  n_left = round_pow2 (h0->data_bytes, sizeof (rw0[0])) - n_done;
-	  p0 -= n_done;
-	  rw0 -= n_done;
-	  do {
-	    vnet_rewrite_copy_one (p0, rw0, 0);
-	    p0--;
-	    rw0--;
-	    n_left--;
-	  } while (n_left != 0);
-	}
-
-      if (h1->data_bytes > most_likely_size)
-	{
-	  n_done = round_pow2 (most_likely_size, sizeof (rw1[0]));
-	  n_left = round_pow2 (h1->data_bytes, sizeof (rw1[0])) - n_done;
-	  p1 -= n_done;
-	  rw1 -= n_done;
-	  do {
-	    vnet_rewrite_copy_one (p1, rw1, 0);
-	    p1--;
-	    rw1--;
-	    n_left--;
-	  } while (n_left != 0);
-	}
+      vnet_rewrite_copy_slow_path (p0, rw0, n_left0, most_likely_size);
+      vnet_rewrite_copy_slow_path (p1, rw1, n_left1, most_likely_size);
     }
 }
 

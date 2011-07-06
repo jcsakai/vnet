@@ -142,20 +142,11 @@ extern ethernet_main_t ethernet_main;
 /* Fetch ethernet main structure possibly calling init function. */
 ethernet_main_t * ethernet_get_main (vlib_main_t * vm);
 
-always_inline uword
-is_ethernet_interface (u32 hw_if_index)
-{
-  ethernet_main_t * em = &ethernet_main;
-  vlib_hw_interface_t * i = vlib_get_hw_interface (em->vlib_main, hw_if_index);
-  vlib_hw_interface_class_t * c = vlib_get_hw_interface_class (em->vlib_main, i->hw_class_index);
-  return ! strcmp (c->name, ethernet_hw_interface_class.name);
-}
-
 always_inline ethernet_interface_t *
 ethernet_get_interface (ethernet_main_t * em, u32 hw_if_index)
 {
   vlib_hw_interface_t * i = vlib_get_hw_interface (em->vlib_main, hw_if_index);
-  return (is_ethernet_interface (hw_if_index)
+  return (i->hw_class_index == ethernet_hw_interface_class.index
 	  ? pool_elt_at_index (em->interfaces, i->hw_instance)
 	  : 0);
 }

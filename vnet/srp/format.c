@@ -66,7 +66,7 @@ u8 * format_srp_header_with_length (u8 * s, va_list * args)
 
   s = format (s, "\n%U%U: %U -> %U",
 	      format_white_space, indent,
-	      format_ethernet_type, h->ethernet.type,
+	      format_ethernet_type, clib_net_to_host_u16 (h->ethernet.type),
 	      format_ethernet_address, h->ethernet.src_address,
 	      format_ethernet_address, h->ethernet.dst_address);
 
