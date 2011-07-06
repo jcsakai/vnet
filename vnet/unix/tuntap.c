@@ -484,7 +484,7 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
 
 VLIB_CONFIG_FUNCTION (tuntap_config, "tuntap");
 
-static void
+void
 tuntap_ip4_add_del_interface_address (ip4_main_t * im,
 				      uword opaque,
 				      u32 sw_if_index,

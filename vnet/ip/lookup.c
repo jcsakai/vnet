@@ -776,6 +776,10 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 is_ip6)
   adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &lm->drop_adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_DROP;
 
+  adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &lm->local_adj_index);
+  adj->lookup_next_index = IP_LOOKUP_NEXT_LOCAL;
+  adj->if_address_index = ~0;
+
   if (! lm->fib_result_n_bytes)
     lm->fib_result_n_bytes = sizeof (uword);
 
