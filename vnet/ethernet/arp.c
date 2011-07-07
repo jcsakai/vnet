@@ -361,6 +361,7 @@ arp_input (vlib_main_t * vm,
 	  ethernet_arp_header_t * arp0;
 	  ethernet_header_t * eth0;
 	  ip_interface_address_t * ifa0;
+	  ip_adjacency_t * adj0;
 	  ip4_address_t * if_addr0;
 	  u32 pi0, error0, next0, sw_if_index0;
 	  u8 is_request0, src_is_local0, dst_is_local0;
@@ -453,7 +454,9 @@ arp_input (vlib_main_t * vm,
 	  memcpy (eth0->dst_address, eth0->src_address, 6);
 	  memcpy (eth0->src_address, hw_if0->hw_address, 6);
 
-	  vlib_buffer_reset (p0);
+	  /* Figure out how much to rewind current data from adjacency. */
+	  adj0 = ip_get_adjacency (&ip4_main.lookup_main, ifa0->neighbor_probe_adj_index);
+	  vlib_buffer_advance (p0, -adj0->rewrite_header.data_bytes);
 
 	  if (next0 != next_index)
 	    {
