@@ -51,7 +51,8 @@ nobase_include_HEADERS +=			\
 libvnet_la_SOURCES +=				\
  vnet/srp/format.c				\
  vnet/srp/interface.c				\
- vnet/srp/node.c
+ vnet/srp/node.c				\
+ vnet/srp/pg.c
 
 nobase_include_HEADERS +=			\
  vnet/srp/packet.h				\

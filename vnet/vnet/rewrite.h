@@ -136,7 +136,7 @@ _vnet_rewrite_one_header (vnet_rewrite_header_t * h0,
 
 #undef _
     
-  n_left0 = (h0->data_bytes - most_likely_size) / sizeof (rw0[0]);
+  n_left0 = ((int) h0->data_bytes - most_likely_size) / (int) sizeof (rw0[0]);
   if (PREDICT_FALSE (n_left0 > 0))
     vnet_rewrite_copy_slow_path (p0, rw0, n_left0, most_likely_size);
 }
@@ -171,8 +171,8 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
 
 #undef _
     
-  n_left0 = (h0->data_bytes - most_likely_size) / sizeof (rw0[0]);
-  n_left1 = (h1->data_bytes - most_likely_size) / sizeof (rw1[0]);
+  n_left0 = ((int) h0->data_bytes - most_likely_size) / (int) sizeof (rw0[0]);
+  n_left1 = ((int) h1->data_bytes - most_likely_size) / (int) sizeof (rw1[0]);
 
   if (PREDICT_FALSE (n_left0 > 0 || n_left1 > 0))
     {
