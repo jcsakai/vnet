@@ -8,8 +8,11 @@
 
 #define IXGE_ALWAYS_POLL 0
 
+#define EVENT_SET_FLAGS 0
+
 ixge_main_t ixge_main;
 static vlib_node_registration_t ixge_input_node;
+static vlib_node_registration_t ixge_process_node;
 
 static void ixge_semaphore_get (ixge_device_t * xd)
 {
@@ -1694,8 +1697,10 @@ static void ixge_interrupt (ixge_main_t * xm, ixge_device_t * xd, u32 i)
       ed->instance = xd->device_index;
       ed->link_status = v;
       xd->link_status_at_last_link_change = v;
-      vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
-				   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+
+      vlib_process_signal_event (vm, ixge_process_node.index,
+                                 EVENT_SET_FLAGS, 
+                                 ((is_up<<31) | xd->vlib_hw_if_index));
     }
 }
 
@@ -2309,6 +2314,7 @@ ixge_process (vlib_main_t * vm,
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd;
   uword event_type, * event_data = 0;
+  int i;
     
   ixge_device_init (xm);
 
@@ -2328,6 +2334,17 @@ ixge_process (vlib_main_t * vm,
       event_type = vlib_process_get_events (vm, &event_data);
 
       switch (event_type) {
+      case EVENT_SET_FLAGS:
+        for (i = 0; i < vec_len (event_data); i++) 
+          {
+            u32 is_up = (event_data[i]>>31);
+            u32 hw_if_index = event_data[i] & 0x7fffffff;
+            
+            vlib_hw_interface_set_flags 
+              (vm, hw_if_index, is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+          }
+        break;
+        
       case ~0:
 	/* No events found: timer expired. */
 	break;

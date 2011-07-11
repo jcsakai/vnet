@@ -7,6 +7,10 @@
 
 ige_main_t ige_main;
 
+#define EVENT_SET_FLAGS 0
+
+static vlib_node_registration_t ige_process_node;
+
 static void ige_semaphore_get (ige_device_t * xd)
 {
   ige_main_t * xm = &ige_main;
@@ -1519,8 +1523,9 @@ static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
       ed->instance = xd->device_index;
       ed->status = r->status;
 
-      vlib_hw_interface_set_flags (vm, xd->vlib_hw_if_index,
-				   is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+      vlib_process_signal_event (vm, ige_process_node.index,
+                                 EVENT_SET_FLAGS, 
+                                 ((is_up<<31) | xd->vlib_hw_if_index));
     }
 }
 
@@ -1973,6 +1978,7 @@ ige_process (vlib_main_t * vm,
   ige_main_t * xm = &ige_main;
   ige_device_t * xd;
   uword event_type, * event_data = 0;
+  int i;
     
   ige_device_init (xm);
 
@@ -1992,6 +1998,18 @@ ige_process (vlib_main_t * vm,
       event_type = vlib_process_get_events (vm, &event_data);
 
       switch (event_type) {
+
+      case EVENT_SET_FLAGS:
+        for (i = 0; i < vec_len (event_data); i++) 
+          {
+            u32 is_up = (event_data[i]>>31);
+            u32 hw_if_index = event_data[i] & 0x7fffffff;
+            
+            vlib_hw_interface_set_flags 
+              (vm, hw_if_index, is_up ? VLIB_HW_INTERFACE_FLAG_LINK_UP : 0);
+          }
+        break;
+
       case ~0:
 	/* No events found: timer expired. */
 	break;
