@@ -60,4 +60,22 @@ srp_setup_node (vlib_main_t * vm, u32 node_index)
   pn->unformat_edit = unformat_pg_srp_header;
 }
 
+#define foreach_srp_error						\
+  _ (NONE, "no error")							\
+  _ (UNKNOWN_MODE, "unknown mode in SRP header")			\
+  _ (KEEP_ALIVE_DROPPED, "v1 keep alive mode in SRP header")		\
+  _ (CONTROL_PACKETS_PROCESSED, "control packets processed")		\
+  _ (IPS_PACKETS_PROCESSED, "IPS packets processed")			\
+  _ (UNKNOWN_CONTROL, "unknown control packet")				\
+  _ (CONTROL_VERSION_NON_ZERO, "control packet with non-zero version")	\
+  _ (CONTROL_BAD_CHECKSUM, "control packet with bad checksum")		\
+  _ (TOPOLOGY_BAD_LENGTH, "topology packet with bad length")
+
+typedef enum {
+#define _(n,s) SRP_ERROR_##n,
+  foreach_srp_error
+#undef _
+  SRP_N_ERROR,
+} srp_error_t;
+
 #endif /* included_srp_h */

@@ -73,7 +73,7 @@ static uword srp_set_rewrite (vlib_main_t * vm,
 }
 
 VLIB_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
-  .name = "srp",
+  .name = "SRP",
   .format_address = format_ethernet_address,
   .format_header = format_srp_header_with_length,
   .unformat_hw_address = unformat_ethernet_address,
