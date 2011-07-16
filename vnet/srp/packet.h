@@ -27,6 +27,7 @@
 #define included_srp_packet_h
 
 #include <clib/byte_order.h>
+#include <clib/bitops.h>
 #include <vnet/ethernet/packet.h>
 
 /* SRP version 2. */
@@ -69,6 +70,13 @@ typedef union {
 #endif
   };
 } srp_header_t;
+
+always_inline void
+srp_header_compute_parity (srp_header_t * h)
+{
+  h->parity = 0;
+  h->parity = count_set_bits (h->as_u16) ^ 1; /* odd parity */
+}
 
 typedef struct {
   srp_header_t srp;
@@ -129,7 +137,7 @@ typedef PACKED (struct {
   srp_topology_mac_binding_t bindings[0];
 }) srp_topology_header_t;
 
-#define foreach_srp_ips_octet_request_type	\
+#define foreach_srp_ips_request_type		\
   _ (idle, 0x0)					\
   _ (wait_to_restore, 0x5)			\
   _ (manual_switch, 0x6)			\
@@ -138,20 +146,20 @@ typedef PACKED (struct {
   _ (forced_switch, 0xd)
 
 typedef enum {
-#define _(f,n) SRP_IPS_OCTET_REQUEST_TYPE_##f = n,
-  foreach_srp_ips_octet_request_type
+#define _(f,n) SRP_IPS_REQUEST_##f = n,
+  foreach_srp_ips_request_type
 #undef _
-} srp_ips_octet_request_type_t;
+} srp_ips_request_type_t;
 
-#define foreach_srp_ips_octet_status		\
+#define foreach_srp_ips_status			\
   _ (idle, 0x0)					\
   _ (wrapped, 0x2)
 
 typedef enum {
-#define _(f,n) SRP_IPS_OCTET_STATUS_##f = n,
-  foreach_srp_ips_octet_status
+#define _(f,n) SRP_IPS_STATUS_##f = n,
+  foreach_srp_ips_status
 #undef _
-} srp_ips_octet_status_t;
+} srp_ips_status_t;
 
 typedef struct {
   srp_header_t srp;

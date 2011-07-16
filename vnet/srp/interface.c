@@ -67,18 +67,70 @@ static uword srp_set_rewrite (vlib_main_t * vm,
   h->srp.as_u16 = 0;
   h->srp.mode = SRP_MODE_data;
   h->srp.ttl = sm->default_data_ttl;
-  h->srp.parity = count_set_bits (h->srp.as_u16) ^ 1; /* odd parity */
+  srp_header_compute_parity (&h->srp);
 
   return n_bytes;
+}
+
+u32 srp_register_interface (srp_hw_wrap_function_t * hw_wrap_function,
+			    u32 * hw_if_indices_by_side)
+{
+  srp_main_t * sm = &srp_main;
+  srp_interface_t * si;
+  vlib_hw_interface_t * hws[SRP_N_RING];
+  int s;
+
+  pool_get (sm->interface_pool, si);
+  memset (si, 0, sizeof (si[0]));
+  for (s = 0; s < SRP_N_SIDE; s++)
+    {
+      hws[s] = vlib_get_hw_interface (sm->vlib_main, hw_if_indices_by_side[s]);
+      si->rings[s].hw_if_index = hw_if_indices_by_side[s];
+      si->rings[s].sw_if_index = hws[s]->sw_if_index;
+      hash_set (sm->interface_index_by_hw_if_index[s], hw_if_indices_by_side[s], si - sm->interface_pool);
+    }
+  si->hw_wrap_function = hw_wrap_function;
+
+  /* Inherit MAC address from outer ring. */
+  memcpy (si->my_address, hws[SRP_RING_OUTER]->hw_address, sizeof (si->my_address));
+
+  /* Default time to wait to restore signal. */
+  si->wait_to_restore_idle_delay = 60;
+
+  return si - sm->interface_pool;
+}
+
+static void srp_interface_add_del_hw_class (vlib_main_t * vm, u32 hw_if_index, u32 is_del)
+{
+  vlib_hw_interface_t * hw = vlib_get_hw_interface (vm, hw_if_index);
+  srp_main_t * sm = &srp_main;
+  srp_interface_t * si;
+  uword s, * p;
+
+  /* Find registered SRP interface with given hardware interface as one of its sides. */
+  si = 0;
+  for (s = 0; s < SRP_N_SIDE; s++)
+    {
+      p = hash_get (sm->interface_index_by_hw_if_index[s], hw_if_index);
+      if (p)
+	{
+	  si = pool_elt_at_index (sm->interface_pool, p[0]);
+	  break;
+	}
+    }
+
+  hw->hw_instance = si ? si - sm->interface_pool : ~0;
 }
 
 VLIB_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
   .name = "SRP",
   .format_address = format_ethernet_address,
   .format_header = format_srp_header_with_length,
+  .format_device = format_srp_device,
   .unformat_hw_address = unformat_ethernet_address,
   .unformat_header = unformat_srp_header,
   .set_rewrite = srp_set_rewrite,
+  .add_del_class = srp_interface_add_del_hw_class,
 };
 
 #if DEBUG > 0

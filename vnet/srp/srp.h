@@ -32,17 +32,100 @@
 
 extern vlib_hw_interface_class_t srp_hw_interface_class;
 
+#define foreach_srp_ips_state			\
+  _ (idle)					\
+  _ (pass_thru)					\
+  _ (wrapped)
+
+typedef enum {
+#define _(f) SRP_IPS_STATE_##f,
+  foreach_srp_ips_state
+#undef _
+  SRP_N_IPS_STATE,
+} srp_ips_state_t;
+
+typedef enum {
+  SRP_RING_OUTER,
+  SRP_RING_INNER,
+  SRP_N_RING = 2,
+  SRP_SIDE_A = SRP_RING_OUTER,	/* outer rx, inner tx */
+  SRP_SIDE_B = SRP_RING_INNER,	/* inner rx, outer tx */
+  SRP_N_SIDE = 2,
+} srp_ring_type_t;
+
+typedef struct {
+  srp_ring_type_t ring;
+
+  /* Hardware interface for this ring/side. */
+  u32 hw_if_index;
+
+  /* Software interface corresponding to hardware interface. */
+  u32 sw_if_index;
+
+  /* Mac address of neighbor on RX fiber. */
+  u8 rx_neighbor_address[6];
+
+  u8 rx_neighbor_address_valid;
+
+  /* True if we are waiting to restore signal. */
+  u8 waiting_to_restore;
+
+  /* Time stamp when signal became valid. */
+  f64 wait_to_restore_start_time;
+} srp_interface_ring_t;
+
+typedef void (srp_hw_wrap_function_t) (u32 hw_if_index, u32 wrap_enable);
+
+typedef struct {
+  /* Current IPS state. */
+  srp_ips_state_t current_ips_state;
+
+  /* Address for this interface. */
+  u8 my_address[6];
+
+  srp_interface_ring_t rings[SRP_N_RING];
+
+  /* Delay between wait to restore event and entering idle state in seconds. */
+  f64 wait_to_restore_idle_delay;
+
+  srp_hw_wrap_function_t * hw_wrap_function;
+} srp_interface_t;
+
 typedef struct {
   vlib_main_t * vlib_main;
+
+  /* Pool of SRP interfaces. */
+  srp_interface_t * interface_pool;
+
+  uword * interface_index_by_hw_if_index[SRP_N_RING];
 
   /* TTL to use for outgoing data packets. */
   u32 default_data_ttl;
 } srp_main_t;
 
+/* Registers sides A/B hardware interface as being SRP capable. */
+u32 srp_register_interface (srp_hw_wrap_function_t * wrap_function, u32 * hw_if_indices);
+
+/* Called when an IPS control packet is received on given interface. */
+void srp_ips_rx_packet (u32 sw_if_index, srp_ips_header_t * ips_packet);
+
+/* Preform local IPS request on given interface. */
+void srp_ips_local_request (u32 sw_if_index, srp_ips_request_type_t request);
+
+always_inline void
+srp_ips_link_change (u32 sw_if_index, u32 link_is_up)
+{
+  srp_ips_local_request (sw_if_index,
+			 link_is_up
+			 ? SRP_IPS_REQUEST_wait_to_restore
+			 : SRP_IPS_REQUEST_signal_fail);
+}
+
 srp_main_t srp_main;
 
 u8 * format_srp_header (u8 * s, va_list * args);
 u8 * format_srp_header_with_length (u8 * s, va_list * args);
+u8 * format_srp_device (u8 * s, va_list * args);
 
 /* Parse srp header. */
 uword
