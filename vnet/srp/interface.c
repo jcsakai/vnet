@@ -72,32 +72,93 @@ static uword srp_set_rewrite (vlib_main_t * vm,
   return n_bytes;
 }
 
-u32 srp_register_interface (srp_hw_wrap_function_t * hw_wrap_function,
-			    u32 * hw_if_indices_by_side)
+static void serialize_srp_register_interface_msg (serialize_main_t * m, va_list * va)
+{
+  u32 * hw_if_indices = va_arg (*va, u32 *);
+  serialize_integer (m, hw_if_indices[SRP_SIDE_A], sizeof (hw_if_indices[SRP_SIDE_A]));
+  serialize_integer (m, hw_if_indices[SRP_SIDE_B], sizeof (hw_if_indices[SRP_SIDE_B]));
+}
+
+static void
+srp_register_interface_internal (u32 * hw_if_indices_by_side, u32 redistribute);
+
+static void unserialize_srp_register_interface_msg (serialize_main_t * m, va_list * va)
+{
+  UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
+  u32 hw_if_indices[SRP_N_SIDE];
+
+  unserialize_integer (m, &hw_if_indices[SRP_SIDE_A], sizeof (hw_if_indices[SRP_SIDE_A]));
+  unserialize_integer (m, &hw_if_indices[SRP_SIDE_B], sizeof (hw_if_indices[SRP_SIDE_B]));
+  srp_register_interface_internal (hw_if_indices, /* redistribute */ 0);
+}
+
+static MC_SERIALIZE_MSG (srp_register_interface_msg) = {
+  .name = "vnet_srp_register_interface",
+  .serialize = serialize_srp_register_interface_msg,
+  .unserialize = unserialize_srp_register_interface_msg,
+};
+
+static void
+srp_register_interface_internal (u32 * hw_if_indices_by_side, u32 redistribute)
 {
   srp_main_t * sm = &srp_main;
+  vlib_main_t * vm = sm->vlib_main;
   srp_interface_t * si;
   vlib_hw_interface_t * hws[SRP_N_RING];
   int s;
+
+  if (vm->mc_main && redistribute)
+    {
+      mc_serialize (vm->mc_main, &srp_register_interface_msg, hw_if_indices_by_side);
+      return;
+    }
 
   pool_get (sm->interface_pool, si);
   memset (si, 0, sizeof (si[0]));
   for (s = 0; s < SRP_N_SIDE; s++)
     {
       hws[s] = vlib_get_hw_interface (sm->vlib_main, hw_if_indices_by_side[s]);
+      si->rings[s].ring = s;
       si->rings[s].hw_if_index = hw_if_indices_by_side[s];
       si->rings[s].sw_if_index = hws[s]->sw_if_index;
-      hash_set (sm->interface_index_by_hw_if_index[s], hw_if_indices_by_side[s], si - sm->interface_pool);
+      hash_set (sm->interface_index_by_hw_if_index, hw_if_indices_by_side[s], si - sm->interface_pool);
     }
-  si->hw_wrap_function = hw_wrap_function;
 
   /* Inherit MAC address from outer ring. */
   memcpy (si->my_address, hws[SRP_RING_OUTER]->hw_address, sizeof (si->my_address));
 
   /* Default time to wait to restore signal. */
-  si->wait_to_restore_idle_delay = 60;
+  si->config.wait_to_restore_idle_delay = 60;
+  si->config.ips_tx_interval = 1;
+}
 
-  return si - sm->interface_pool;
+void srp_register_interface (u32 * hw_if_indices_by_side)
+{
+  srp_register_interface_internal (hw_if_indices_by_side, /* redistribute */ 1);
+}
+
+always_inline srp_interface_t *
+srp_get_interface_from_vlib_hw_interface (u32 hw_if_index)
+{
+  srp_main_t * sm = &srp_main;
+  uword * p = hash_get (sm->interface_index_by_hw_if_index, hw_if_index);
+  return p ? pool_elt_at_index (sm->interface_pool, p[0]) : 0;
+}
+
+void srp_interface_set_hw_wrap_function (u32 hw_if_index, srp_hw_wrap_function_t * f)
+{
+  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  si->hw_wrap_function = f;
+}
+
+void srp_interface_enable_ips (u32 hw_if_index)
+{
+  srp_main_t * sm = &srp_main;
+  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+
+  si->ips_process_enable = 1;
+
+  vlib_node_set_state (sm->vlib_main, srp_ips_process_node.index, VLIB_NODE_STATE_POLLING);
 }
 
 static void srp_interface_add_del_hw_class (vlib_main_t * vm, u32 hw_if_index, u32 is_del)
@@ -105,21 +166,12 @@ static void srp_interface_add_del_hw_class (vlib_main_t * vm, u32 hw_if_index, u
   vlib_hw_interface_t * hw = vlib_get_hw_interface (vm, hw_if_index);
   srp_main_t * sm = &srp_main;
   srp_interface_t * si;
-  uword s, * p;
+  uword * p;
 
   /* Find registered SRP interface with given hardware interface as one of its sides. */
   si = 0;
-  for (s = 0; s < SRP_N_SIDE; s++)
-    {
-      p = hash_get (sm->interface_index_by_hw_if_index[s], hw_if_index);
-      if (p)
-	{
-	  si = pool_elt_at_index (sm->interface_pool, p[0]);
-	  break;
-	}
-    }
-
-  hw->hw_instance = si ? si - sm->interface_pool : ~0;
+  p = hash_get (sm->interface_index_by_hw_if_index, hw_if_index);
+  hw->hw_instance = p ? (u32) p[0] : ~0;
 }
 
 VLIB_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
@@ -132,6 +184,57 @@ VLIB_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
   .set_rewrite = srp_set_rewrite,
   .add_del_class = srp_interface_add_del_hw_class,
 };
+
+static void serialize_srp_interface_config_msg (serialize_main_t * m, va_list * va)
+{
+  srp_interface_t * si = va_arg (*va, srp_interface_t *);
+  srp_main_t * sm = &srp_main;
+
+  ASSERT (! pool_is_free (sm->interface_pool, si));
+  serialize_integer (m, si - sm->interface_pool, sizeof (u32));
+  serialize (m, serialize_f64, si->config.wait_to_restore_idle_delay);
+  serialize (m, serialize_f64, si->config.ips_tx_interval);
+}
+
+static void unserialize_srp_interface_config_msg (serialize_main_t * m, va_list * va)
+{
+  UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
+  srp_main_t * sm = &srp_main;
+  srp_interface_t * si;
+  u32 si_index;
+
+  unserialize_integer (m, &si_index, sizeof (u32));
+  si = pool_elt_at_index (sm->interface_pool, si_index);
+  unserialize (m, unserialize_f64, &si->config.wait_to_restore_idle_delay);
+  unserialize (m, unserialize_f64, &si->config.ips_tx_interval);
+}
+
+static MC_SERIALIZE_MSG (srp_interface_config_msg) = {
+  .name = "vnet_srp_interface_config",
+  .serialize = serialize_srp_interface_config_msg,
+  .unserialize = unserialize_srp_interface_config_msg,
+};
+
+void srp_interface_get_interface_config (u32 hw_if_index, srp_interface_config_t * c)
+{
+  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  ASSERT (si != 0);
+  c[0] = si->config;
+}
+
+void srp_interface_set_interface_config (u32 hw_if_index, srp_interface_config_t * c)
+{
+  srp_main_t * sm = &srp_main;
+  vlib_main_t * vm = sm->vlib_main;
+  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  ASSERT (si != 0);
+  if (memcmp (&si->config, &c[0], sizeof (c[0])))
+    {
+      si->config = c[0];
+      if (vm->mc_main)
+	mc_serialize (vm->mc_main, &srp_interface_config_msg, si);
+    }
+}
 
 #if DEBUG > 0
 

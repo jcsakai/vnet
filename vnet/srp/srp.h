@@ -77,16 +77,27 @@ typedef struct {
 typedef void (srp_hw_wrap_function_t) (u32 hw_if_index, u32 wrap_enable);
 
 typedef struct {
+  /* Delay between wait to restore event and entering idle state in seconds. */
+  f64 wait_to_restore_idle_delay;
+
+  /* Number of seconds between sending ips messages to neighbors. */
+  f64 ips_tx_interval;
+} srp_interface_config_t;
+
+typedef struct {
   /* Current IPS state. */
   srp_ips_state_t current_ips_state;
 
   /* Address for this interface. */
   u8 my_address[6];
 
+  /* Enable IPS process handling for this interface. */
+  u8 ips_process_enable;
+
   srp_interface_ring_t rings[SRP_N_RING];
 
-  /* Delay between wait to restore event and entering idle state in seconds. */
-  f64 wait_to_restore_idle_delay;
+  /* Configurable parameters. */
+  srp_interface_config_t config;
 
   srp_hw_wrap_function_t * hw_wrap_function;
 } srp_interface_t;
@@ -97,14 +108,22 @@ typedef struct {
   /* Pool of SRP interfaces. */
   srp_interface_t * interface_pool;
 
-  uword * interface_index_by_hw_if_index[SRP_N_RING];
+  uword * interface_index_by_hw_if_index;
 
   /* TTL to use for outgoing data packets. */
   u32 default_data_ttl;
 } srp_main_t;
 
 /* Registers sides A/B hardware interface as being SRP capable. */
-u32 srp_register_interface (srp_hw_wrap_function_t * wrap_function, u32 * hw_if_indices);
+void srp_register_interface (u32 * hw_if_indices);
+
+/* Enable sending IPS messages for interface implied by given vlib hardware interface. */
+void srp_interface_enable_ips (u32 hw_if_index);
+
+/* Set function to wrap hardware side of SRP interface. */
+void srp_interface_set_hw_wrap_function (u32 hw_if_index, srp_hw_wrap_function_t * f);
+
+vlib_node_registration_t srp_ips_process_node;
 
 /* Called when an IPS control packet is received on given interface. */
 void srp_ips_rx_packet (u32 sw_if_index, srp_ips_header_t * ips_packet);
@@ -120,6 +139,9 @@ srp_ips_link_change (u32 sw_if_index, u32 link_is_up)
 			 ? SRP_IPS_REQUEST_wait_to_restore
 			 : SRP_IPS_REQUEST_signal_fail);
 }
+
+void srp_interface_get_interface_config (u32 hw_if_index, srp_interface_config_t * c);
+void srp_interface_set_interface_config (u32 hw_if_index, srp_interface_config_t * c);
 
 srp_main_t srp_main;
 
