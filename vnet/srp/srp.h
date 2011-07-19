@@ -32,6 +32,7 @@
 
 extern vlib_hw_interface_class_t srp_hw_interface_class;
 
+/* See RFC 2892. */
 #define foreach_srp_ips_state			\
   _ (idle)					\
   _ (pass_thru)					\
@@ -74,7 +75,9 @@ typedef struct {
   f64 wait_to_restore_start_time;
 } srp_interface_ring_t;
 
+struct srp_interface_t;
 typedef void (srp_hw_wrap_function_t) (u32 hw_if_index, u32 wrap_enable);
+typedef void (srp_hw_enable_function_t) (struct srp_interface_t * si, u32 wrap_enable);
 
 typedef struct {
   /* Delay between wait to restore event and entering idle state in seconds. */
@@ -84,7 +87,7 @@ typedef struct {
   f64 ips_tx_interval;
 } srp_interface_config_t;
 
-typedef struct {
+typedef struct srp_interface_t {
   /* Current IPS state. */
   srp_ips_state_t current_ips_state;
 
@@ -100,6 +103,8 @@ typedef struct {
   srp_interface_config_t config;
 
   srp_hw_wrap_function_t * hw_wrap_function;
+
+  srp_hw_enable_function_t * hw_enable_function;
 } srp_interface_t;
 
 typedef struct {
@@ -112,6 +117,10 @@ typedef struct {
 
   /* TTL to use for outgoing data packets. */
   u32 default_data_ttl;
+
+  vlib_one_time_waiting_process_t * srp_register_interface_waiting_process_pool;
+
+  uword * srp_register_interface_waiting_process_pool_index_by_hw_if_index;
 } srp_main_t;
 
 /* Registers sides A/B hardware interface as being SRP capable. */
@@ -122,6 +131,8 @@ void srp_interface_enable_ips (u32 hw_if_index);
 
 /* Set function to wrap hardware side of SRP interface. */
 void srp_interface_set_hw_wrap_function (u32 hw_if_index, srp_hw_wrap_function_t * f);
+
+void srp_interface_set_hw_enable_function (u32 hw_if_index, srp_hw_enable_function_t * f);
 
 vlib_node_registration_t srp_ips_process_node;
 

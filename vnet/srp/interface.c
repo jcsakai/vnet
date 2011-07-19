@@ -79,17 +79,30 @@ static void serialize_srp_register_interface_msg (serialize_main_t * m, va_list 
   serialize_integer (m, hw_if_indices[SRP_SIDE_B], sizeof (hw_if_indices[SRP_SIDE_B]));
 }
 
-static void
-srp_register_interface_internal (u32 * hw_if_indices_by_side, u32 redistribute);
+static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redistribute);
 
 static void unserialize_srp_register_interface_msg (serialize_main_t * m, va_list * va)
 {
   UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
   u32 hw_if_indices[SRP_N_SIDE];
+  srp_main_t * sm = &srp_main;
+  uword * p;
 
   unserialize_integer (m, &hw_if_indices[SRP_SIDE_A], sizeof (hw_if_indices[SRP_SIDE_A]));
   unserialize_integer (m, &hw_if_indices[SRP_SIDE_B], sizeof (hw_if_indices[SRP_SIDE_B]));
-  srp_register_interface_internal (hw_if_indices, /* redistribute */ 0);
+
+  p = hash_get (sm->srp_register_interface_waiting_process_pool_index_by_hw_if_index,
+		hw_if_indices[0]);
+  if (p)
+    {
+      vlib_one_time_waiting_process_t * wp = pool_elt_at_index (sm->srp_register_interface_waiting_process_pool, p[0]);
+      vlib_signal_one_time_waiting_process (mcm->vlib_main, wp);
+      pool_put (sm->srp_register_interface_waiting_process_pool, wp);
+      hash_unset (sm->srp_register_interface_waiting_process_pool_index_by_hw_if_index,
+		  hw_if_indices[0]);
+    }
+  else
+    srp_register_interface_helper (hw_if_indices, /* redistribute */ 0);
 }
 
 static MC_SERIALIZE_MSG (srp_register_interface_msg) = {
@@ -98,8 +111,7 @@ static MC_SERIALIZE_MSG (srp_register_interface_msg) = {
   .unserialize = unserialize_srp_register_interface_msg,
 };
 
-static void
-srp_register_interface_internal (u32 * hw_if_indices_by_side, u32 redistribute)
+static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redistribute)
 {
   srp_main_t * sm = &srp_main;
   vlib_main_t * vm = sm->vlib_main;
@@ -109,9 +121,21 @@ srp_register_interface_internal (u32 * hw_if_indices_by_side, u32 redistribute)
 
   if (vm->mc_main && redistribute)
     {
+      vlib_one_time_waiting_process_t * wp;
       mc_serialize (vm->mc_main, &srp_register_interface_msg, hw_if_indices_by_side);
-      return;
+      pool_get (sm->srp_register_interface_waiting_process_pool, wp);
+      hash_set (sm->srp_register_interface_waiting_process_pool_index_by_hw_if_index,
+		hw_if_indices_by_side[0],
+		wp - sm->srp_register_interface_waiting_process_pool);
+      vlib_current_process_wait_for_one_time_event (vm, wp);
     }
+
+  /* Check if interface has already been registered. */
+  {
+    uword * p = hash_get (sm->interface_index_by_hw_if_index, hw_if_indices_by_side[0]);
+    if (p)
+      return;
+  }
 
   pool_get (sm->interface_pool, si);
   memset (si, 0, sizeof (si[0]));
@@ -134,7 +158,7 @@ srp_register_interface_internal (u32 * hw_if_indices_by_side, u32 redistribute)
 
 void srp_register_interface (u32 * hw_if_indices_by_side)
 {
-  srp_register_interface_internal (hw_if_indices_by_side, /* redistribute */ 1);
+  srp_register_interface_helper (hw_if_indices_by_side, /* redistribute */ 1);
 }
 
 always_inline srp_interface_t *
@@ -151,6 +175,12 @@ void srp_interface_set_hw_wrap_function (u32 hw_if_index, srp_hw_wrap_function_t
   si->hw_wrap_function = f;
 }
 
+void srp_interface_set_hw_enable_function (u32 hw_if_index, srp_hw_enable_function_t * f)
+{
+  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  si->hw_enable_function = f;
+}
+
 void srp_interface_enable_ips (u32 hw_if_index)
 {
   srp_main_t * sm = &srp_main;
@@ -161,17 +191,60 @@ void srp_interface_enable_ips (u32 hw_if_index)
   vlib_node_set_state (sm->vlib_main, srp_ips_process_node.index, VLIB_NODE_STATE_POLLING);
 }
 
-static void srp_interface_add_del_hw_class (vlib_main_t * vm, u32 hw_if_index, u32 is_del)
+static uword
+srp_is_valid_class_for_interface (vlib_main_t * vm, u32 hw_if_index, u32 hw_class_index)
 {
-  vlib_hw_interface_t * hw = vlib_get_hw_interface (vm, hw_if_index);
-  srp_main_t * sm = &srp_main;
-  srp_interface_t * si;
-  uword * p;
+  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
 
-  /* Find registered SRP interface with given hardware interface as one of its sides. */
-  si = 0;
-  p = hash_get (sm->interface_index_by_hw_if_index, hw_if_index);
-  hw->hw_instance = p ? (u32) p[0] : ~0;
+  if (! si)
+    return 0;
+
+  /* Both sides must be admin down. */
+  if (vlib_sw_interface_is_admin_up (vm, si->rings[SRP_RING_OUTER].sw_if_index))
+    return 0;
+  if (vlib_sw_interface_is_admin_up (vm, si->rings[SRP_RING_INNER].sw_if_index))
+    return 0;
+					 
+  return 1;
+}
+
+static void
+srp_interface_hw_class_change (vlib_main_t * vm, u32 hw_if_index,
+			       u32 old_hw_class_index, u32 new_hw_class_index)
+{
+  srp_main_t * sm = &srp_main;
+  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  vlib_hw_interface_t * hi;
+  vlib_device_class_t * dc;
+  u32 r, to_srp;
+
+  to_srp = new_hw_class_index == srp_hw_interface_class.index;
+
+  /* Changing class on either outer or inner rings implies changing the class
+     of the other. */
+  for (r = 0; r < SRP_N_RING; r++)
+    {
+      srp_interface_ring_t * ir = &si->rings[r];
+
+      hi = vlib_get_hw_interface (vm, ir->hw_if_index);
+      dc = vlib_get_device_class (vm, hi->dev_class_index);
+
+      /* hw_if_index itself will be handled by caller. */
+      if (ir->hw_if_index != hw_if_index)
+	{
+	  vlib_hw_interface_init_for_class (vm, ir->hw_if_index,
+					    new_hw_class_index,
+					    to_srp ? si - sm->interface_pool : ~0);
+
+	  if (dc->hw_class_change)
+	    dc->hw_class_change (vm, ir->hw_if_index, new_hw_class_index);
+	}
+      else
+	hi->hw_instance = to_srp ? si - sm->interface_pool : ~0;
+    }
+
+  if (si->hw_enable_function)
+    si->hw_enable_function (si, /* enable */ to_srp);
 }
 
 VLIB_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
@@ -182,7 +255,8 @@ VLIB_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
   .unformat_hw_address = unformat_ethernet_address,
   .unformat_header = unformat_srp_header,
   .set_rewrite = srp_set_rewrite,
-  .add_del_class = srp_interface_add_del_hw_class,
+  .is_valid_class_for_interface = srp_is_valid_class_for_interface,
+  .hw_class_change = srp_interface_hw_class_change,
 };
 
 static void serialize_srp_interface_config_msg (serialize_main_t * m, va_list * va)
