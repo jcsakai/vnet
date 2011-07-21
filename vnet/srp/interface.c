@@ -72,14 +72,40 @@ static uword srp_set_rewrite (vlib_main_t * vm,
   return n_bytes;
 }
 
+static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redistribute);
+
+void serialize_srp_main (serialize_main_t * m, va_list * va)
+{
+  srp_main_t * sm = &srp_main;
+  srp_interface_t * si;
+
+  serialize_integer (m, pool_elts (sm->interface_pool), sizeof (u32));
+  pool_foreach (si, sm->interface_pool, ({
+    serialize_integer (m, si->rings[SRP_RING_OUTER].hw_if_index, sizeof (u32));
+    serialize_integer (m, si->rings[SRP_RING_INNER].hw_if_index, sizeof (u32));
+  }));
+}
+
+void unserialize_srp_main (serialize_main_t * m, va_list * va)
+{
+  srp_main_t * sm = &srp_main;
+  u32 i, n_ifs, hw_if_indices[SRP_N_RING];
+
+  unserialize_integer (m, &n_ifs, sizeof (u32));
+  for (i = 0; i < n_ifs; i++)
+    {
+      unserialize_integer (m, &hw_if_indices[SRP_RING_OUTER], sizeof (u32));
+      unserialize_integer (m, &hw_if_indices[SRP_RING_INNER], sizeof (u32));
+      srp_register_interface_helper (&hw_if_indices, /* redistribute */ 0);
+    }
+}
+
 static void serialize_srp_register_interface_msg (serialize_main_t * m, va_list * va)
 {
   u32 * hw_if_indices = va_arg (*va, u32 *);
   serialize_integer (m, hw_if_indices[SRP_SIDE_A], sizeof (hw_if_indices[SRP_SIDE_A]));
   serialize_integer (m, hw_if_indices[SRP_SIDE_B], sizeof (hw_if_indices[SRP_SIDE_B]));
 }
-
-static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redistribute);
 
 static void unserialize_srp_register_interface_msg (serialize_main_t * m, va_list * va)
 {
@@ -117,7 +143,7 @@ static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redi
   vlib_main_t * vm = sm->vlib_main;
   srp_interface_t * si;
   vlib_hw_interface_t * hws[SRP_N_RING];
-  int s;
+  uword s, * p;
 
   if (vm->mc_main && redistribute)
     {
@@ -131,14 +157,16 @@ static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redi
     }
 
   /* Check if interface has already been registered. */
-  {
-    uword * p = hash_get (sm->interface_index_by_hw_if_index, hw_if_indices_by_side[0]);
-    if (p)
-      return;
-  }
-
-  pool_get (sm->interface_pool, si);
-  memset (si, 0, sizeof (si[0]));
+  p = hash_get (sm->interface_index_by_hw_if_index, hw_if_indices_by_side[0]);
+  if (p)
+    {
+      si = pool_elt_at_index (sm->interface_pool, p[0]);
+    }
+  else
+    {
+      pool_get (sm->interface_pool, si);
+      memset (si, 0, sizeof (si[0]));
+    }
   for (s = 0; s < SRP_N_SIDE; s++)
     {
       hws[s] = vlib_get_hw_interface (sm->vlib_main, hw_if_indices_by_side[s]);
@@ -149,7 +177,8 @@ static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redi
     }
 
   /* Inherit MAC address from outer ring. */
-  memcpy (si->my_address, hws[SRP_RING_OUTER]->hw_address, sizeof (si->my_address));
+  memcpy (si->my_address, hws[SRP_RING_OUTER]->hw_address,
+	  vec_len (hws[SRP_RING_OUTER]->hw_address));
 
   /* Default time to wait to restore signal. */
   si->config.wait_to_restore_idle_delay = 60;
@@ -217,6 +246,11 @@ srp_interface_hw_class_change (vlib_main_t * vm, u32 hw_if_index,
   vlib_hw_interface_t * hi;
   vlib_device_class_t * dc;
   u32 r, to_srp;
+
+  if (!si) {
+      clib_warning ("srp interface no set si = 0");
+      return;
+  }
 
   to_srp = new_hw_class_index == srp_hw_interface_class.index;
 

@@ -194,4 +194,6 @@ typedef enum {
   SRP_N_ERROR,
 } srp_error_t;
 
+serialize_function_t serialize_srp_main, unserialize_srp_main;
+
 #endif /* included_srp_h */
