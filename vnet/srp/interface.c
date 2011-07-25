@@ -88,7 +88,6 @@ void serialize_srp_main (serialize_main_t * m, va_list * va)
 
 void unserialize_srp_main (serialize_main_t * m, va_list * va)
 {
-  srp_main_t * sm = &srp_main;
   u32 i, n_ifs, hw_if_indices[SRP_N_RING];
 
   unserialize_integer (m, &n_ifs, sizeof (u32));
@@ -96,7 +95,7 @@ void unserialize_srp_main (serialize_main_t * m, va_list * va)
     {
       unserialize_integer (m, &hw_if_indices[SRP_RING_OUTER], sizeof (u32));
       unserialize_integer (m, &hw_if_indices[SRP_RING_INNER], sizeof (u32));
-      srp_register_interface_helper (&hw_if_indices, /* redistribute */ 0);
+      srp_register_interface_helper (hw_if_indices, /* redistribute */ 0);
     }
 }
 
