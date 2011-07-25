@@ -756,7 +756,7 @@ void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
 
     vec_foreach (a, lm->multipath_adjacencies)
       {
-	if (a->n_adj_in_block > 0)
+	if (a->n_adj_in_block > 0 && a->reference_count > 0)
 	  hash_set (lm->multipath_adjacency_by_next_hops,
 		    ip_next_hop_hash_key_from_handle (a->normalized_next_hops.heap_handle),
 		    a - lm->multipath_adjacencies);
