@@ -518,7 +518,7 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
     {
       ip4_add_del_route_args_t a;
       a.table_index_or_table_id = fib_index;
-      a.flags = ((is_del ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
+      a.flags = ((is_del && ! new_mp ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
 		 | IP4_ROUTE_FLAG_FIB_INDEX
 		 | IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY
 		 | (flags & (IP4_ROUTE_FLAG_NO_REDISTRIBUTE | IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP)));
