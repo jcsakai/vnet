@@ -207,6 +207,15 @@ unserialize_fixup_ip6_rewrite_adjacencies (vlib_main_t * vm,
 	  ni = is_arp ? ip6_discover_neighbor_node.index : ip6_rewrite_node.index;
 	  adj[i].rewrite_header.node_index = ni;
 	  adj[i].rewrite_header.next_index = vlib_node_add_next (vm, ni, hw->output_node_index);
+	  if (is_arp)
+	    vnet_rewrite_for_sw_interface
+	      (vm,
+	       VNET_L3_PACKET_TYPE_ARP,
+	       sw_if_index,
+	       ni,
+	       VNET_REWRITE_FOR_SW_INTERFACE_ADDRESS_BROADCAST,
+	       &adj[i].rewrite_header,
+	       sizeof (adj->rewrite_data));
 	  break;
 
 	default:

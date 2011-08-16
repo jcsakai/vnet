@@ -195,6 +195,15 @@ unserialize_fixup_ip4_rewrite_adjacencies (vlib_main_t * vm,
 	  ni = is_arp ? ip4_arp_node.index : ip4_rewrite_node.index;
 	  adj[i].rewrite_header.node_index = ni;
 	  adj[i].rewrite_header.next_index = vlib_node_add_next (vm, ni, hw->output_node_index);
+	  if (is_arp)
+	    vnet_rewrite_for_sw_interface
+	      (vm,
+	       VNET_L3_PACKET_TYPE_ARP,
+	       sw_if_index,
+	       ni,
+	       VNET_REWRITE_FOR_SW_INTERFACE_ADDRESS_BROADCAST,
+	       &adj[i].rewrite_header,
+	       sizeof (adj->rewrite_data));
 	  break;
 
 	default:
@@ -498,7 +507,7 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
 
   if (! ip_multipath_adjacency_add_del_next_hop
       (lm, is_del,
-       dst_adj ? dst_adj->heap_handle : ~0,
+       old_mp_adj_index,
        nh_adj_index,
        next_hop_weight,
        &new_mp_adj_index))
