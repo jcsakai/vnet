@@ -516,6 +516,17 @@ ip6_add_del_route_next_hop (ip6_main_t * im,
       dst_adj = 0;
     }
 
+  /* Ignore adds of X/128 with next hop of X. */
+  if (! is_del
+      && dst_address_length == 128
+      && ip6_address_is_equal (dst_address, next_hop))
+    {
+      error = clib_error_return (0, "prefix matches next hop %U/%d",
+                                 format_ip6_address, dst_address,
+                                 dst_address_length);
+      goto done;
+    }
+
   old_mp_adj_index = dst_adj ? dst_adj->heap_handle : ~0;
 
   if (! ip_multipath_adjacency_add_del_next_hop

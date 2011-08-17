@@ -503,6 +503,17 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
       dst_adj = 0;
     }
 
+  /* Ignore adds of X/32 with next hop of X. */
+  if (! is_del
+      && dst_address_length == 32
+      && dst_address->data_u32 == next_hop->data_u32)
+    {
+      error = clib_error_return (0, "prefix matches next hop %U/%d",
+                                 format_ip4_address, dst_address,
+                                 dst_address_length);
+      goto done;
+    }
+
   old_mp_adj_index = dst_adj ? dst_adj->heap_handle : ~0;
 
   if (! ip_multipath_adjacency_add_del_next_hop

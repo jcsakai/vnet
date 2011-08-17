@@ -123,6 +123,16 @@ ip6_multicast_ethernet_address (u8 * ethernet_address, u32 group_id)
   ethernet_address[5] = ((group_id >>  0) & 0xff);
 }
 
+always_inline uword
+ip6_address_is_equal (ip6_address_t * a, ip6_address_t * b)
+{
+  int i;
+  for (i = 0; i < ARRAY_LEN (a->as_uword); i++)
+    if (a->as_uword[i] != b->as_uword[i])
+      return 0;
+  return 1;
+}
+
 always_inline void
 ip6_address_mask (ip6_address_t * a, ip6_address_t * mask)
 {
