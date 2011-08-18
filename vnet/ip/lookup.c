@@ -1505,6 +1505,12 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 		  vlib_cli_output (vm, "%v", msg);
 		  vec_free (msg);
 
+		  if (result && lm->format_fib_result)
+		    vlib_cli_output (vm, "%20s%U", "",
+				     lm->format_fib_result, vm, lm, result,
+				     i + 1 - nhs[j].weight,
+				     nhs[j].weight);
+
 		  j++;
 		  if (j < n_nhs)
 		    {
@@ -1513,9 +1519,6 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 		    }
 		}
 	    }
-
-	  if (result && lm->format_fib_result)
-	    vlib_cli_output (vm, "%20s%U", "", lm->format_fib_result, vm, lm, result, 0);
 	}
     }
 
