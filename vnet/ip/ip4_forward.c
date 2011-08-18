@@ -1284,10 +1284,12 @@ void unserialize_vnet_ip4_main (serialize_main_t * m, va_list * va)
   unserialize (m, unserialize_ip_lookup_main, &i4m->lookup_main);
 
   {
-    ip_adjacency_t * adj;
+    ip_adjacency_t * adj, * adj_heap;
     u32 n_adj;
-    heap_foreach (adj, n_adj, i4m->lookup_main.adjacency_heap, ({
+    adj_heap = i4m->lookup_main.adjacency_heap;
+    heap_foreach (adj, n_adj, adj_heap, ({
       unserialize_fixup_ip4_rewrite_adjacencies (vm, adj, n_adj);
+      ip_call_add_del_adjacency_callbacks (&i4m->lookup_main, adj - adj_heap, /* is_del */ 0);
     }));
   }
 
