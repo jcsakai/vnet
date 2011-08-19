@@ -792,8 +792,8 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 is_ip6)
 		    /* format pair/arg */
 		    0, 0);
 
-  /* 5% max error tolerance for multipath. */
-  lm->multipath_next_hop_error_tolerance = .05;
+  /* 1% max error tolerance for multipath. */
+  lm->multipath_next_hop_error_tolerance = .01;
 
   lm->is_ip6 = is_ip6;
   if (is_ip6)
