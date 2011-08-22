@@ -737,6 +737,10 @@ void serialize_ip_lookup_main (serialize_main_t * m, va_list * va)
 
   serialize (m, serialize_heap, lm->next_hop_heap, serialize_vec_ip_multipath_next_hop);
   vec_serialize (m, lm->multipath_adjacencies, serialize_vec_ip_multipath_adjacency);
+
+  /* Adjacency counters (FIXME disabled for now). */
+  if (0)
+    serialize (m, serialize_vlib_combined_counter_main, &lm->adjacency_counters, /* incremental */ 0);
 }
 
 void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
@@ -746,9 +750,6 @@ void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
   unserialize (m, unserialize_heap, &lm->adjacency_heap, unserialize_vec_ip_adjacency);
   unserialize (m, unserialize_heap, &lm->next_hop_heap, unserialize_vec_ip_multipath_next_hop);
   vec_unserialize (m, &lm->multipath_adjacencies, unserialize_vec_ip_multipath_adjacency);
-
-  /* Validate adjacency counters. */
-  vlib_validate_counter (&lm->adjacency_counters, vec_len (lm->adjacency_heap) - 1);
 
   /* Build hash table from unserialized data. */
   {
@@ -762,6 +763,13 @@ void unserialize_ip_lookup_main (serialize_main_t * m, va_list * va)
 		    a - lm->multipath_adjacencies);
       }
   }
+
+  /* Validate adjacency counters. */
+  vlib_validate_counter (&lm->adjacency_counters, vec_len (lm->adjacency_heap) - 1);
+
+  /* Adjacency counters (FIXME disabled for now). */
+  if (0)
+    unserialize (m, unserialize_vlib_combined_counter_main, &lm->adjacency_counters, /* incremental */ 0);
 }
 
 void ip_lookup_init (ip_lookup_main_t * lm, u32 is_ip6)
@@ -1386,14 +1394,25 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   ip4_fib_t * fib;
   ip_lookup_main_t * lm = &im4->lookup_main;
   uword * results, i;
-  int verbose;
+  int verbose, matching;
+  ip4_address_t matching_address;
 
   routes = 0;
   results = 0;
   verbose = 1;
-  if (unformat (input, "brief") || unformat (input, "summary")
-      || unformat (input, "sum"))
-    verbose = 0;
+  matching = 0;
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "brief") || unformat (input, "summary")
+	  || unformat (input, "sum"))
+	verbose = 0;
+
+      else if (unformat (input, "%U", unformat_ip4_address, &matching_address))
+	matching = 1;
+
+      else
+	break;
+    }
 
   vec_foreach (fib, im4->fibs)
     {
@@ -1422,20 +1441,41 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	{
 	  uword * hash = fib->adj_index_by_dst_address[i];
 	  hash_pair_t * p;
-	  hash_foreach_pair (p, hash, ({
-	    ip4_route_t x;
-	    x.address.data_u32 = p->key;
-	    x.address_length = i;
-	    if (lm->fib_result_n_words > 1)
-	      {
-		x.index = vec_len (results);
-		vec_add (results, p->value, lm->fib_result_n_words);
-	      }
-	    else
-	      x.index = p->value[0];
+	  ip4_route_t x;
 
-	    vec_add1 (routes, x);
-	  }));
+	  x.address_length = i;
+
+	  if (matching)
+	    {
+	      x.address.as_u32 = matching_address.as_u32 & im4->fib_masks[i];
+	      p = hash_get_pair (hash, x.address.as_u32);
+	      if (p)
+		{
+		  if (lm->fib_result_n_words > 1)
+		    {
+		      x.index = vec_len (results);
+		      vec_add (results, p->value, lm->fib_result_n_words);
+		    }
+		  else
+		    x.index = p->value[0];
+		  vec_add1 (routes, x);
+		}
+	    }
+	  else
+	    {
+	      hash_foreach_pair (p, hash, ({
+		x.address.data_u32 = p->key;
+		if (lm->fib_result_n_words > 1)
+		  {
+		    x.index = vec_len (results);
+		    vec_add (results, p->value, lm->fib_result_n_words);
+		  }
+		else
+		  x.index = p->value[0];
+
+		vec_add1 (routes, x);
+	      }));
+	    }
 	}
 
       vec_sort (routes, r1, r2,
