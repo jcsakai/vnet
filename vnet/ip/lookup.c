@@ -316,7 +316,10 @@ ip_multipath_adjacency_add_del_next_hop (ip_lookup_main_t * lm,
   n_nhs = 0;
   i_nh = 0;
   nhs = 0;
-  if (old_mp_adj_index != ~0)
+
+  /* If old multipath adjacency is valid, find requested next hop. */
+  if (old_mp_adj_index < vec_len (lm->multipath_adjacencies)
+      && lm->multipath_adjacencies[old_mp_adj_index].normalized_next_hops.count > 0)
     {
       mp_old = vec_elt_at_index (lm->multipath_adjacencies, old_mp_adj_index);
 	
@@ -478,6 +481,7 @@ ip_multipath_adjacency_free (ip_lookup_main_t * lm,
   heap_dealloc (lm->next_hop_heap, a->unnormalized_next_hops.heap_handle);
 
   ip_del_adjacency2 (lm, a->adj_index, a->reference_count == 0);
+  memset (a, 0, sizeof (a[0]));
 }
 
 always_inline ip_multipath_next_hop_t *
