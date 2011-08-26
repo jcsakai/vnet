@@ -674,3 +674,104 @@ static clib_error_t * ethernet_arp_init (vlib_main_t * vm)
 }
 
 VLIB_INIT_FUNCTION (ethernet_arp_init);
+
+static void 
+arp_unset_ip4_over_ethernet (vlib_main_t *vm,
+                             ethernet_arp_main_t *am,
+                             u32 sw_if_index,
+                             ethernet_arp_ip4_over_ethernet_address_t *a)
+{
+  ethernet_arp_ip4_entry_t * e;
+  ethernet_arp_ip4_key_t k;
+  uword * p;
+  
+  k.sw_if_index = sw_if_index;
+  k.ip4_address = a->ip4;
+  p = mhash_get (&am->ip4_entry_by_key, &k);
+  if (! p)
+    {
+      vlib_cli_output (vm, "no such ARP cache entry\n");
+      return;
+    }
+  e = pool_elt_at_index (am->ip4_entry_pool, p[0]);
+  mhash_unset (&am->ip4_entry_by_key, &e->key, 0);
+  pool_put (am->ip4_entry_pool, e);
+}
+
+static void 
+increment_ip4_and_mac_address (ethernet_arp_ip4_over_ethernet_address_t *a)
+{
+  u8 old;
+  int i;
+
+  for (i = 3; i >= 0; i--) 
+    {
+      old = a->ip4.as_u8[i];
+      a->ip4.as_u8[i] += 1;
+      if (old < a->ip4.as_u8[i])
+        break;
+    }
+
+  for (i = 5; i >= 0; i--)
+    {
+      old = a->ethernet[i];
+      a->ethernet[i] += 1;
+      if (old < a->ethernet[i])
+        break;
+    }
+}
+
+static clib_error_t *
+ip_arp_add_del_command_fn (vlib_main_t * vm,
+		 unformat_input_t * input,
+		 vlib_cli_command_t * cmd)
+{
+  ethernet_arp_main_t * am = &ethernet_arp_main;
+  u32 sw_if_index;
+  ethernet_arp_ip4_over_ethernet_address_t addr;
+  int addr_valid=0;
+  int is_del=0;
+  int count=1;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT) 
+    {
+      /* set ip arp TenGigE1/1/0/1 1.2.3.4 aa:bb:... or aabb.ccdd... */
+      if (unformat (input, "%U %U %U",
+                    unformat_vlib_sw_interface,
+                    vm,
+                    &sw_if_index,
+                    unformat_ip4_address, &addr.ip4, 
+                    unformat_ethernet_address, &addr.ethernet))
+        addr_valid = 1;
+      else if (unformat (input, "delete") || unformat (input, "del"))
+        is_del = 1;
+      else if (unformat (input, "count %d", &count))
+        ;
+      else
+        return clib_error_return (0, "unknown input `%U'",
+                                  format_unformat_error, input);
+    }
+  
+  if (addr_valid) 
+    {
+      int i;
+
+      for (i = 0; i < count; i++) 
+        {
+          if (is_del == 0)
+            arp_set_ip4_over_ethernet (vm, am, sw_if_index, &addr);
+          else
+            arp_unset_ip4_over_ethernet (vm, am, sw_if_index, &addr);
+
+          increment_ip4_and_mac_address(&addr);
+        }
+    }
+  
+  return 0;
+}
+
+static VLIB_CLI_COMMAND (ip_arp_add_del_command) = {
+    .path = "set ip arp",
+    .short_help = "set ip arp",
+    .function = ip_arp_add_del_command_fn,
+};
