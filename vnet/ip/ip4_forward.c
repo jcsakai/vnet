@@ -195,6 +195,15 @@ unserialize_fixup_ip4_rewrite_adjacencies (vlib_main_t * vm,
 	  ni = is_arp ? ip4_arp_node.index : ip4_rewrite_node.index;
 	  adj[i].rewrite_header.node_index = ni;
 	  adj[i].rewrite_header.next_index = vlib_node_add_next (vm, ni, hw->output_node_index);
+	  if (is_arp)
+	    vnet_rewrite_for_sw_interface
+	      (vm,
+	       VNET_L3_PACKET_TYPE_ARP,
+	       sw_if_index,
+	       ni,
+	       VNET_REWRITE_FOR_SW_INTERFACE_ADDRESS_BROADCAST,
+	       &adj[i].rewrite_header,
+	       sizeof (adj->rewrite_data));
 	  break;
 
 	default:
@@ -494,11 +503,22 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
       dst_adj = 0;
     }
 
+  /* Ignore adds of X/32 with next hop of X. */
+  if (! is_del
+      && dst_address_length == 32
+      && dst_address->data_u32 == next_hop->data_u32)
+    {
+      error = clib_error_return (0, "prefix matches next hop %U/%d",
+                                 format_ip4_address, dst_address,
+                                 dst_address_length);
+      goto done;
+    }
+
   old_mp_adj_index = dst_adj ? dst_adj->heap_handle : ~0;
 
   if (! ip_multipath_adjacency_add_del_next_hop
       (lm, is_del,
-       dst_adj ? dst_adj->heap_handle : ~0,
+       old_mp_adj_index,
        nh_adj_index,
        next_hop_weight,
        &new_mp_adj_index))
@@ -518,7 +538,7 @@ ip4_add_del_route_next_hop (ip4_main_t * im,
     {
       ip4_add_del_route_args_t a;
       a.table_index_or_table_id = fib_index;
-      a.flags = ((is_del ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
+      a.flags = ((is_del && ! new_mp ? IP4_ROUTE_FLAG_DEL : IP4_ROUTE_FLAG_ADD)
 		 | IP4_ROUTE_FLAG_FIB_INDEX
 		 | IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY
 		 | (flags & (IP4_ROUTE_FLAG_NO_REDISTRIBUTE | IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP)));
@@ -1264,10 +1284,12 @@ void unserialize_vnet_ip4_main (serialize_main_t * m, va_list * va)
   unserialize (m, unserialize_ip_lookup_main, &i4m->lookup_main);
 
   {
-    ip_adjacency_t * adj;
+    ip_adjacency_t * adj, * adj_heap;
     u32 n_adj;
-    heap_foreach (adj, n_adj, i4m->lookup_main.adjacency_heap, ({
+    adj_heap = i4m->lookup_main.adjacency_heap;
+    heap_foreach (adj, n_adj, adj_heap, ({
       unserialize_fixup_ip4_rewrite_adjacencies (vm, adj, n_adj);
+      ip_call_add_del_adjacency_callbacks (&i4m->lookup_main, adj - adj_heap, /* is_del */ 0);
     }));
   }
 

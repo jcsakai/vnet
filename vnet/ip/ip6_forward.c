@@ -207,6 +207,15 @@ unserialize_fixup_ip6_rewrite_adjacencies (vlib_main_t * vm,
 	  ni = is_arp ? ip6_discover_neighbor_node.index : ip6_rewrite_node.index;
 	  adj[i].rewrite_header.node_index = ni;
 	  adj[i].rewrite_header.next_index = vlib_node_add_next (vm, ni, hw->output_node_index);
+	  if (is_arp)
+	    vnet_rewrite_for_sw_interface
+	      (vm,
+	       VNET_L3_PACKET_TYPE_ARP,
+	       sw_if_index,
+	       ni,
+	       VNET_REWRITE_FOR_SW_INTERFACE_ADDRESS_BROADCAST,
+	       &adj[i].rewrite_header,
+	       sizeof (adj->rewrite_data));
 	  break;
 
 	default:
@@ -505,6 +514,17 @@ ip6_add_del_route_next_hop (ip6_main_t * im,
 
       dst_adj_index = ~0;
       dst_adj = 0;
+    }
+
+  /* Ignore adds of X/128 with next hop of X. */
+  if (! is_del
+      && dst_address_length == 128
+      && ip6_address_is_equal (dst_address, next_hop))
+    {
+      error = clib_error_return (0, "prefix matches next hop %U/%d",
+                                 format_ip6_address, dst_address,
+                                 dst_address_length);
+      goto done;
     }
 
   old_mp_adj_index = dst_adj ? dst_adj->heap_handle : ~0;
@@ -1279,10 +1299,12 @@ void unserialize_vnet_ip6_main (serialize_main_t * m, va_list * va)
   unserialize (m, unserialize_ip_lookup_main, lm);
 
   {
-    ip_adjacency_t * adj;
+    ip_adjacency_t * adj, * adj_heap;
     u32 n_adj;
-    heap_foreach (adj, n_adj, im->lookup_main.adjacency_heap, ({
-	  unserialize_fixup_ip6_rewrite_adjacencies (vm, adj, n_adj);
+    adj_heap = im->lookup_main.adjacency_heap;
+    heap_foreach (adj, n_adj, adj_heap, ({
+      unserialize_fixup_ip6_rewrite_adjacencies (vm, adj, n_adj);
+      ip_call_add_del_adjacency_callbacks (&im->lookup_main, adj - adj_heap, /* is_del */ 0);
     }));
   }
 

@@ -7,8 +7,11 @@
 
 ige_main_t ige_main;
 
+#define IGE_ALWAYS_POLL 0
+
 #define EVENT_SET_FLAGS 0
 
+static vlib_node_registration_t ige_input_node;
 static vlib_node_registration_t ige_process_node;
 
 static void ige_semaphore_get (ige_device_t * xd)
@@ -304,17 +307,18 @@ static u8 * format_ige_rx_dma_trace (u8 * s, va_list * va)
   return s;
 }
 
-#define foreach_ige_rx_error                    \
+#define foreach_ige_error			\
   _ (none, "no error")                          \
   _ (rx_data_error, "rx data error")            \
-  _ (ip4_checksum_error, "ip4 checksum errors")
+  _ (ip4_checksum_error, "ip4 checksum errors")	\
+  _ (tx_full_drops, "tx ring full drops")
 
 typedef enum {
-#define _(f,s) IGE_RX_ERROR_##f,
-  foreach_ige_rx_error
+#define _(f,s) IGE_ERROR_##f,
+  foreach_ige_error
 #undef _
-  IGE_RX_N_ERROR,
-} ige_rx_error_t;
+  IGE_N_ERROR,
+} ige_error_t;
 
 typedef enum {
   IGE_RX_NEXT_IP4_INPUT,
@@ -330,13 +334,13 @@ ige_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
   u8 is0_ip4, n0, e0;
   u32 f0;
 
-  e0 = IGE_RX_ERROR_none;
+  e0 = IGE_ERROR_none;
   n0 = IGE_RX_NEXT_ETHERNET_INPUT;
 
   is0_ip4 = s02 & IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_CHECKSUMMED;
   n0 = is0_ip4 ? IGE_RX_NEXT_IP4_INPUT : n0;
   e0 = (is0_ip4 && (s02 & IGE_RX_DESCRIPTOR_STATUS2_IP4_CHECKSUM_ERROR)
-	? IGE_RX_ERROR_ip4_checksum_error
+	? IGE_ERROR_ip4_checksum_error
 	: e0);
 
   e0 = ((s02 &
@@ -344,11 +348,11 @@ ige_rx_next_and_error_from_status_x1 (u32 s00, u32 s02,
           | IGE_RX_DESCRIPTOR_STATUS2_SYMBOL_ERROR
           | IGE_RX_DESCRIPTOR_STATUS2_SEQUENCE_ERROR
           | IGE_RX_DESCRIPTOR_STATUS2_RX_DATA_ERROR))
-        ? IGE_RX_ERROR_rx_data_error
+        ? IGE_ERROR_rx_data_error
         : e0);
 
   /* Check for error. */
-  n0 = e0 != IGE_RX_ERROR_none ? IGE_RX_NEXT_DROP : n0;
+  n0 = e0 != IGE_ERROR_none ? IGE_RX_NEXT_DROP : n0;
 
   f0 = ((s02 & (IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_TCP_CHECKSUMMED
 		| IGE_RX_DESCRIPTOR_STATUS2_IS_IP4_UDP_CHECKSUMMED))
@@ -381,13 +385,13 @@ ige_rx_legacy_next_and_error_from_status_x1 (u32 s00,
   u8 is0_ip4, n0, e0;
   u32 f0;
 
-  e0 = IGE_RX_ERROR_none;
+  e0 = IGE_ERROR_none;
   n0 = IGE_RX_NEXT_ETHERNET_INPUT;
 
   is0_ip4 = s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_IP4_CHECKSUMMED;
   n0 = is0_ip4 ? IGE_RX_NEXT_IP4_INPUT : n0;
   e0 = (is0_ip4 && (s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IP4_CHECKSUM_ERROR)
-	? IGE_RX_ERROR_ip4_checksum_error
+	? IGE_ERROR_ip4_checksum_error
 	: e0);
 
   e0 = ((s00 &
@@ -395,11 +399,11 @@ ige_rx_legacy_next_and_error_from_status_x1 (u32 s00,
           | IGE_LEGACY_RX_DESCRIPTOR_STATUS_SYMBOL_ERROR
           | IGE_LEGACY_RX_DESCRIPTOR_STATUS_SEQUENCE_ERROR
           | IGE_LEGACY_RX_DESCRIPTOR_STATUS_RX_DATA_ERROR))
-        ? IGE_RX_ERROR_rx_data_error
+        ? IGE_ERROR_rx_data_error
         : e0);
 
   /* Check for error. */
-  n0 = e0 != IGE_RX_ERROR_none ? IGE_RX_NEXT_DROP : n0;
+  n0 = e0 != IGE_ERROR_none ? IGE_RX_NEXT_DROP : n0;
 
   f0 = ((s00 & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_IP4_TCP_CHECKSUMMED)
 	? IP_BUFFER_L4_CHECKSUM_COMPUTED
@@ -696,7 +700,7 @@ ige_ring_sub (ige_dma_queue_t * q, u32 i0, u32 i1)
   i32 d = i1 - i0;
   ASSERT (i0 < q->n_descriptors);
   ASSERT (i1 < q->n_descriptors);
-  return d < 0 ? -d : d;
+  return d < 0 ? q->n_descriptors + d : d;
 }
 
 always_inline uword
@@ -871,7 +875,7 @@ ige_interface_tx (vlib_main_t * vm,
   vlib_interface_output_runtime_t * rd = (void *) node->runtime_data;
   ige_device_t * xd = vec_elt_at_index (xm->devices, rd->dev_instance);
   ige_dma_queue_t * dq;
-  u32 * from, n_left_from, n_left_tx, n_descriptors_to_tx;
+  u32 * from, n_left_from, n_left_tx, n_descriptors_to_tx, n_tail_drop;
   u32 queue_index = 0;		/* fixme parameter */
   ige_tx_state_t tx_state;
   ige_dma_regs_t * dr = get_dma_regs (xd, VLIB_TX, queue_index);
@@ -884,18 +888,58 @@ ige_interface_tx (vlib_main_t * vm,
 
   dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], queue_index);
 
-  n_left_tx = dq->n_descriptors;
-
-  /* There might be room on the ring due to packets already transmitted. */
-  {
-    u32 hw_head_index = dr->head_index;
-    n_left_tx += ige_ring_sub (dq, hw_head_index, dq->head_index);
-    dq->head_index = hw_head_index;
-  }
-
-  n_descriptors_to_tx = clib_min (n_left_tx, n_left_from);
+  n_left_tx = dq->n_descriptors - 1;
+  dq->head_index = dr->head_index;
+  n_left_tx -= ige_ring_sub (dq, dq->head_index, dq->tail_index);
 
   _vec_len (xm->tx_buffers_pending_free) = 0;
+
+  n_descriptors_to_tx = f->n_vectors;
+  n_tail_drop = 0;
+  if (PREDICT_FALSE (n_descriptors_to_tx > n_left_tx))
+    {
+      i32 i, n_ok, i_eop, i_sop;
+
+      i_sop = i_eop = ~0;
+      for (i = n_left_tx - 1; i >= 0; i--)
+	{
+	  vlib_buffer_t * b = vlib_get_buffer (vm, from[i]);
+	  if (! (b->flags & VLIB_BUFFER_NEXT_PRESENT))
+	    {
+	      if (i_sop != ~0 && i_eop != ~0)
+		break;
+	      i_eop = i;
+	      i_sop = i + 1;
+	    }
+	}
+      if (i == 0)
+	n_ok = 0;
+      else
+	n_ok = i_eop + 1;
+
+      {
+	ELOG_TYPE_DECLARE (e) = {
+	  .function = (char *) __FUNCTION__,
+	  .format = "ixge %d, ring full to tx %d head %d tail %d",
+	  .format_args = "i2i2i2i2",
+	};
+	struct { u16 instance, to_tx, head, tail; } * ed;
+	ed = ELOG_DATA (&vm->elog_main, e);
+	ed->instance = xd->device_index;
+	ed->to_tx = n_descriptors_to_tx;
+	ed->head = dq->head_index;
+	ed->tail = dq->tail_index;
+      }
+
+      if (n_ok < n_descriptors_to_tx)
+	{
+	  n_tail_drop = n_descriptors_to_tx - n_ok;
+	  vec_add (xm->tx_buffers_pending_free, from + n_ok, n_tail_drop);
+	  vlib_error_count (vm, ige_input_node.index, IGE_ERROR_tx_full_drops, n_tail_drop);
+	}
+
+      n_descriptors_to_tx = n_ok;
+    }
 
   /* Process from tail to end of descriptor ring. */
   if (n_descriptors_to_tx > 0 && dq->tail_index < dq->n_descriptors)
@@ -903,7 +947,6 @@ ige_interface_tx (vlib_main_t * vm,
       u32 n = clib_min (dq->n_descriptors - dq->tail_index, n_descriptors_to_tx);
       n = ige_tx_no_wrap (xm, xd, dq, from, dq->tail_index, n, &tx_state);
       from += n;
-      n_left_from -= n;
       n_descriptors_to_tx -= n;
       dq->tail_index += n;
       ASSERT (dq->tail_index <= dq->n_descriptors);
@@ -915,7 +958,6 @@ ige_interface_tx (vlib_main_t * vm,
     {
       u32 n = ige_tx_no_wrap (xm, xd, dq, from, 0, n_descriptors_to_tx, &tx_state);
       from += n;
-      n_left_from -= n;
       ASSERT (n == n_descriptors_to_tx);
       dq->tail_index += n;
       ASSERT (dq->tail_index <= dq->n_descriptors);
@@ -940,14 +982,6 @@ ige_interface_tx (vlib_main_t * vm,
 	_vec_len (xm->tx_buffers_pending_free) = 0;
       }
   }
-
-  /* Not enough room on ring: drop the buffers. */
-  if (n_left_from > 0)
-    {
-      /* Back up to last start of packet and free from there. */
-      ASSERT (0);
-      abort ();
-    }
 
   return f->n_vectors;
 }
@@ -1463,6 +1497,7 @@ static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
 
   if (i != 2)
     {
+        if (0) {
       ELOG_TYPE_DECLARE (e) = {
 	.function = (char *) __FUNCTION__,
 	.format = "ige %d, %s",
@@ -1501,6 +1536,7 @@ static void ige_interrupt (ige_main_t * xm, ige_device_t * xd, u32 i)
       ed = ELOG_DATA (&vm->elog_main, e);
       ed->instance = xd->device_index;
       ed->index = i;
+        }
     }
   else
     {
@@ -1591,9 +1627,9 @@ ige_input (vlib_main_t * vm,
   return n_rx_packets;
 }
 
-static char * ige_rx_error_strings[] = {
+static char * ige_error_strings[] = {
 #define _(n,s) s,
-  foreach_ige_rx_error
+  foreach_ige_error
 #undef _
 };
 
@@ -1608,8 +1644,8 @@ static VLIB_REGISTER_NODE (ige_input_node) = {
   .format_buffer = format_ethernet_header_with_length,
   .format_trace = format_ige_rx_dma_trace,
 
-  .n_errors = IGE_RX_N_ERROR,
-  .error_strings = ige_rx_error_strings,
+  .n_errors = IGE_N_ERROR,
+  .error_strings = ige_error_strings,
 
   .n_next_nodes = IGE_RX_N_NEXT,
   .next_nodes = {
@@ -1775,7 +1811,7 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     = vlib_buffer_get_or_create_free_list (vm, xm->n_bytes_in_rx_buffer, "ige rx");
 
   if (! xm->n_descriptors[rt])
-    xm->n_descriptors[rt] = 3 * VLIB_FRAME_SIZE / 2;
+      xm->n_descriptors[rt] = 3 * VLIB_FRAME_SIZE / 2;
 
   dq->queue_index = queue_index;
   dq->n_descriptors = round_pow2 (xm->n_descriptors[rt], xm->n_descriptors_per_cache_line);
@@ -1826,17 +1862,16 @@ ige_dma_init (ige_device_t * xd, vlib_rx_or_tx_t rt, u32 queue_index)
     dr->n_descriptor_bytes = dq->n_descriptors * sizeof (dq->descriptors[0]);
     dq->head_index = dq->tail_index = 0;
 
-    /* Interrupt every 10*1.024e-6 secs. */
-    dr->interrupt_delay_timer = 10;
-
     if (rt == VLIB_RX)
       /* Give hardware all but last cache line of descriptors. */
       dq->tail_index = dq->n_descriptors - xm->n_descriptors_per_cache_line;
 
     CLIB_MEMORY_BARRIER ();
 
+    dr->control &= ~0x3f << 0;
+    dr->control &= ~0x3f << 16;
     dr->control |= ((/* prefetch threshold */ 32 << 0)
-		    | (/* writeback threshold */ 16 << 16));
+                    | (/* writeback threshold */ 16 << 16));
 
     /* Set head/tail indices and enable DMA. */
     dr->head_index = dq->head_index;
@@ -1858,7 +1893,7 @@ static void ige_device_init (ige_main_t * xm)
       const u32 reset_bit = (1 << 26);
 
       /* Make sure TX packet buffer has room for 2 9k frames. */
-      {
+      if (0) {
 	u32 pba = r->packet_buffer_allocation;
 	u32 rx_k_bytes = pba & 0xffff;
 	u32 tx_k_bytes = pba >> 16;
@@ -1966,6 +2001,7 @@ static void ige_device_init (ige_main_t * xm)
 	  r->tx_control |= 1 << 28;
 	}
 
+      r->interrupt.throttle_rate = 20e-6 / 256e-9;
       r->interrupt.enable_write_1_to_set = ~0;
     }
 }
@@ -2112,7 +2148,10 @@ ige_pci_init (vlib_main_t * vm, pci_device_t * dev)
   {
     linux_pci_device_t * lp = pci_dev_for_linux (dev);
 
-    vlib_node_set_state (vm, ige_input_node.index, VLIB_NODE_STATE_INTERRUPT);
+    vlib_node_set_state (vm, ige_input_node.index, 
+			 (IGE_ALWAYS_POLL
+			  ? VLIB_NODE_STATE_POLLING
+			  : VLIB_NODE_STATE_INTERRUPT));
     lp->device_input_node_index = ige_input_node.index;
     lp->device_index = xd->device_index;
   }
