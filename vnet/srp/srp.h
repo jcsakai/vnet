@@ -156,6 +156,14 @@ void srp_interface_set_interface_config (u32 hw_if_index, srp_interface_config_t
 
 srp_main_t srp_main;
 
+always_inline srp_interface_t *
+srp_get_interface_from_vlib_hw_interface (u32 hw_if_index)
+{
+  srp_main_t * sm = &srp_main;
+  uword * p = hash_get (sm->interface_index_by_hw_if_index, hw_if_index);
+  return p ? pool_elt_at_index (sm->interface_pool, p[0]) : 0;
+}
+
 u8 * format_srp_header (u8 * s, va_list * args);
 u8 * format_srp_header_with_length (u8 * s, va_list * args);
 u8 * format_srp_device (u8 * s, va_list * args);
