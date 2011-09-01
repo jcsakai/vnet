@@ -189,14 +189,6 @@ void srp_register_interface (u32 * hw_if_indices_by_side)
   srp_register_interface_helper (hw_if_indices_by_side, /* redistribute */ 1);
 }
 
-always_inline srp_interface_t *
-srp_get_interface_from_vlib_hw_interface (u32 hw_if_index)
-{
-  srp_main_t * sm = &srp_main;
-  uword * p = hash_get (sm->interface_index_by_hw_if_index, hw_if_index);
-  return p ? pool_elt_at_index (sm->interface_pool, p[0]) : 0;
-}
-
 void srp_interface_set_hw_wrap_function (u32 hw_if_index, srp_hw_wrap_function_t * f)
 {
   srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
