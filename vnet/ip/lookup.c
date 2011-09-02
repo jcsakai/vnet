@@ -589,6 +589,7 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
       prev = pi != ~0 ? pool_elt_at_index (lm->if_address_pool, pi) : 0;
 
       pool_get (lm->if_address_pool, a);
+      memset (a, ~0, sizeof (a[0]));
       ai = a - lm->if_address_pool;
       a->address_key = mhash_set (&lm->address_to_if_address_index, address, ai, /* old_value */ 0);
       a->address_length = address_length;
@@ -601,6 +602,12 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
       if (result_if_address_index)
 	*result_if_address_index = ai;
     }
+  else
+    {
+      if (result_if_address_index)
+	*result_if_address_index = a - lm->if_address_pool;
+    }
+    
 
   return /* no error */ 0;
 }
