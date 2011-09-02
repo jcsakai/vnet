@@ -456,6 +456,7 @@ arp_input (vlib_main_t * vm,
 
 	  /* Figure out how much to rewind current data from adjacency. */
 	  adj0 = ip_get_adjacency (&ip4_main.lookup_main, ifa0->neighbor_probe_adj_index);
+	  ASSERT (adj0->lookup_next_index == IP_LOOKUP_NEXT_ARP);
 	  vlib_buffer_advance (p0, -adj0->rewrite_header.data_bytes);
 
 	  if (next0 != next_index)
