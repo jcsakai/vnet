@@ -1118,13 +1118,10 @@ ip4_add_del_interface_address_internal (vlib_main_t * vm,
   ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   clib_error_t * error = 0;
-  u32 if_address_index;
+  u32 if_address_index, elts_before;
 
-  {
-    uword elts_before = pool_elts (lm->if_address_pool);
-
-    if (vm->mc_main && redistribute)
-      {
+  if (vm->mc_main && redistribute)
+    {
 	ip4_interface_address_t a;
 	a.sw_if_index = sw_if_index;
 	a.address = address[0];
@@ -1133,21 +1130,18 @@ ip4_add_del_interface_address_internal (vlib_main_t * vm,
 		      &a, (int)is_del);
 	goto done;
       }
+    
+  elts_before = pool_elts (lm->if_address_pool);
 
-    error = ip_interface_address_add_del
-      (lm,
-       sw_if_index,
-       address,
-       address_length,
-       is_del,
-       &if_address_index);
-    if (error)
-      goto done;
-
-    /* Pool did not grow: add duplicate address. */
-    if (elts_before == pool_elts (lm->if_address_pool))
-      goto done;
-  }
+  error = ip_interface_address_add_del
+    (lm,
+     sw_if_index,
+     address,
+     address_length,
+     is_del,
+     &if_address_index);
+  if (error)
+    goto done;
 
   if (vlib_sw_interface_is_admin_up (vm, sw_if_index) && insert_routes)
     {
@@ -1162,14 +1156,16 @@ ip4_add_del_interface_address_internal (vlib_main_t * vm,
 				  pool_elt_at_index (lm->if_address_pool, if_address_index));
     }
 
-  {
-    ip4_add_del_interface_address_callback_t * cb;
-    vec_foreach (cb, im->add_del_interface_address_callbacks)
-      cb->function (im, cb->function_opaque, sw_if_index,
-		    address, address_length,
-		    if_address_index,
-		    is_del);
-  }
+  /* If pool did not grow/shrink: add duplicate address. */
+  if (elts_before != pool_elts (lm->if_address_pool))
+    {
+      ip4_add_del_interface_address_callback_t * cb;
+      vec_foreach (cb, im->add_del_interface_address_callbacks)
+	cb->function (im, cb->function_opaque, sw_if_index,
+		      address, address_length,
+		      if_address_index,
+		      is_del);
+    }
 
  done:
   return error;
