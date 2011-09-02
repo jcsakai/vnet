@@ -42,6 +42,12 @@
 #include <vnet/ip/ip.h>
 
 typedef struct {
+  u32 sw_if_index;
+  u8 is_v6;
+  u8 addr[16];
+} subif_address_t;
+
+typedef struct {
   /* Vector of iovecs for readv/writev calls. */
   struct iovec * iovecs;
 
@@ -57,6 +63,12 @@ typedef struct {
 
   /* Linux interface name for tun device. */
   char * tun_name;
+
+  /* Pool of subinterface addresses */
+  subif_address_t *subifs;
+
+  /* Hash for subif addresses */
+  mhash_t subif_mhash;
 
   u32 unix_file_index;
 
@@ -495,14 +507,32 @@ tuntap_ip4_add_del_interface_address (ip4_main_t * im,
 {
   tuntap_main_t * tm = &tuntap_main;
   struct ifreq ifr;
+  subif_address_t subif_addr, * ap;
+  uword * p;
 
   /* Tuntap disabled. */
   if (tm->dev_tap_fd < 0)
     return;
 
-  /* Use VLIB sw_if_index to select alias device. */
+  /* See if we already know about this subif */
+  memset (&subif_addr, 0, sizeof (subif_addr));
+  subif_addr.sw_if_index = sw_if_index;
+  memcpy (&subif_addr.addr, address, sizeof (*address));
+  
+  p = mhash_get (&tm->subif_mhash, &subif_addr);
+
+  if (p)
+    ap = pool_elt_at_index (tm->subifs, p[0]);
+  else
+    {
+      pool_get (tm->subifs, ap);
+      *ap = subif_addr;
+      mhash_set (&tm->subif_mhash, ap, ap - tm->subifs, 0);
+    }
+
+  /* Use subif pool index to select alias device. */
   memset (&ifr, 0, sizeof (ifr));
-  sprintf (ifr.ifr_name, "%s:%d", tm->tun_name, sw_if_index);
+  sprintf (ifr.ifr_name, "%s:%d", tm->tun_name, (int)(ap - tm->subifs));
 
   if (! is_delete)
     {
@@ -520,6 +550,11 @@ tuntap_ip4_add_del_interface_address (ip4_main_t * im,
       if (ioctl (tm->dev_tap_fd, SIOCSIFNETMASK, &ifr) < 0)
 	clib_unix_warning ("ioctl SIOCSIFNETMASK");
     }
+  else
+    {
+      mhash_unset (&tm->subif_mhash, &subif_addr, 0 /* old value ptr */);
+      pool_put (tm->subifs, ap);
+    }
 
   /* get flags, modify to bring up interface... */
   if (ioctl (tm->dev_tap_fd, SIOCGIFFLAGS, &ifr) < 0)
@@ -532,6 +567,104 @@ tuntap_ip4_add_del_interface_address (ip4_main_t * im,
 
   if (ioctl (tm->dev_tap_fd, SIOCSIFFLAGS, &ifr) < 0)
     clib_unix_warning ("ioctl SIOCSIFFLAGS");
+}
+
+/*
+ * $$$$ gross workaround for a known #include bug 
+ * #include <linux/ipv6.h> causes multiple definitions if
+ * netinet/in.h is also included.
+ */
+struct in6_ifreq {
+	struct in6_addr	ifr6_addr;
+        u32		ifr6_prefixlen;
+	int		ifr6_ifindex; 
+};
+
+/* 
+ * Both the v6 interface address API and the way ifconfig
+ * displays subinterfaces differ from their v4 couterparts.
+ * The code given here seems to work but YMMV.
+ */
+void
+tuntap_ip6_add_del_interface_address (ip6_main_t * im,
+				      uword opaque,
+				      u32 sw_if_index,
+				      ip6_address_t * address,
+				      u32 address_length,
+				      u32 if_address_index,
+				      u32 is_delete)
+{
+  tuntap_main_t * tm = &tuntap_main;
+  struct ifreq ifr;
+  struct in6_ifreq ifr6;
+  subif_address_t subif_addr, * ap;
+  uword * p;
+
+  /* Tuntap disabled. */
+  if (tm->dev_tap_fd < 0)
+    return;
+
+  /* See if we already know about this subif */
+  memset (&subif_addr, 0, sizeof (subif_addr));
+  subif_addr.sw_if_index = sw_if_index;
+  subif_addr.is_v6 = 1;
+  memcpy (&subif_addr.addr, address, sizeof (*address));
+  
+  p = mhash_get (&tm->subif_mhash, &subif_addr);
+
+  if (p)
+    ap = pool_elt_at_index (tm->subifs, p[0]);
+  else
+    {
+      pool_get (tm->subifs, ap);
+      *ap = subif_addr;
+      mhash_set (&tm->subif_mhash, ap, ap - tm->subifs, 0);
+    }
+
+  /* Use subif pool index to select alias device. */
+  memset (&ifr, 0, sizeof (ifr));
+  memset (&ifr6, 0, sizeof (ifr6));
+  sprintf (ifr.ifr_name, "%s:%d", tm->tun_name, (int)(ap - tm->subifs));
+
+  if (! is_delete)
+    {
+      int sockfd = socket (AF_INET6, SOCK_STREAM, 0);
+      if (sockfd < 0)
+        clib_unix_warning ("get ifindex socket");
+
+      if (ioctl (sockfd, SIOGIFINDEX, &ifr) < 0)
+        clib_unix_warning ("get ifindex");
+
+      ifr6.ifr6_ifindex = ifr.ifr_ifindex;
+      ifr6.ifr6_prefixlen = address_length;
+      memcpy (&ifr6.ifr6_addr, address, 16);
+
+      if (ioctl (sockfd, SIOCSIFADDR, &ifr6) < 0)
+        clib_unix_warning ("set address");
+
+      close (sockfd);
+    }
+  else
+    {
+      int sockfd = socket (AF_INET6, SOCK_STREAM, 0);
+      if (sockfd < 0)
+        clib_unix_warning ("get ifindex socket");
+
+      if (ioctl (sockfd, SIOGIFINDEX, &ifr) < 0)
+        clib_unix_warning ("get ifindex");
+
+      ifr6.ifr6_ifindex = ifr.ifr_ifindex;
+      ifr6.ifr6_prefixlen = address_length;
+      memcpy (&ifr6.ifr6_addr, address, 16);
+
+      if (ioctl (sockfd, SIOCDIFADDR, &ifr6) < 0)
+        clib_unix_warning ("del address");
+
+      close (sockfd);
+
+      mhash_unset (&tm->subif_mhash, &subif_addr, 0 /* old value ptr */);
+      pool_put (tm->subifs, ap);
+    }
 }
 
 static void
@@ -575,17 +708,25 @@ static clib_error_t *
 tuntap_init (vlib_main_t * vm)
 {
   clib_error_t * error;
-  ip4_main_t * im = &ip4_main;
-  ip4_add_del_interface_address_callback_t cb;
+  ip4_main_t * im4 = &ip4_main;
+  ip6_main_t * im6 = &ip6_main;
+  ip4_add_del_interface_address_callback_t cb4;
+  ip6_add_del_interface_address_callback_t cb6;
   tuntap_main_t * tm = &tuntap_main;
 
   error = vlib_call_init_function (vm, ip4_init);
   if (error)
     return error;
 
-  cb.function = tuntap_ip4_add_del_interface_address;
-  cb.function_opaque = 0;
-  vec_add1 (im->add_del_interface_address_callbacks, cb);
+  mhash_init (&tm->subif_mhash, sizeof (u32), sizeof(subif_address_t));
+
+  cb4.function = tuntap_ip4_add_del_interface_address;
+  cb4.function_opaque = 0;
+  vec_add1 (im4->add_del_interface_address_callbacks, cb4);
+
+  cb6.function = tuntap_ip6_add_del_interface_address;
+  cb6.function_opaque = 0;
+  vec_add1 (im6->add_del_interface_address_callbacks, cb6);
 
   vm->os_punt_frame = tuntap_punt_frame;
 
