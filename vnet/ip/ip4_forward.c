@@ -1122,14 +1122,14 @@ ip4_add_del_interface_address_internal (vlib_main_t * vm,
 
   if (vm->mc_main && redistribute)
     {
-	ip4_interface_address_t a;
-	a.sw_if_index = sw_if_index;
-	a.address = address[0];
-	a.length = address_length;
-	mc_serialize (vm->mc_main, &ip4_set_interface_address_msg, 
-		      &a, (int)is_del);
-	goto done;
-      }
+      ip4_interface_address_t a;
+      a.sw_if_index = sw_if_index;
+      a.address = address[0];
+      a.length = address_length;
+      mc_serialize (vm->mc_main, &ip4_set_interface_address_msg, 
+		    &a, (int)is_del);
+      goto done;
+    }
     
   elts_before = pool_elts (lm->if_address_pool);
 
