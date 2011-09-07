@@ -381,7 +381,7 @@ static VLIB_REGISTER_NODE (ip6_icmp_neighbor_solicitation_node) = {
   .n_next_nodes = ICMP6_NEIGHBOR_SOLICITATION_N_NEXT,
   .next_nodes = {
     [ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP] = "error-drop",
-    [ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY] = CLIB_DEBUG > 0 ? "ip6-input" : "ip6-lookup",
   },
 };
 

@@ -260,7 +260,7 @@ ip4_fib_set_adj_index (ip4_main_t * im,
   fib->new_hash_values[0] = adj_index;
 
   /* Make sure adj index is valid. */
-  if (DEBUG > 0)
+  if (CLIB_DEBUG > 0)
     (void) ip_get_adjacency (lm, adj_index);
 
   hash = fib->adj_index_by_dst_address[dst_address_length];

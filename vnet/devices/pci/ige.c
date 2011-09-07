@@ -1185,7 +1185,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  bi_last = bi1;
 	  b_last = b1;
 
-	  if (DEBUG > 0)
+	  if (CLIB_DEBUG > 0)
 	    {
 	      u32 bi_sop0 = is_sop ? bi0 : bi_sop;
 	      u32 bi_sop1 = is_eop0 ? bi1 : bi_sop0;
@@ -1326,7 +1326,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 
 	  bi_sop = is_sop ? bi0 : bi_sop;
 
-	  if (DEBUG > 0 && is_eop0)
+	  if (CLIB_DEBUG > 0 && is_eop0)
 	    {
 	      u8 * msg = vlib_validate_buffer (vm, bi_sop, /* follow_buffer_next */ 1);
 	      ASSERT (! msg);

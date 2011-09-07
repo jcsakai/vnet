@@ -273,7 +273,7 @@ ip6_fib_set_adj_index (ip6_main_t * im,
   fib->new_hash_values[0] = adj_index;
 
   /* Make sure adj index is valid. */
-  if (DEBUG > 0)
+  if (CLIB_DEBUG > 0)
     (void) ip_get_adjacency (lm, adj_index);
 
   mh = ip6_fib_get_dst_address_length (fib, dst_address_length);

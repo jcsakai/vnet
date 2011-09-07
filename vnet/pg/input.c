@@ -1280,7 +1280,7 @@ pg_stream_fill_helper (pg_main_t * pg,
     return 0;
       
   /* No need to do anything with already used buffers unless debugging. */
-  if (DEBUG > 0 || (s->flags & PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE))
+  if (CLIB_DEBUG > 0 || (s->flags & PG_STREAM_FLAGS_DISABLE_BUFFER_RECYCLE))
     init_buffers_inline
       (vm, s,
        buffers,
@@ -1350,7 +1350,7 @@ pg_stream_fill (pg_main_t * pg, pg_stream_t * s, u32 n_buffers)
     }
 
   /* All buffer fifos should have the same size. */
-  if (DEBUG > 0)
+  if (CLIB_DEBUG > 0)
     {
       uword l = ~0, e;
       vec_foreach (bi, s->buffer_indices)
@@ -1569,7 +1569,7 @@ pg_generate_packets (vlib_node_runtime_t * node,
 	  vlib_set_trace_count (vm, node, n_trace - n);
 	}
 
-      if (DEBUG > 0)
+      if (CLIB_DEBUG > 0)
 	{
 	  u8 * e;
 	  e = vlib_validate_buffers (vm, to_next, /* stride */ 1,

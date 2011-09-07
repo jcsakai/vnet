@@ -233,7 +233,7 @@ tuntap_rx (vlib_main_t * vm,
     _vec_len (tm->rx_buffers) = i_rx;
   }
 
-  if (DEBUG > 0)
+  if (CLIB_DEBUG > 0)
     {
       u8 * msg = vlib_validate_buffer (vm, bi, /* follow_buffer_next */ 1);
       if (msg)

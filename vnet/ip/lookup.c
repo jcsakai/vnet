@@ -32,7 +32,7 @@ ip_multipath_del_adjacency (ip_lookup_main_t * lm, u32 del_adj_index);
 always_inline void
 ip_poison_adjacencies (ip_adjacency_t * adj, uword n_adj)
 {
-  if (DEBUG > 0)
+  if (CLIB_DEBUG > 0)
     memset (adj, 0xfe, n_adj * sizeof (adj[0]));
 }
 

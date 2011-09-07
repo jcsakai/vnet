@@ -1592,7 +1592,7 @@ static VLIB_REGISTER_NODE (ip4_tcp_listen_node) = {
   .n_next_nodes = TCP_LISTEN_N_NEXT,
   .next_nodes = {
     [TCP_LISTEN_NEXT_DROP] = "error-drop",
-    [TCP_LISTEN_NEXT_REPLY] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+    [TCP_LISTEN_NEXT_REPLY] = CLIB_DEBUG > 0 ? "ip4-input" : "ip4-lookup",
   },
 };
 
@@ -1605,7 +1605,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_listen_node) = {
   .n_next_nodes = TCP_LISTEN_N_NEXT,
   .next_nodes = {
     [TCP_LISTEN_NEXT_DROP] = "error-drop",
-    [TCP_LISTEN_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [TCP_LISTEN_NEXT_REPLY] = CLIB_DEBUG > 0 ? "ip6-input" : "ip6-lookup",
   },
 };
 
@@ -1721,7 +1721,7 @@ static VLIB_REGISTER_NODE (ip4_tcp_connect_node) = {
   .n_next_nodes = TCP_CONNECT_N_NEXT,
   .next_nodes = {
     [TCP_CONNECT_NEXT_DROP] = "error-drop",
-    [TCP_CONNECT_NEXT_REPLY] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+    [TCP_CONNECT_NEXT_REPLY] = CLIB_DEBUG > 0 ? "ip4-input" : "ip4-lookup",
   },
 };
 
@@ -1734,7 +1734,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_connect_node) = {
   .n_next_nodes = TCP_CONNECT_N_NEXT,
   .next_nodes = {
     [TCP_CONNECT_NEXT_DROP] = "error-drop",
-    [TCP_CONNECT_NEXT_REPLY] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [TCP_CONNECT_NEXT_REPLY] = CLIB_DEBUG > 0 ? "ip6-input" : "ip6-lookup",
   },
 };
 
@@ -2256,7 +2256,7 @@ static VLIB_REGISTER_NODE (ip4_tcp_output_node) = {
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [0] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+    [0] = CLIB_DEBUG > 0 ? "ip4-input" : "ip4-lookup",
   },
 };
 
@@ -2270,7 +2270,7 @@ static VLIB_REGISTER_NODE (ip6_tcp_output_node) = {
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [0] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [0] = CLIB_DEBUG > 0 ? "ip6-input" : "ip6-lookup",
   },
 };
 

@@ -358,7 +358,7 @@ static VLIB_REGISTER_NODE (ip6_icmp_echo_request_node) = {
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [0] = DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [0] = CLIB_DEBUG > 0 ? "ip6-input" : "ip6-lookup",
   },
 };
 

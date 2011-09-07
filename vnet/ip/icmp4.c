@@ -387,7 +387,7 @@ static VLIB_REGISTER_NODE (ip4_icmp_echo_request_node) = {
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [0] = DEBUG > 0 ? "ip4-input" : "ip4-lookup",
+    [0] = CLIB_DEBUG > 0 ? "ip4-input" : "ip4-lookup",
   },
 };
 
