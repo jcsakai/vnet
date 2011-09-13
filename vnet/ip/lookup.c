@@ -548,7 +548,7 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
     return clib_error_create ("%U wrong length (expected %d) for interface %U",
 			      lm->format_address_and_length, address, address_length,
 			      a->address_length,
-			      format_vlib_sw_interface_name, &vlib_global_main, sw_if_index);
+			      format_vlib_sw_if_index_name, &vlib_global_main, sw_if_index);
 
   if (is_del)
     {
