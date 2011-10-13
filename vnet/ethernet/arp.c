@@ -420,7 +420,7 @@ arp_input (vlib_main_t * vm,
 	  /* Fill in ethernet header. */
 	  eth0 = ethernet_buffer_get_header (p0);
 
-	  is_request0 = arp0->opcode == clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_request);
+	  is_request0 = arp0->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_request);
 
 	  /* Learn or update sender's mapping only for requests or unicasts
 	     that don't match local interface address. */
@@ -431,7 +431,7 @@ arp_input (vlib_main_t * vm,
 	  /* Only send a reply for requests sent which match a local interface. */
 	  if (! (is_request0 && dst_is_local0))
 	    {
-	      error0 = (arp0->opcode == clib_net_to_host_u16 (ETHERNET_ARP_OPCODE_reply)
+	      error0 = (arp0->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply)
 			? ETHERNET_ARP_ERROR_replies_received
 			: ETHERNET_ARP_ERROR_opcode_not_request);
 	      goto drop1;
