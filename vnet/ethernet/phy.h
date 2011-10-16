@@ -132,7 +132,7 @@ typedef struct ethernet_phy_device_registration {
 } ethernet_phy_device_registration_t;
 
 #define REGISTER_ETHERNET_PHY_DEVICE(x) \
-  VLIB_ELF_SECTION_DATA(x,ethernet_phy_device_registration_t,ethernet_phy)
+  ethernet_phy_device_registration_t x CLIB_ELF_SECTION("vnet_ethernet_phy")
 
 static inline ethernet_phy_device_registration_t *
 ethernet_phy_device_next_registered (ethernet_phy_device_registration_t * r)
@@ -143,7 +143,7 @@ ethernet_phy_device_next_registered (ethernet_phy_device_registration_t * r)
   for (i = 0; r->supported_devices[i].vendor_id != 0; i++)
     ;
 
-  return vlib_elf_section_data_next (r, i * sizeof (r->supported_devices[0]));
+  return clib_elf_section_data_next (r, i * sizeof (r->supported_devices[0]));
 }
 
 static inline clib_error_t *

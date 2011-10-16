@@ -92,12 +92,11 @@ clib_error_t * ethernet_phy_reset (ethernet_phy_t * phy)
 static ethernet_phy_device_registration_t *
 find_phy_device (ethernet_phy_t * phy)
 {
-  vlib_main_t * vm = phy->vlib_main;
-  vlib_elf_section_bounds_t * b, * bounds;
+  clib_elf_section_bounds_t * b, * bounds;
   ethernet_phy_device_registration_t * r;
   ethernet_phy_device_id_t * i;
 
-  bounds = vlib_get_elf_section_bounds (vm, "ethernet_phy");
+  bounds = clib_elf_get_section_bounds ("vnet_ethernet_phy");
   vec_foreach (b, bounds)
     {
       for (r = b->lo;
