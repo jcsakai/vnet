@@ -459,31 +459,18 @@ arp_input (vlib_main_t * vm,
 	  ASSERT (adj0->lookup_next_index == IP_LOOKUP_NEXT_ARP);
 	  vlib_buffer_advance (p0, -adj0->rewrite_header.data_bytes);
 
-	  if (next0 != next_index)
-	    {
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
+          vlib_validate_buffer_enqueue_x1 (vm, node, next_index,to_next,
+                                           n_left_to_next,pi0,next0);
 
-	      next_index = next0;
-	      vlib_get_next_frame (vm, node, next_index,
-				   to_next, n_left_to_next);
-	      to_next[0] = pi0;
-	      n_left_to_next -= 1;
-	    }
 	  n_replies_sent += 1;
 	  continue;
 
 	drop1:
 	  next0 = ARP_INPUT_NEXT_DROP;
 	  p0->error = node->errors[error0];
-	  if (next0 != next_index)
-	    {
-	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
-	      next_index = next0;
-	      vlib_get_next_frame (vm, node, next_index,
-				   to_next, n_left_to_next);
-	      to_next[0] = pi0;
-	      n_left_to_next -= 1;
-	    }
+
+          vlib_validate_buffer_enqueue_x1 (vm, node, next_index,to_next,
+                                           n_left_to_next,pi0,next0);
 	}
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
