@@ -214,7 +214,7 @@ ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index)
   pool_put (em->interfaces, ei);
 }
 
-#if DEBUG > 0
+#if CLIB_DEBUG > 0
 
 #define VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT VLIB_INTERFACE_TX_N_NEXT
 
