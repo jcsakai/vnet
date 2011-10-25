@@ -45,8 +45,8 @@ typedef struct {
 
 static u8 * format_hdlc_input_trace (u8 * s, va_list * va)
 {
-  UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
-  UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
+  CLIB_UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
+  CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   hdlc_input_trace_t * t = va_arg (*va, hdlc_input_trace_t *);
 
   s = format (s, "%U", format_hdlc_header, t->packet_data);

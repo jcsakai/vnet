@@ -1500,7 +1500,7 @@ typedef struct {
 static u8 * format_ip4_forward_next_trace (u8 * s, va_list * args)
 {
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
-  UNUSED (vlib_node_t * node) = va_arg (*args, vlib_node_t *);
+  CLIB_UNUSED (vlib_node_t * node) = va_arg (*args, vlib_node_t *);
   ip4_forward_next_trace_t * t = va_arg (*args, ip4_forward_next_trace_t *);
   ip4_main_t * im = &ip4_main;
   ip_adjacency_t * adj;

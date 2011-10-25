@@ -763,7 +763,7 @@ typedef struct {
 static u8 * format_ixge_tx_dma_trace (u8 * s, va_list * va)
 {
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
-  UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
+  CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   ixge_tx_dma_trace_t * t = va_arg (*va, ixge_tx_dma_trace_t *);
   ixge_main_t * xm = &ixge_main;
   ixge_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);

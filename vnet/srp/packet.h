@@ -95,7 +95,7 @@ typedef enum {
   SRP_N_CONTROL_PACKET_TYPE,
 } srp_control_packet_type_t;
 
-typedef PACKED (struct {
+typedef CLIB_PACKED (struct {
   /* Set to 0. */
   u8 version;
 
@@ -122,7 +122,7 @@ typedef struct {
   u8 address[6];
 } srp_topology_mac_binding_t;
 
-typedef PACKED (struct {
+typedef CLIB_PACKED (struct {
   srp_header_t srp;
   ethernet_header_t ethernet;
   srp_control_header_t control;

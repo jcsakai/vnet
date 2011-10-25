@@ -88,8 +88,8 @@ typedef struct {
 
 static u8 * format_icmp_input_trace (u8 * s, va_list * va)
 {
-  UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
-  UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
+  CLIB_UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
+  CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   icmp_input_trace_t * t = va_arg (*va, icmp_input_trace_t *);
 
   s = format (s, "%U",

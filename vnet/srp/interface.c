@@ -108,7 +108,7 @@ static void serialize_srp_register_interface_msg (serialize_main_t * m, va_list 
 
 static void unserialize_srp_register_interface_msg (serialize_main_t * m, va_list * va)
 {
-  UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
+  CLIB_UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
   u32 hw_if_indices[SRP_N_SIDE];
   srp_main_t * sm = &srp_main;
   uword * p;
@@ -297,7 +297,7 @@ static void serialize_srp_interface_config_msg (serialize_main_t * m, va_list * 
 
 static void unserialize_srp_interface_config_msg (serialize_main_t * m, va_list * va)
 {
-  UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
+  CLIB_UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
   srp_main_t * sm = &srp_main;
   srp_interface_t * si;
   u32 si_index;

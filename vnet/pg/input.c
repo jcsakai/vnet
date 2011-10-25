@@ -1407,7 +1407,7 @@ typedef struct {
 static u8 * format_pg_input_trace (u8 * s, va_list * va)
 {
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
-  UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
+  CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   pg_input_trace_t * t = va_arg (*va, pg_input_trace_t *);
   pg_main_t * pg = &pg_main;
   pg_stream_t * stream;

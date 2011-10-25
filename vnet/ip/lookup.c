@@ -1389,13 +1389,13 @@ static VLIB_CLI_COMMAND (ip_probe_neighbor_command) = {
   .short_help = "Probe IP4/IP6 address for interface",
 };
 
-typedef struct {
+typedef CLIB_PACKED (struct {
   ip4_address_t address;
 
-  PACKED (u32 address_length : 6);
+  u32 address_length : 6;
 
-  PACKED (u32 index : 26);
-} ip4_route_t;
+  u32 index : 26;
+}) ip4_route_t;
 
 static clib_error_t *
 ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)

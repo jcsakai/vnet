@@ -32,7 +32,7 @@
 /* Consider using vector types for speed? */
 typedef uword vnet_rewrite_data_t;
 
-typedef PACKED (struct {
+typedef CLIB_PACKED (struct {
   /* Interface to mark re-written packets with. */
   u32 sw_if_index;
 

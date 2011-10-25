@@ -107,7 +107,7 @@ typedef enum {
   ETHERNET_ARP_N_OPCODE,
 } ethernet_arp_opcode_t;
 
-typedef PACKED (struct {
+typedef CLIB_PACKED (struct {
   u8 ethernet[6];
   ip4_address_t ip4;
 }) ethernet_arp_ip4_over_ethernet_address_t;

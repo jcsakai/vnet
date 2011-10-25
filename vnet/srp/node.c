@@ -33,8 +33,8 @@ typedef struct {
 
 static u8 * format_srp_input_trace (u8 * s, va_list * va)
 {
-  UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
-  UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
+  CLIB_UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
+  CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   srp_input_trace_t * t = va_arg (*va, srp_input_trace_t *);
 
   s = format (s, "%U", format_srp_header, t->packet_data);
@@ -645,7 +645,7 @@ static void serialize_srp_interface_state_msg (serialize_main_t * m, va_list * v
 
 static void unserialize_srp_interface_state_msg (serialize_main_t * m, va_list * va)
 {
-  UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
+  CLIB_UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
   srp_main_t * sm = &srp_main;
   srp_interface_t * si;
   u32 si_index, r;

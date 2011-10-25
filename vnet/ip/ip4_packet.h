@@ -115,13 +115,13 @@ typedef union {
 
   /* For checksumming we'll want to access IP header in word sized chunks. */
   /* For 64 bit machines. */
-  PACKED (struct {
+  CLIB_PACKED (struct {
     u64 checksum_data_64[2];
     u32 checksum_data_64_32[1];
   });
 
   /* For 32 bit machines. */
-  PACKED (struct {
+  CLIB_PACKED (struct {
     u32 checksum_data_32[5];
   });
 } ip4_header_t;

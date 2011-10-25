@@ -59,7 +59,7 @@ typedef enum {
 } snap_cisco_protocol_t;
 
 typedef union {
-  PACKED (struct {
+  CLIB_PACKED (struct {
     /* OUI: organization unique identifier. */
     u8 oui[3];
 
