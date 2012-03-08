@@ -791,6 +791,7 @@ void ip_lookup_init (ip_lookup_main_t * lm, u32 is_ip6)
      routing table.  Same for drop adjacency. */
   adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &lm->miss_adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_MISS;
+  ASSERT (lm->miss_adj_index == IP_LOOKUP_MISS_ADJ_INDEX);
 
   adj = ip_add_adjacency (lm, /* template */ 0, /* n-adj */ 1, &lm->drop_adj_index);
   adj->lookup_next_index = IP_LOOKUP_NEXT_DROP;
@@ -1405,18 +1406,22 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
   ip4_fib_t * fib;
   ip_lookup_main_t * lm = &im4->lookup_main;
   uword * results, i;
-  int verbose, matching;
+  int verbose, matching, mtrie;
   ip4_address_t matching_address;
 
   routes = 0;
   results = 0;
   verbose = 1;
   matching = 0;
+  mtrie = 0;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "brief") || unformat (input, "summary")
 	  || unformat (input, "sum"))
 	verbose = 0;
+
+      else if (unformat (input, "mtrie"))
+	mtrie = 1;
 
       else if (unformat (input, "%U", unformat_ip4_address, &matching_address))
 	matching = 1;
@@ -1442,6 +1447,9 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 	    }
 	  continue;
 	}
+
+      if (mtrie)
+	vlib_cli_output (vm, "%U", format_ip4_fib_mtrie, &fib->mtrie);
 
       if (routes)
 	_vec_len (routes) = 0;

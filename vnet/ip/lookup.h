@@ -240,6 +240,9 @@ typedef struct ip_lookup_main_t {
   /* Adjacency index for routing table misses, local punts, and drops. */
   u32 miss_adj_index, drop_adj_index, local_adj_index;
 
+  /* Miss adjacency is always first in adjacency table. */
+#define IP_LOOKUP_MISS_ADJ_INDEX 0
+
   ip_add_del_adjacency_callback_t * add_del_adjacency_callbacks;
 
   /* Pool of addresses that are assigned to interfaces. */
