@@ -47,7 +47,6 @@ static VLIB_INIT_FUNCTION (vnet_main_init);
 
 int main (int argc, char * argv[])
 {
-  clib_mem_init (0, 256 << 20);
   return vlib_unix_main (argc, argv);
 }
 
