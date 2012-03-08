@@ -354,6 +354,8 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
     ip4_fib_set_adj_index (im, fib, a->flags, dst_address, dst_address_length,
 			   adj_index);
 
+  ip4_fib_mtrie_add_del_route (fib, a->dst_address, dst_address_length, adj_index, is_del);
+
   /* Delete old adjacency index if present and changed. */
   {
     u32 old_adj_index = fib->old_hash_values[0];
@@ -1780,11 +1782,10 @@ ip4_local (vlib_main_t * vm,
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
-	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_header_t * ip0, * ip1;
 	  udp_header_t * udp0, * udp1;
-	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
-	  u32 pi1, ip_len1, udp_len1, flags1, adj_index1, next1;
+	  u32 pi0, ip_len0, udp_len0, flags0, next0;
+	  u32 pi1, ip_len1, udp_len1, flags1, next1;
 	  i32 len_diff0, len_diff1;
 	  u8 error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
 	  u8 error1, is_udp1, is_tcp_udp1, good_tcp_udp1, proto1;
@@ -1800,14 +1801,8 @@ ip4_local (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  p1 = vlib_get_buffer (vm, pi1);
 
-	  i0 = vlib_get_buffer_opaque (p0);
-	  i1 = vlib_get_buffer_opaque (p1);
-
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
-
-	  adj_index0 = i0->dst_adj_index;
-	  adj_index1 = i1->dst_adj_index;
 
 	  proto0 = ip0->protocol;
 	  proto1 = ip1->protocol;
@@ -1946,9 +1941,8 @@ ip4_local (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
-	  ip_buffer_opaque_t * i0;
 	  udp_header_t * udp0;
-	  u32 pi0, next0, ip_len0, udp_len0, flags0, adj_index0;
+	  u32 pi0, next0, ip_len0, udp_len0, flags0;
 	  i32 len_diff0;
 	  u8 error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
       
@@ -1959,9 +1953,6 @@ ip4_local (vlib_main_t * vm,
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, pi0);
-	  i0 = vlib_get_buffer_opaque (p0);
-
-	  adj_index0 = i0->dst_adj_index;
 
 	  ip0 = vlib_buffer_get_current (p0);
 
@@ -2544,13 +2535,9 @@ add_del_interface_table (vlib_main_t * vm,
 			 vlib_cli_command_t * cmd)
 {
   clib_error_t * error = 0;
-  u32 sw_if_index, table_id, is_del;
+  u32 sw_if_index, table_id;
 
   sw_if_index = ~0;
-  is_del = 0;
-
-  if (unformat (input, "del"))
-    is_del = 1;
 
   if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
     {

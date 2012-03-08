@@ -26,17 +26,20 @@
 #ifndef included_ip_ip4_h
 #define included_ip_ip4_h
 
-#include <vlib/mc.h>
+#include <vnet/ip/ip4_mtrie.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/lookup.h>
 #include <vnet/vnet/buffer.h>	/* for VNET_BUFFER_LOCALLY_GENERATED */
 
-typedef struct {
+typedef struct ip4_fib_t {
   /* Hash table for each prefix length mapping. */
   uword * adj_index_by_dst_address[33];
 
   /* Temporary vectors for holding new/old values for hash_set. */
   uword * new_hash_values, * old_hash_values;
+
+  /* Mtrie for fast lookups.  Hash is used to maintain overlapping prefixes. */
+  ip4_fib_mtrie_t mtrie;
 
   /* Table ID (hash key) for this FIB. */
   u32 table_id;
