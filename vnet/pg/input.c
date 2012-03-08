@@ -778,14 +778,13 @@ static u64 do_it (pg_main_t * pg,
 		  u64 v,
 		  pg_edit_type_t edit_type)
 {
-  u32 max_bits, l0, l1, h0, h1, start_bit;
+  u32 max_bits, l0, l1, h1, start_bit;
 
   if (v_min == v_max)
     edit_type = PG_EDIT_FIXED;
 
   l0 = lo_bit / BITS (u8);
   l1 = lo_bit % BITS (u8);
-  h0 = hi_bit / BITS (u8);
   h1 = hi_bit % BITS (u8);
 
   start_bit = l0 * BITS (u8);
