@@ -261,11 +261,8 @@ static u8 * format_ige_rx_dma_trace (u8 * s, va_list * va)
   ige_rx_dma_trace_t * t = va_arg (*va, ige_rx_dma_trace_t *);
   ige_main_t * xm = &ige_main;
   ige_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
-  ige_dma_queue_t * dq;
   format_function_t * f;
   uword indent = format_get_indent (s);
-
-  dq = vec_elt_at_index (xd->dma_queues[VLIB_RX], t->queue_index);
 
   {
     vlib_sw_interface_t * sw = vlib_get_sw_interface (vm, xd->vlib_sw_if_index);
@@ -571,11 +568,8 @@ static u8 * format_ige_tx_dma_trace (u8 * s, va_list * va)
   ige_tx_dma_trace_t * t = va_arg (*va, ige_tx_dma_trace_t *);
   ige_main_t * xm = &ige_main;
   ige_device_t * xd = vec_elt_at_index (xm->devices, t->device_index);
-  ige_dma_queue_t * dq;
   format_function_t * f;
   uword indent = format_get_indent (s);
-
-  dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], t->queue_index);
 
   {
     vlib_sw_interface_t * sw = vlib_get_sw_interface (vm, xd->vlib_sw_if_index);
@@ -875,7 +869,7 @@ ige_interface_tx (vlib_main_t * vm,
   vlib_interface_output_runtime_t * rd = (void *) node->runtime_data;
   ige_device_t * xd = vec_elt_at_index (xm->devices, rd->dev_instance);
   ige_dma_queue_t * dq;
-  u32 * from, n_left_from, n_left_tx, n_descriptors_to_tx, n_tail_drop;
+  u32 * from, n_left_tx, n_descriptors_to_tx, n_tail_drop;
   u32 queue_index = 0;		/* fixme parameter */
   ige_tx_state_t tx_state;
   ige_dma_regs_t * dr = get_dma_regs (xd, VLIB_TX, queue_index);
@@ -884,7 +878,6 @@ ige_interface_tx (vlib_main_t * vm,
   tx_state.is_start_of_packet = 1;
   
   from = vlib_frame_vector_args (f);
-  n_left_from = f->n_vectors;
 
   dq = vec_elt_at_index (xd->dma_queues[VLIB_TX], queue_index);
 
