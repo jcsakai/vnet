@@ -93,6 +93,8 @@ ip4_source_check_inline (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0, * p1;
 	  ip4_header_t * ip0, * ip1;
+	  ip4_fib_mtrie_t * mtrie0, * mtrie1;
+	  ip4_fib_mtrie_leaf_t leaf0, leaf1;
 	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_source_check_config_t * c0, * c1;
 	  ip_adjacency_t * adj0, * adj1;
@@ -138,12 +140,32 @@ ip4_source_check_inline (vlib_main_t * vm,
 				     &next1,
 				     sizeof (c1[0]));
 
-	  adj_index0 = ip4_fib_lookup_with_table (im, c0->fib_index,
-						  &ip0->src_address,
-						  c0->no_default_route);
-	  adj_index1 = ip4_fib_lookup_with_table (im, c1->fib_index,
-						  &ip1->src_address,
-						  c1->no_default_route);
+	  mtrie0 = &vec_elt_at_index (im->fibs, c0->fib_index)->mtrie;
+	  mtrie1 = &vec_elt_at_index (im->fibs, c1->fib_index)->mtrie;
+
+	  leaf0 = leaf1 = IP4_FIB_MTRIE_LEAF_ROOT;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 0);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 0);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 1);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 1);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 2);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 2);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 3);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 3);
+
+	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+	  adj_index1 = ip4_fib_mtrie_leaf_get_adj_index (leaf1);
+
+	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, c0->fib_index,
+							   &ip0->src_address,
+							   c0->no_default_route));
+	  ASSERT (adj_index1 == ip4_fib_lookup_with_table (im, c1->fib_index,
+							   &ip1->src_address,
+							   c1->no_default_route));
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -174,6 +196,8 @@ ip4_source_check_inline (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip4_header_t * ip0;
+	  ip4_fib_mtrie_t * mtrie0;
+	  ip4_fib_mtrie_leaf_t leaf0;
 	  ip_buffer_opaque_t * i0;
 	  ip4_source_check_config_t * c0;
 	  ip_adjacency_t * adj0;
@@ -195,9 +219,23 @@ ip4_source_check_inline (vlib_main_t * vm,
 				     &next0,
 				     sizeof (c0[0]));
 
-	  adj_index0 = ip4_fib_lookup_with_table (im, c0->fib_index,
-						  &ip0->src_address,
-						  c0->no_default_route);
+	  mtrie0 = &vec_elt_at_index (im->fibs, c0->fib_index)->mtrie;
+
+	  leaf0 = IP4_FIB_MTRIE_LEAF_ROOT;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 0);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 1);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 2);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 3);
+
+	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+
+	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, c0->fib_index,
+							   &ip0->src_address,
+							   c0->no_default_route));
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
 	  /* Pass multicast. */
