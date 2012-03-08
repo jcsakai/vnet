@@ -835,6 +835,12 @@ ip4_lookup (vlib_main_t * vm,
 	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
 	  adj_index1 = ip4_fib_mtrie_leaf_get_adj_index (leaf1);
 
+	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, fib_index0,
+							   &ip0->dst_address,
+							   /* no_default_route */ 0));
+	  ASSERT (adj_index1 == ip4_fib_lookup_with_table (im, fib_index1,
+							   &ip1->dst_address,
+							   /* no_default_route */ 0));
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
 
@@ -958,6 +964,10 @@ ip4_lookup (vlib_main_t * vm,
 	  hash_v3_finalize32_step3 (hash_a0, hash_b0, hash_c0);
 
 	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+
+	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, fib_index0,
+							   &ip0->dst_address,
+							   /* no_default_route */ 0));
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
