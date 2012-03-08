@@ -602,7 +602,7 @@ ip6_foreach_matching_route (ip6_main_t * im,
   ip6_fib_t * fib = find_fib_by_table_index_or_id (im, table_index_or_table_id, flags);
   ip6_fib_mhash_t * mh;
   ip6_address_t * k;
-  uword * v;
+  CLIB_UNUSED (uword * v);
   
   if (*results)
     _vec_len (*results) = 0;
