@@ -1730,11 +1730,10 @@ ip6_local (vlib_main_t * vm,
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
-	  ip_buffer_opaque_t * i0, * i1;
 	  ip6_header_t * ip0, * ip1;
 	  udp_header_t * udp0, * udp1;
-	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
-	  u32 pi1, ip_len1, udp_len1, flags1, adj_index1, next1;
+	  u32 pi0, ip_len0, udp_len0, flags0, next0;
+	  u32 pi1, ip_len1, udp_len1, flags1, next1;
 	  i32 len_diff0, len_diff1;
 	  u8 error0, type0, good_l4_checksum0;
 	  u8 error1, type1, good_l4_checksum1;
@@ -1749,14 +1748,8 @@ ip6_local (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  p1 = vlib_get_buffer (vm, pi1);
 
-	  i0 = vlib_get_buffer_opaque (p0);
-	  i1 = vlib_get_buffer_opaque (p1);
-
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
-
-	  adj_index0 = i0->dst_adj_index;
-	  adj_index1 = i1->dst_adj_index;
 
 	  type0 = lm->builtin_protocol_by_ip_protocol[ip0->protocol];
 	  type1 = lm->builtin_protocol_by_ip_protocol[ip1->protocol];
@@ -1855,9 +1848,8 @@ ip6_local (vlib_main_t * vm,
 	{
 	  vlib_buffer_t * p0;
 	  ip6_header_t * ip0;
-	  ip_buffer_opaque_t * i0;
 	  udp_header_t * udp0;
-	  u32 pi0, ip_len0, udp_len0, flags0, adj_index0, next0;
+	  u32 pi0, ip_len0, udp_len0, flags0, next0;
 	  i32 len_diff0;
 	  u8 error0, type0, good_l4_checksum0;
       
@@ -1868,9 +1860,6 @@ ip6_local (vlib_main_t * vm,
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, pi0);
-	  i0 = vlib_get_buffer_opaque (p0);
-
-	  adj_index0 = i0->dst_adj_index;
 
 	  ip0 = vlib_buffer_get_current (p0);
 
@@ -1984,7 +1973,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
   ip6_main_t * im = &ip6_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   u32 * from, * to_next_drop;
-  uword n_left_from, n_left_to_next_drop, next_index;
+  uword n_left_from, n_left_to_next_drop;
   static f64 time_last_seed_change = -1e100;
   static u32 hash_seeds[3];
   static uword hash_bitmap[256 / BITS (uword)]; 
@@ -2011,7 +2000,6 @@ ip6_discover_neighbor (vlib_main_t * vm,
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
-  next_index = node->cached_next_index;
 
   while (n_left_from > 0)
     {

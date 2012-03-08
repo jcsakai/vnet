@@ -203,9 +203,9 @@ u8 * format_ip6_header (u8 * s, va_list * args)
     s = format (s, "\n%Uversion %d",
 		format_white_space, indent, ip_version);
     
-  s = format (s, "\n%Utos 0x%02x, hop limit %d, payload length %d",
+  s = format (s, "\n%Utos 0x%02x, flow label 0x%x, hop limit %d, payload length %d",
 	      format_white_space, indent,
-	      traffic_class, ip->hop_limit,
+	      traffic_class, flow_label, ip->hop_limit,
 	      clib_net_to_host_u16 (ip->payload_length));
 
   /* Recurse into next protocol layer. */
