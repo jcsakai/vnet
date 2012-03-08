@@ -354,7 +354,6 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
   tuntap_main_t *tm = &tuntap_main;
   clib_error_t * error = 0;
   struct ifreq ifr;
-  struct sockaddr_in *sin;
   int flags = IFF_TUN | IFF_NO_PI;
   int disabled = 0;
 
@@ -389,7 +388,6 @@ tuntap_config (vlib_main_t * vm, unformat_input_t * input)
     }
 
   memset (&ifr, 0, sizeof (ifr));
-  sin = (struct sockaddr_in *)&ifr.ifr_addr;
   strcpy(ifr.ifr_name, tm->tun_name);
   ifr.ifr_flags = flags;
   if (ioctl (tm->dev_net_tun_fd, TUNSETIFF, (void *)&ifr) < 0)
