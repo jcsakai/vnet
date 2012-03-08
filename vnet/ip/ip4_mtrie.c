@@ -60,7 +60,7 @@ ply_init (ip4_fib_mtrie_ply_t * p, ip4_fib_mtrie_leaf_t init, uword prefix_len)
 #endif
 }
 
-always_inline ip4_fib_mtrie_leaf_t
+static ip4_fib_mtrie_leaf_t
 ply_create (ip4_fib_mtrie_t * m, ip4_fib_mtrie_leaf_t init_leaf, uword prefix_len)
 {
   ip4_fib_mtrie_ply_t * p;

@@ -38,6 +38,7 @@
 typedef u32 ip4_fib_mtrie_leaf_t;
 
 #define IP4_FIB_MTRIE_LEAF_EMPTY (1 + 2*IP_LOOKUP_MISS_ADJ_INDEX)
+#define IP4_FIB_MTRIE_LEAF_ROOT  (0 + 2*0)
 
 always_inline u32 ip4_fib_mtrie_leaf_is_empty (ip4_fib_mtrie_leaf_t n)
 { return n == IP4_FIB_MTRIE_LEAF_EMPTY; }
@@ -122,5 +123,23 @@ void ip4_fib_mtrie_add_del_route (struct ip4_fib_t * f,
 u32 ip4_mtrie_lookup_address (ip4_fib_mtrie_t * m, ip4_address_t dst);
 
 format_function_t format_ip4_fib_mtrie;
+
+/* Lookup step.  Processes 1 byte of 4 byte ip4 address. */
+always_inline ip4_fib_mtrie_leaf_t
+ip4_fib_mtrie_lookup_step (ip4_fib_mtrie_t * m,
+			   ip4_fib_mtrie_leaf_t current_leaf,
+			   ip4_address_t * dst_address,
+			   u32 dst_address_byte_index)
+{
+  ip4_fib_mtrie_leaf_t next_leaf;
+  ip4_fib_mtrie_ply_t * ply;
+  uword current_is_terminal = ip4_fib_mtrie_leaf_is_terminal (current_leaf);
+
+  ply = m->ply_pool + (current_is_terminal ? 0 : (current_leaf >> 1));
+  next_leaf = ply->leaves[dst_address->as_u8[dst_address_byte_index]];
+  next_leaf = current_is_terminal ? current_leaf : next_leaf;
+
+  return next_leaf;
+}
 
 #endif /* included_ip_ip4_fib_h */
