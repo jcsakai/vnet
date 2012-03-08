@@ -724,26 +724,6 @@ void ip4_delete_matching_routes (ip4_main_t * im,
   ip4_maybe_remap_adjacencies (im, table_index_or_table_id, flags);
 }
 
-/* Compute flow hash.  We'll use it to select which Sponge to use for this
-   flow.  And other things. */
-always_inline u32
-ip4_compute_flow_hash (ip4_header_t * ip, u32 flow_hash_seed)
-{
-    tcp_header_t * tcp = (void *) (ip + 1);
-    u32 a, b, c;
-    uword is_tcp_udp = (ip->protocol == IP_PROTOCOL_TCP
-			|| ip->protocol == IP_PROTOCOL_UDP);
-
-    c = ip->dst_address.data_u32;
-    b = ip->src_address.data_u32;
-    a = is_tcp_udp ? tcp->ports.src_and_dst : 0;
-    a ^= ip->protocol ^ flow_hash_seed;
-
-    hash_v3_finalize32 (a, b, c);
-
-    return c;
-}
-
 static uword
 ip4_lookup (vlib_main_t * vm,
 	    vlib_node_runtime_t * node,
@@ -767,11 +747,18 @@ ip4_lookup (vlib_main_t * vm,
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
-	  u32 pi0, pi1, adj_index0, adj_index1, wrong_next;
-	  ip_lookup_next_t next0, next1;
 	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_header_t * ip0, * ip1;
+	  tcp_header_t * tcp0, * tcp1;
+	  ip_lookup_next_t next0, next1;
 	  ip_adjacency_t * adj0, * adj1;
+	  ip4_fib_mtrie_t * mtrie0, * mtrie1;
+	  ip4_fib_mtrie_leaf_t leaf0, leaf1;
+	  u32 pi0, fib_index0, adj_index0, is_tcp_udp0;
+	  u32 pi1, fib_index1, adj_index1, is_tcp_udp1;
+	  u32 hash_a0, hash_b0, hash_c0;
+	  u32 hash_a1, hash_b1, hash_c1;
+	  u32 wrong_next;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -796,8 +783,57 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = ip4_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
-	  adj_index1 = ip4_fib_lookup_buffer (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
+	  fib_index0 = vec_elt (im->fib_index_by_sw_if_index, p0->sw_if_index[VLIB_RX]);
+	  fib_index1 = vec_elt (im->fib_index_by_sw_if_index, p1->sw_if_index[VLIB_RX]);
+
+	  fib_index0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index0;
+	  fib_index1 = (p1->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index1;
+
+	  mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
+	  mtrie1 = &vec_elt_at_index (im->fibs, fib_index1)->mtrie;
+
+	  leaf0 = leaf1 = IP4_FIB_MTRIE_LEAF_ROOT;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 0);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 0);
+
+	  tcp0 = (void *) (ip0 + 1);
+	  tcp1 = (void *) (ip1 + 1);
+
+	  is_tcp_udp0 = (ip0->protocol == IP_PROTOCOL_TCP
+			 || ip0->protocol == IP_PROTOCOL_UDP);
+	  is_tcp_udp1 = (ip1->protocol == IP_PROTOCOL_TCP
+			 || ip1->protocol == IP_PROTOCOL_UDP);
+
+	  hash_c0 = ip0->dst_address.data_u32;
+	  hash_c1 = ip1->dst_address.data_u32;
+	  hash_b0 = ip0->src_address.data_u32;
+	  hash_b1 = ip1->src_address.data_u32;
+	  hash_a0 = is_tcp_udp0 ? tcp0->ports.src_and_dst : 0;
+	  hash_a1 = is_tcp_udp1 ? tcp1->ports.src_and_dst : 0;
+	  hash_a0 ^= ip0->protocol ^ im->flow_hash_seed;
+	  hash_a1 ^= ip1->protocol ^ im->flow_hash_seed;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 1);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 1);
+
+	  hash_v3_finalize32_step1 (hash_a0, hash_b0, hash_c0);
+	  hash_v3_finalize32_step1 (hash_a1, hash_b1, hash_c1);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 2);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 2);
+
+	  hash_v3_finalize32_step2 (hash_a0, hash_b0, hash_c0);
+	  hash_v3_finalize32_step2 (hash_a1, hash_b1, hash_c1);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 3);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 3);
+
+	  hash_v3_finalize32_step3 (hash_a0, hash_b0, hash_c0);
+	  hash_v3_finalize32_step3 (hash_a1, hash_b1, hash_c1);
+
+	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+	  adj_index1 = ip4_fib_mtrie_leaf_get_adj_index (leaf1);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -808,15 +844,16 @@ ip4_lookup (vlib_main_t * vm,
 	  i0 = vlib_get_buffer_opaque (p0);
 	  i1 = vlib_get_buffer_opaque (p1);
 
-	  i0->flow_hash = ip4_compute_flow_hash (ip0, im->flow_hash_seed);
-	  i1->flow_hash = ip4_compute_flow_hash (ip1, im->flow_hash_seed);
+	  /* Use flow hash to compute multipath adjacency. */
+	  i0->flow_hash = hash_c0;
+	  i1->flow_hash = hash_c1;
 
 	  ASSERT (adj0->n_adj > 0);
 	  ASSERT (adj1->n_adj > 0);
 	  ASSERT (is_pow2 (adj0->n_adj));
 	  ASSERT (is_pow2 (adj1->n_adj));
-	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
-	  adj_index1 += (i1->flow_hash & (adj1->n_adj - 1));
+	  adj_index0 += (hash_c0 & (adj0->n_adj - 1));
+	  adj_index1 += (hash_c1 & (adj1->n_adj - 1));
 
 	  i0->dst_adj_index = adj_index0;
 	  i1->dst_adj_index = adj_index1;
@@ -871,11 +908,15 @@ ip4_lookup (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  ip4_header_t * ip0;
 	  ip_buffer_opaque_t * i0;
-	  u32 pi0, adj_index0;
+	  ip4_header_t * ip0;
+	  tcp_header_t * tcp0;
 	  ip_lookup_next_t next0;
 	  ip_adjacency_t * adj0;
+	  ip4_fib_mtrie_t * mtrie0;
+	  ip4_fib_mtrie_leaf_t leaf0;
+	  u32 pi0, fib_index0, adj_index0, is_tcp_udp0;
+	  u32 hash_a0, hash_b0, hash_c0;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -884,7 +925,39 @@ ip4_lookup (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  adj_index0 = ip4_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  fib_index0 = vec_elt (im->fib_index_by_sw_if_index, p0->sw_if_index[VLIB_RX]);
+
+	  fib_index0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index0;
+
+	  mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
+
+	  leaf0 = IP4_FIB_MTRIE_LEAF_ROOT;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 0);
+
+	  tcp0 = (void *) (ip0 + 1);
+
+	  is_tcp_udp0 = (ip0->protocol == IP_PROTOCOL_TCP
+			 || ip0->protocol == IP_PROTOCOL_UDP);
+
+	  hash_c0 = ip0->dst_address.data_u32;
+	  hash_b0 = ip0->src_address.data_u32;
+	  hash_a0 = is_tcp_udp0 ? tcp0->ports.src_and_dst : 0;
+	  hash_a0 ^= ip0->protocol ^ im->flow_hash_seed;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 1);
+
+	  hash_v3_finalize32_step1 (hash_a0, hash_b0, hash_c0);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 2);
+
+	  hash_v3_finalize32_step2 (hash_a0, hash_b0, hash_c0);
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 3);
+
+	  hash_v3_finalize32_step3 (hash_a0, hash_b0, hash_c0);
+
+	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
@@ -892,11 +965,12 @@ ip4_lookup (vlib_main_t * vm,
 
 	  i0 = vlib_get_buffer_opaque (p0);
 
-	  i0->flow_hash = ip4_compute_flow_hash (ip0, im->flow_hash_seed);
+	  /* Use flow hash to compute multipath adjacency. */
+	  i0->flow_hash = hash_c0;
 
 	  ASSERT (adj0->n_adj > 0);
 	  ASSERT (is_pow2 (adj0->n_adj));
-	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
+	  adj_index0 += (hash_c0 & (adj0->n_adj - 1));
 
 	  i0->dst_adj_index = adj_index0;
 
@@ -2572,6 +2646,26 @@ static VLIB_CLI_COMMAND (set_interface_ip_table_command) = {
   .function = add_del_interface_table,
   .short_help = "Add/delete FIB table id for interface",
 };
+
+/* Compute flow hash.  We'll use it to select which adjacency to use for this
+   flow.  And other things. */
+always_inline u32
+ip4_compute_flow_hash (ip4_header_t * ip, u32 flow_hash_seed)
+{
+    tcp_header_t * tcp = (void *) (ip + 1);
+    u32 a, b, c;
+    uword is_tcp_udp = (ip->protocol == IP_PROTOCOL_TCP
+			|| ip->protocol == IP_PROTOCOL_UDP);
+
+    c = ip->dst_address.data_u32;
+    b = ip->src_address.data_u32;
+    a = is_tcp_udp ? tcp->ports.src_and_dst : 0;
+    a ^= ip->protocol ^ flow_hash_seed;
+
+    hash_v3_finalize32 (a, b, c);
+
+    return c;
+}
 
 static uword
 ip4_lookup_multicast (vlib_main_t * vm,
