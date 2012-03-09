@@ -33,8 +33,4 @@
 #define IP_BUFFER_L4_CHECKSUM_COMPUTED (1 << LOG2_IP_BUFFER_L4_CHECKSUM_COMPUTED)
 #define IP_BUFFER_L4_CHECKSUM_CORRECT  (1 << LOG2_IP_BUFFER_L4_CHECKSUM_CORRECT)
 
-/* Set for traffic generated locally.  IP uses this to not decrement ttl for packets
-   which are generated locally (responses to pings, packet generator). */
-#define VNET_BUFFER_LOCALLY_GENERATED VLIB_BUFFER_FLAG_USER(3)
-
 #endif /* included_vnet_buffer_h */

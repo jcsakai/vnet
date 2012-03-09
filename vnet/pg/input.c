@@ -25,7 +25,7 @@
 
 #include <vlib/vlib.h>
 #include <vnet/pg/pg.h>
-#include <vnet/vnet/buffer.h>
+#include <vnet/vnet/vnet.h>
 
 static int
 validate_buffer_data2 (vlib_buffer_t * b, pg_stream_t * s,
@@ -1123,9 +1123,6 @@ init_replay_buffers_inline (vlib_main_t * vm,
       b0->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
       b0->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
-      if (data_offset == 0)
-	ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
-
       d0 = vec_elt (s->replay_packet_templates, i);
 
       n0 = n_data;
@@ -1191,12 +1188,6 @@ init_buffers_inline (vlib_main_t * vm,
       b0->sw_if_index[VLIB_TX] =
 	b1->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
-      if (data_offset == 0)
-	{
-	  ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
-	  ASSERT (b1->flags & VNET_BUFFER_LOCALLY_GENERATED);
-	}
-
       if (set_data)
 	{
 	  memcpy (b0->data, data, n_data);
@@ -1222,9 +1213,6 @@ init_buffers_inline (vlib_main_t * vm,
 
       b0->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
       b0->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
-
-      if (data_offset == 0)
-	ASSERT (b0->flags & VNET_BUFFER_LOCALLY_GENERATED);
 
       if (set_data)
 	memcpy (b0->data, data, n_data);
@@ -1270,7 +1258,7 @@ pg_stream_fill_helper (pg_main_t * pg,
     f->buffer_init_function = pg_buffer_init;
   f->buffer_init_function_opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
   if (is_start_of_packet)
-    f->buffer_init_template.flags |= VNET_BUFFER_LOCALLY_GENERATED;
+    f->buffer_init_template.sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 
   if (! vlib_buffer_alloc_from_free_list (vm,
 					  buffers,

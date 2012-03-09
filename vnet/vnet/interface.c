@@ -1,7 +1,7 @@
 /*
- * vnet.h: general networking definitions
+ * interface.c: vnet interfaces
  *
- * Copyright (c) 2011 Eliot Dresselhaus
+ * Copyright (c) 2012 Eliot Dresselhaus
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -23,25 +23,48 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef included_vnet_vnet_h
-#define included_vnet_vnet_h
-
-#include <clib/types.h>
-
-typedef enum {
-  VNET_UNICAST,
-  VNET_MULTICAST,
-  VNET_N_CAST,
-} vnet_cast_t;
-
-typedef struct {
-  u32 local_interface_hw_if_index;
-  u32 local_interface_sw_if_index;
-} vnet_main_t;
-
-#include <vnet/vnet/config.h>
-#include <vnet/vnet/rewrite.h>
+#include <vnet/vnet/vnet.h>
 
 vnet_main_t vnet_main;
 
-#endif /* included_vnet_vnet_h */
+static uword
+vnet_local_interface_tx (vlib_main_t * vm,
+			 vlib_node_runtime_t * node,
+			 vlib_frame_t * f)
+{
+  ASSERT (0);
+  return f->n_vectors;
+}
+
+static VLIB_DEVICE_CLASS (vnet_local_interface_device_class) = {
+  .name = "local",
+  .tx_function = vnet_local_interface_tx,
+};
+
+static VLIB_HW_INTERFACE_CLASS (vnet_local_interface_hw_class) = {
+  .name = "local",
+};
+
+static clib_error_t *
+vnet_main_init (vlib_main_t * vm)
+{
+  clib_error_t * error;
+  u32 hw_if_index;
+  vlib_hw_interface_t * hw;
+
+  if ((error = vlib_call_init_function (vm, vlib_interface_init)))
+    return error;
+
+  hw_if_index = vlib_register_interface
+    (vm,
+     vnet_local_interface_device_class.index, /* instance */ 0,
+     vnet_local_interface_hw_class.index, /* instance */ 0);
+  hw = vlib_get_hw_interface (vm, hw_if_index);
+
+  vnet_main.local_interface_hw_if_index = hw_if_index;
+  vnet_main.local_interface_sw_if_index = hw->sw_if_index;
+
+  return 0;
+}
+
+VLIB_INIT_FUNCTION (vnet_main_init);
