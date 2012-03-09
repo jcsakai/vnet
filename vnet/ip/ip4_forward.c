@@ -724,10 +724,11 @@ void ip4_delete_matching_routes (ip4_main_t * im,
   ip4_maybe_remap_adjacencies (im, table_index_or_table_id, flags);
 }
 
-static uword
-ip4_lookup (vlib_main_t * vm,
-	    vlib_node_runtime_t * node,
-	    vlib_frame_t * frame)
+always_inline uword
+ip4_lookup_inline (vlib_main_t * vm,
+		   vlib_node_runtime_t * node,
+		   vlib_frame_t * frame,
+		   int lookup_for_responses_to_locally_received_packets)
 {
   ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
@@ -786,16 +787,16 @@ ip4_lookup (vlib_main_t * vm,
 	  fib_index0 = vec_elt (im->fib_index_by_sw_if_index, p0->sw_if_index[VLIB_RX]);
 	  fib_index1 = vec_elt (im->fib_index_by_sw_if_index, p1->sw_if_index[VLIB_RX]);
 
-	  fib_index0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index0;
-	  fib_index1 = (p1->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index1;
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    {
+	      mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
+	      mtrie1 = &vec_elt_at_index (im->fibs, fib_index1)->mtrie;
 
-	  mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
-	  mtrie1 = &vec_elt_at_index (im->fibs, fib_index1)->mtrie;
+	      leaf0 = leaf1 = IP4_FIB_MTRIE_LEAF_ROOT;
 
-	  leaf0 = leaf1 = IP4_FIB_MTRIE_LEAF_ROOT;
-
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 0);
-	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 0);
+	      leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 0);
+	      leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 0);
+	    }
 
 	  tcp0 = (void *) (ip0 + 1);
 	  tcp1 = (void *) (ip1 + 1);
@@ -814,26 +815,46 @@ ip4_lookup (vlib_main_t * vm,
 	  hash_a0 ^= ip0->protocol ^ im->flow_hash_seed;
 	  hash_a1 ^= ip1->protocol ^ im->flow_hash_seed;
 
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 1);
-	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 1);
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    {
+	      leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 1);
+	      leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 1);
+	    }
 
 	  hash_v3_finalize32_step1 (hash_a0, hash_b0, hash_c0);
 	  hash_v3_finalize32_step1 (hash_a1, hash_b1, hash_c1);
 
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 2);
-	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 2);
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    {
+	      leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 2);
+	      leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 2);
+	    }
 
 	  hash_v3_finalize32_step2 (hash_a0, hash_b0, hash_c0);
 	  hash_v3_finalize32_step2 (hash_a1, hash_b1, hash_c1);
 
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 3);
-	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 3);
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    {
+	      leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 3);
+	      leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->dst_address, 3);
+	    }
 
 	  hash_v3_finalize32_step3 (hash_a0, hash_b0, hash_c0);
 	  hash_v3_finalize32_step3 (hash_a1, hash_b1, hash_c1);
 
-	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
-	  adj_index1 = ip4_fib_mtrie_leaf_get_adj_index (leaf1);
+	  i0 = vlib_get_buffer_opaque (p0);
+	  i1 = vlib_get_buffer_opaque (p1);
+
+	  if (lookup_for_responses_to_locally_received_packets)
+	    {
+	      adj_index0 = i0->adj_index[VLIB_RX];
+	      adj_index1 = i1->adj_index[VLIB_RX];
+	    }
+	  else
+	    {
+	      adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+	      adj_index1 = ip4_fib_mtrie_leaf_get_adj_index (leaf1);
+	    }
 
 	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, fib_index0,
 							   &ip0->dst_address,
@@ -847,9 +868,6 @@ ip4_lookup (vlib_main_t * vm,
 	  next0 = adj0->lookup_next_index;
 	  next1 = adj1->lookup_next_index;
 
-	  i0 = vlib_get_buffer_opaque (p0);
-	  i1 = vlib_get_buffer_opaque (p1);
-
 	  /* Use flow hash to compute multipath adjacency. */
 	  i0->flow_hash = hash_c0;
 	  i1->flow_hash = hash_c1;
@@ -861,8 +879,8 @@ ip4_lookup (vlib_main_t * vm,
 	  adj_index0 += (hash_c0 & (adj0->n_adj - 1));
 	  adj_index1 += (hash_c1 & (adj1->n_adj - 1));
 
-	  i0->dst_adj_index = adj_index0;
-	  i1->dst_adj_index = adj_index1;
+	  i0->adj_index[VLIB_TX] = adj_index0;
+	  i1->adj_index[VLIB_TX] = adj_index1;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
 					   vlib_buffer_length_in_chain (vm, p0));
@@ -932,14 +950,14 @@ ip4_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 
 	  fib_index0 = vec_elt (im->fib_index_by_sw_if_index, p0->sw_if_index[VLIB_RX]);
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    {
+	      mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
 
-	  fib_index0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index0;
+	      leaf0 = IP4_FIB_MTRIE_LEAF_ROOT;
 
-	  mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
-
-	  leaf0 = IP4_FIB_MTRIE_LEAF_ROOT;
-
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 0);
+	      leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 0);
+	    }
 
 	  tcp0 = (void *) (ip0 + 1);
 
@@ -951,19 +969,27 @@ ip4_lookup (vlib_main_t * vm,
 	  hash_a0 = is_tcp_udp0 ? tcp0->ports.src_and_dst : 0;
 	  hash_a0 ^= ip0->protocol ^ im->flow_hash_seed;
 
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 1);
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 1);
 
 	  hash_v3_finalize32_step1 (hash_a0, hash_b0, hash_c0);
 
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 2);
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 2);
 
 	  hash_v3_finalize32_step2 (hash_a0, hash_b0, hash_c0);
 
-	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 3);
+	  if (! lookup_for_responses_to_locally_received_packets)
+	    leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->dst_address, 3);
 
 	  hash_v3_finalize32_step3 (hash_a0, hash_b0, hash_c0);
 
-	  adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+	  i0 = vlib_get_buffer_opaque (p0);
+
+	  if (lookup_for_responses_to_locally_received_packets)
+	    adj_index0 = i0->adj_index[VLIB_RX];
+	  else
+	    adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
 
 	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, fib_index0,
 							   &ip0->dst_address,
@@ -973,8 +999,6 @@ ip4_lookup (vlib_main_t * vm,
 
 	  next0 = adj0->lookup_next_index;
 
-	  i0 = vlib_get_buffer_opaque (p0);
-
 	  /* Use flow hash to compute multipath adjacency. */
 	  i0->flow_hash = hash_c0;
 
@@ -982,7 +1006,7 @@ ip4_lookup (vlib_main_t * vm,
 	  ASSERT (is_pow2 (adj0->n_adj));
 	  adj_index0 += (hash_c0 & (adj0->n_adj - 1));
 
-	  i0->dst_adj_index = adj_index0;
+	  i0->adj_index[VLIB_TX] = adj_index0;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
 					   vlib_buffer_length_in_chain (vm, p0));
@@ -1009,6 +1033,15 @@ ip4_lookup (vlib_main_t * vm,
     }
 
   return frame->n_vectors;
+}
+
+static uword
+ip4_lookup (vlib_main_t * vm,
+	    vlib_node_runtime_t * node,
+	    vlib_frame_t * frame)
+{
+  return ip4_lookup_inline (vm, node, frame, /* lookup_for_responses_to_locally_received_packets */ 0);
+
 }
 
 void ip4_adjacency_set_interface_route (vlib_main_t * vm, ip_adjacency_t * adj,
@@ -1505,7 +1538,7 @@ static VLIB_REGISTER_NODE (ip4_lookup_node) = {
     [IP_LOOKUP_NEXT_PUNT] = "ip4-punt",
     [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
     [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
-    [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
+    [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite-transit",
   },
 
   .sw_interface_admin_up_down_function = ip4_sw_interface_admin_up_down,
@@ -1566,7 +1599,6 @@ ip4_lookup_init (vlib_main_t * vm)
 			       /* data */ &h,
 			       sizeof (h),
 			       /* alloc chunk size */ 8,
-			       /* flags */ VNET_BUFFER_LOCALLY_GENERATED,
 			       "ip4 arp");
   }
 
@@ -1617,7 +1649,8 @@ static u8 * format_ip4_forward_next_trace (u8 * s, va_list * args)
 static void
 ip4_forward_next_trace (vlib_main_t * vm,
 			vlib_node_runtime_t * node,
-			vlib_frame_t * frame)
+			vlib_frame_t * frame,
+			vlib_rx_or_tx_t which_adj_index)
 {
   u32 * from, n_left;
 
@@ -1647,7 +1680,7 @@ ip4_forward_next_trace (vlib_main_t * vm,
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
-	  t0->adj_index = i0->dst_adj_index;
+	  t0->adj_index = i0->adj_index[which_adj_index];
 	  memcpy (t0->packet_data,
 		  vlib_buffer_get_current (b0),
 		  sizeof (t0->packet_data));
@@ -1655,7 +1688,7 @@ ip4_forward_next_trace (vlib_main_t * vm,
       if (b1->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t1 = vlib_add_trace (vm, node, b1, sizeof (t1[0]));
-	  t1->adj_index = i1->dst_adj_index;
+	  t1->adj_index = i1->adj_index[which_adj_index];
 	  memcpy (t1->packet_data,
 		  vlib_buffer_get_current (b1),
 		  sizeof (t1->packet_data));
@@ -1679,7 +1712,7 @@ ip4_forward_next_trace (vlib_main_t * vm,
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
-	  t0->adj_index = i0->dst_adj_index;
+	  t0->adj_index = i0->adj_index[which_adj_index];
 	  memcpy (t0->packet_data,
 		  vlib_buffer_get_current (b0),
 		  sizeof (t0->packet_data));
@@ -1707,7 +1740,7 @@ ip4_drop_or_punt (vlib_main_t * vm,
 			   error_code);
 
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip4_forward_next_trace (vm, node, frame);
+    ip4_forward_next_trace (vm, node, frame, VLIB_TX);
 
   return n_packets;
 }
@@ -1857,7 +1890,7 @@ ip4_local (vlib_main_t * vm,
   next_index = node->cached_next_index;
   
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip4_forward_next_trace (vm, node, frame);
+    ip4_forward_next_trace (vm, node, frame, VLIB_TX);
 
   while (n_left_from > 0)
     {
@@ -1866,10 +1899,14 @@ ip4_local (vlib_main_t * vm,
       while (n_left_from >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * p0, * p1;
+	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_header_t * ip0, * ip1;
 	  udp_header_t * udp0, * udp1;
-	  u32 pi0, ip_len0, udp_len0, flags0, next0;
-	  u32 pi1, ip_len1, udp_len1, flags1, next1;
+	  ip4_fib_mtrie_t * mtrie0, * mtrie1;
+	  ip4_fib_mtrie_leaf_t leaf0, leaf1;
+	  ip_adjacency_t * adj0, * adj1;
+	  u32 pi0, ip_len0, udp_len0, flags0, next0, fib_index0, adj_index0;
+	  u32 pi1, ip_len1, udp_len1, flags1, next1, fib_index1, adj_index1;
 	  i32 len_diff0, len_diff1;
 	  u8 error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
 	  u8 error1, is_udp1, is_tcp_udp1, good_tcp_udp1, proto1;
@@ -1887,6 +1924,17 @@ ip4_local (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
+
+	  fib_index0 = vec_elt (im->fib_index_by_sw_if_index, vnet_main.local_interface_sw_if_index);
+	  fib_index1 = vec_elt (im->fib_index_by_sw_if_index, vnet_main.local_interface_sw_if_index);
+
+	  mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
+	  mtrie1 = &vec_elt_at_index (im->fibs, fib_index1)->mtrie;
+
+	  leaf0 = leaf1 = IP4_FIB_MTRIE_LEAF_ROOT;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 0);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 0);
 
 	  proto0 = ip0->protocol;
 	  proto1 = ip1->protocol;
@@ -1907,6 +1955,9 @@ ip4_local (vlib_main_t * vm,
 	  /* Don't verify UDP checksum for packets with explicit zero checksum. */
 	  good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
 	  good_tcp_udp1 |= is_udp1 && udp1->checksum == 0;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 1);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 1);
 
 	  /* Verify UDP length. */
 	  ip_len0 = clib_net_to_host_u16 (ip0->length);
@@ -1946,6 +1997,9 @@ ip4_local (vlib_main_t * vm,
 	  good_tcp_udp0 &= len_diff0 >= 0;
 	  good_tcp_udp1 &= len_diff1 >= 0;
 
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 2);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 2);
+
 	  error0 = error1 = IP4_ERROR_UNKNOWN_PROTOCOL;
 
 	  error0 = len_diff0 < 0 ? IP4_ERROR_UDP_LENGTH : error0;
@@ -1959,20 +2013,34 @@ ip4_local (vlib_main_t * vm,
 		    ? IP4_ERROR_TCP_CHECKSUM + is_udp1
 		    : error1);
 
-	  if (error0 == IP4_ERROR_UNKNOWN_PROTOCOL)
-	    {
-	      u32 src_adj_index0 = ip4_src_lookup_for_packet (im, p0, ip0);
-	      error0 = (lm->miss_adj_index == src_adj_index0
-			? IP4_ERROR_SRC_LOOKUP_MISS
-			: error0);
-	    }
-	  if (error1 == IP4_ERROR_UNKNOWN_PROTOCOL)
-	    {
-	      u32 src_adj_index1 = ip4_src_lookup_for_packet (im, p1, ip1);
-	      error1 = (lm->miss_adj_index == src_adj_index1
-			? IP4_ERROR_SRC_LOOKUP_MISS
-			: error1);
-	    }
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 3);
+	  leaf1 = ip4_fib_mtrie_lookup_step (mtrie1, leaf1, &ip1->src_address, 3);
+
+	  i0 = vlib_get_buffer_opaque (p0);
+	  i1 = vlib_get_buffer_opaque (p1);
+
+	  i0->adj_index[VLIB_RX] = adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+	  i1->adj_index[VLIB_RX] = adj_index1 = ip4_fib_mtrie_leaf_get_adj_index (leaf1);
+
+	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, fib_index0,
+							   &ip0->src_address,
+							   /* no_default_route */ 0));
+	  ASSERT (adj_index1 == ip4_fib_lookup_with_table (im, fib_index1,
+							   &ip1->src_address,
+							   /* no_default_route */ 0));
+
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+	  adj1 = ip_get_adjacency (lm, adj_index1);
+
+	  /* Must have a route to source otherwise we drop the packet. */
+	  error0 = (error0 == IP4_ERROR_UNKNOWN_PROTOCOL
+		    && adj0->lookup_next_index != IP_LOOKUP_NEXT_REWRITE
+		    ? IP4_ERROR_SRC_LOOKUP_MISS
+		    : error0);
+	  error1 = (error1 == IP4_ERROR_UNKNOWN_PROTOCOL
+		    && adj1->lookup_next_index != IP_LOOKUP_NEXT_REWRITE
+		    ? IP4_ERROR_SRC_LOOKUP_MISS
+		    : error1);
 
 	  next0 = lm->local_next_by_ip_protocol[proto0];
 	  next1 = lm->local_next_by_ip_protocol[proto1];
@@ -2024,9 +2092,13 @@ ip4_local (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
+	  ip_buffer_opaque_t * i0;
 	  ip4_header_t * ip0;
 	  udp_header_t * udp0;
-	  u32 pi0, next0, ip_len0, udp_len0, flags0;
+	  ip4_fib_mtrie_t * mtrie0;
+	  ip4_fib_mtrie_leaf_t leaf0;
+	  ip_adjacency_t * adj0;
+	  u32 pi0, next0, ip_len0, udp_len0, flags0, fib_index0, adj_index0;
 	  i32 len_diff0;
 	  u8 error0, is_udp0, is_tcp_udp0, good_tcp_udp0, proto0;
       
@@ -2040,6 +2112,14 @@ ip4_local (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
+	  fib_index0 = vec_elt (im->fib_index_by_sw_if_index, vnet_main.local_interface_sw_if_index);
+
+	  mtrie0 = &vec_elt_at_index (im->fibs, fib_index0)->mtrie;
+
+	  leaf0 = IP4_FIB_MTRIE_LEAF_ROOT;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 0);
+
 	  proto0 = ip0->protocol;
 	  is_udp0 = proto0 == IP_PROTOCOL_UDP;
 	  is_tcp_udp0 = is_udp0 || proto0 == IP_PROTOCOL_TCP;
@@ -2051,7 +2131,9 @@ ip4_local (vlib_main_t * vm,
 	  udp0 = ip4_next_header (ip0);
 
 	  /* Don't verify UDP checksum for packets with explicit zero checksum. */
-	  good_tcp_udp0 |= (is_udp0 && udp0->checksum == 0);
+	  good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 1);
 
 	  /* Verify UDP length. */
 	  ip_len0 = clib_net_to_host_u16 (ip0->length);
@@ -2063,15 +2145,20 @@ ip4_local (vlib_main_t * vm,
 
 	  if (PREDICT_FALSE (! (is_tcp_udp0 & good_tcp_udp0)))
 	    {
-	      if (is_tcp_udp0
-		  && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
-		flags0 = ip4_tcp_udp_validate_checksum (vm, p0);
-	      good_tcp_udp0 =
-		(flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
-	      good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
+	      if (is_tcp_udp0)
+		{
+		  if (is_tcp_udp0
+		      && ! (flags0 & IP_BUFFER_L4_CHECKSUM_COMPUTED))
+		    flags0 = ip4_tcp_udp_validate_checksum (vm, p0);
+		  good_tcp_udp0 =
+		    (flags0 & IP_BUFFER_L4_CHECKSUM_CORRECT) != 0;
+		  good_tcp_udp0 |= is_udp0 && udp0->checksum == 0;
+		}
 	    }
 
 	  good_tcp_udp0 &= len_diff0 >= 0;
+
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 2);
 
 	  error0 = IP4_ERROR_UNKNOWN_PROTOCOL;
 
@@ -2082,15 +2169,25 @@ ip4_local (vlib_main_t * vm,
 		    ? IP4_ERROR_TCP_CHECKSUM + is_udp0
 		    : error0);
 
-	  next0 = lm->local_next_by_ip_protocol[proto0];
+	  leaf0 = ip4_fib_mtrie_lookup_step (mtrie0, leaf0, &ip0->src_address, 3);
 
-	  if (error0 == IP4_ERROR_UNKNOWN_PROTOCOL)
-	    {
-	      u32 src_adj_index0 = ip4_src_lookup_for_packet (im, p0, ip0);
-	      error0 = (lm->miss_adj_index == src_adj_index0
-			? IP4_ERROR_SRC_LOOKUP_MISS
-			: error0);
-	    }
+	  i0 = vlib_get_buffer_opaque (p0);
+
+	  i0->adj_index[VLIB_RX] = adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+
+	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, fib_index0,
+							   &ip0->src_address,
+							   /* no_default_route */ 0));
+
+	  adj0 = ip_get_adjacency (lm, adj_index0);
+
+	  /* Must have a route to source otherwise we drop the packet. */
+	  error0 = (error0 == IP4_ERROR_UNKNOWN_PROTOCOL
+		    && adj0->lookup_next_index != IP_LOOKUP_NEXT_REWRITE
+		    ? IP4_ERROR_SRC_LOOKUP_MISS
+		    : error0);
+
+	  next0 = lm->local_next_by_ip_protocol[proto0];
 
 	  next0 = error0 != IP4_ERROR_UNKNOWN_PROTOCOL ? IP_LOCAL_NEXT_DROP : next0;
 
@@ -2167,7 +2264,7 @@ ip4_arp (vlib_main_t * vm,
   f64 time_now;
 
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip4_forward_next_trace (vm, node, frame);
+    ip4_forward_next_trace (vm, node, frame, VLIB_TX);
 
   time_now = vlib_time_now (vm);
   if (time_now - time_last_seed_change > 1e-3)
@@ -2210,7 +2307,7 @@ ip4_arp (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  i0 = vlib_get_buffer_opaque (p0);
 
-	  adj_index0 = i0->dst_adj_index;
+	  adj_index0 = i0->adj_index[VLIB_TX];
 
 	  ip0 = vlib_buffer_get_current (p0);
 
@@ -2361,15 +2458,17 @@ typedef enum {
   IP4_REWRITE_NEXT_DROP,
 } ip4_rewrite_next_t;
 
-static uword
-ip4_rewrite (vlib_main_t * vm,
-	     vlib_node_runtime_t * node,
-	     vlib_frame_t * frame)
+always_inline uword
+ip4_rewrite_inline (vlib_main_t * vm,
+		    vlib_node_runtime_t * node,
+		    vlib_frame_t * frame,
+		    int rewrite_for_locally_received_packets)
 {
   ip_lookup_main_t * lm = &ip4_main.lookup_main;
   u32 * from = vlib_frame_vector_args (frame);
   u32 n_left_from, n_left_to_next, * to_next, next_index;
   vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip4_input_node.index);
+  vlib_rx_or_tx_t adj_rx_tx = rewrite_for_locally_received_packets ? VLIB_RX : VLIB_TX;
 
   n_left_from = frame->n_vectors;
   next_index = node->cached_next_index;
@@ -2418,8 +2517,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  i0 = vlib_get_buffer_opaque (p0);
 	  i1 = vlib_get_buffer_opaque (p1);
 
-	  adj_index0 = i0->dst_adj_index;
-	  adj_index1 = i1->dst_adj_index;
+	  adj_index0 = i0->adj_index[adj_rx_tx];
+	  adj_index1 = i1->adj_index[adj_rx_tx];
 
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
@@ -2428,40 +2527,36 @@ ip4_rewrite (vlib_main_t * vm,
 
 	  /* Decrement TTL & update checksum.
 	     Works either endian, so no need for byte swap. */
-	  {
-	    i32 ttl0 = ip0->ttl, ttl1 = ip1->ttl;
-	    u8 decrement0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
-	    u8 decrement1 = (p1->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
+	  if (! rewrite_for_locally_received_packets)
+	    {
+	      i32 ttl0 = ip0->ttl, ttl1 = ip1->ttl;
 
-	    /* Input node should have reject packets with ttl 0. */
-	    ASSERT (ip0->ttl > 0);
-	    ASSERT (ip1->ttl > 0);
+	      /* Input node should have reject packets with ttl 0. */
+	      ASSERT (ip0->ttl > 0);
+	      ASSERT (ip1->ttl > 0);
 
-	    checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
-	    checksum1 = ip1->checksum + clib_host_to_net_u16 (0x0100);
+	      checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
+	      checksum1 = ip1->checksum + clib_host_to_net_u16 (0x0100);
 
-	    checksum0 += checksum0 >= 0xffff;
-	    checksum1 += checksum1 >= 0xffff;
+	      checksum0 += checksum0 >= 0xffff;
+	      checksum1 += checksum1 >= 0xffff;
 
-	    checksum0 = decrement0 ? checksum0 : ip0->checksum;
-	    checksum1 = decrement1 ? checksum1 : ip1->checksum;
+	      ip0->checksum = checksum0;
+	      ip1->checksum = checksum1;
 
-	    ip0->checksum = checksum0;
-	    ip1->checksum = checksum1;
+	      ttl0 -= 1;
+	      ttl1 -= 1;
 
-	    ttl0 -= decrement0;
-	    ttl1 -= decrement1;
+	      ip0->ttl = ttl0;
+	      ip1->ttl = ttl1;
 
-	    ip0->ttl = ttl0;
-	    ip1->ttl = ttl1;
+	      error0 = ttl0 <= 0 ? IP4_ERROR_TIME_EXPIRED : error0;
+	      error1 = ttl1 <= 0 ? IP4_ERROR_TIME_EXPIRED : error1;
 
-	    error0 = ttl0 <= 0 ? IP4_ERROR_TIME_EXPIRED : error0;
-	    error1 = ttl1 <= 0 ? IP4_ERROR_TIME_EXPIRED : error1;
-
-	    /* Verify checksum. */
-	    ASSERT (ip0->checksum == ip4_header_checksum (ip0));
-	    ASSERT (ip1->checksum == ip4_header_checksum (ip1));
-	  }
+	      /* Verify checksum. */
+	      ASSERT (ip0->checksum == ip4_header_checksum (ip0));
+	      ASSERT (ip1->checksum == ip4_header_checksum (ip1));
+	    }
 
 	  /* Rewrite packet header and updates lengths. */
 	  adj0 = ip_get_adjacency (lm, adj_index0);
@@ -2525,7 +2620,8 @@ ip4_rewrite (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  i0 = vlib_get_buffer_opaque (p0);
 
-	  adj_index0 = i0->dst_adj_index;
+	  adj_index0 = i0->adj_index[adj_rx_tx];
+
 	  adj0 = ip_get_adjacency (lm, adj_index0);
       
 	  ip0 = vlib_buffer_get_current (p0);
@@ -2533,28 +2629,26 @@ ip4_rewrite (vlib_main_t * vm,
 	  error0 = IP4_ERROR_NONE;
 
 	  /* Decrement TTL & update checksum. */
-	  {
-	    i32 ttl0 = ip0->ttl;
-	    u8 decrement0 = (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
+	  if (! rewrite_for_locally_received_packets)
+	    {
+	      i32 ttl0 = ip0->ttl;
 
-	    checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
+	      checksum0 = ip0->checksum + clib_host_to_net_u16 (0x0100);
 
-	    checksum0 += checksum0 >= 0xffff;
+	      checksum0 += checksum0 >= 0xffff;
 
-	    checksum0 = decrement0 ? checksum0 : ip0->checksum;
+	      ip0->checksum = checksum0;
 
-	    ip0->checksum = checksum0;
+	      ASSERT (ip0->ttl > 0);
 
-	    ASSERT (ip0->ttl > 0);
+	      ttl0 -= 1;
 
-	    ttl0 -= decrement0;
+	      ip0->ttl = ttl0;
 
-	    ip0->ttl = ttl0;
+	      ASSERT (ip0->checksum == ip4_header_checksum (ip0));
 
-	    ASSERT (ip0->checksum == ip4_header_checksum (ip0));
-
-	    error0 = ttl0 <= 0 ? IP4_ERROR_TIME_EXPIRED : error0;
-	  }
+	      error0 = ttl0 <= 0 ? IP4_ERROR_TIME_EXPIRED : error0;
+	    }
 
 	  p0->error = error_node->errors[error0];
 
@@ -2595,15 +2689,48 @@ ip4_rewrite (vlib_main_t * vm,
 
   /* Need to do trace after rewrites to pick up new packet data. */
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip4_forward_next_trace (vm, node, frame);
+    ip4_forward_next_trace (vm, node, frame, adj_rx_tx);
 
   return frame->n_vectors;
 }
 
+static uword
+ip4_rewrite_transit (vlib_main_t * vm,
+		     vlib_node_runtime_t * node,
+		     vlib_frame_t * frame)
+{
+  return ip4_rewrite_inline (vm, node, frame,
+			     /* rewrite_for_locally_received_packets */ 0);
+}
+
+static uword
+ip4_rewrite_local (vlib_main_t * vm,
+		   vlib_node_runtime_t * node,
+		   vlib_frame_t * frame)
+{
+  return ip4_rewrite_inline (vm, node, frame,
+			     /* rewrite_for_locally_received_packets */ 1);
+}
+
 VLIB_REGISTER_NODE (ip4_rewrite_node) = {
-  .function = ip4_rewrite,
-  .name = "ip4-rewrite",
+  .function = ip4_rewrite_transit,
+  .name = "ip4-rewrite-transit",
   .vector_size = sizeof (u32),
+
+  .format_trace = format_ip4_forward_next_trace,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [IP4_REWRITE_NEXT_DROP] = "error-drop",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip4_rewrite_local_node) = {
+  .function = ip4_rewrite_local,
+  .name = "ip4-rewrite-local",
+  .vector_size = sizeof (u32),
+
+  .sibling_of = "ip4-rewrite-transit",
 
   .format_trace = format_ip4_forward_next_trace,
 
@@ -2751,8 +2878,8 @@ ip4_lookup_multicast (vlib_main_t * vm,
 	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
 	  adj_index1 += (i1->flow_hash & (adj1->n_adj - 1));
 
-	  i0->dst_adj_index = adj_index0;
-	  i1->dst_adj_index = adj_index1;
+	  i0->adj_index[VLIB_TX] = adj_index0;
+	  i1->adj_index[VLIB_TX] = adj_index1;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
 					   vlib_buffer_length_in_chain (vm, p0));
@@ -2831,7 +2958,7 @@ ip4_lookup_multicast (vlib_main_t * vm,
 	  ASSERT (is_pow2 (adj0->n_adj));
 	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
 
-	  i0->dst_adj_index = adj_index0;
+	  i0->adj_index[VLIB_TX] = adj_index0;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
 					   vlib_buffer_length_in_chain (vm, p0));
@@ -2872,7 +2999,7 @@ static VLIB_REGISTER_NODE (ip4_lookup_multicast_node) = {
     [IP_LOOKUP_NEXT_PUNT] = "ip4-punt",
     [IP_LOOKUP_NEXT_LOCAL] = "ip4-local",
     [IP_LOOKUP_NEXT_ARP] = "ip4-arp",
-    [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite",
+    [IP_LOOKUP_NEXT_REWRITE] = "ip4-rewrite-transit",
   },
 };
 
