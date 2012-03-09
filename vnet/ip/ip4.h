@@ -153,7 +153,6 @@ ip4_fib_lookup_buffer (ip4_main_t * im, u32 sw_if_index, ip4_address_t * dst,
 		       vlib_buffer_t * b)
 {
   u32 fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
-  fib_index = (b->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index;
   return ip4_fib_lookup_with_table (im, fib_index, dst,
 				    /* disable_default_route */ 0);
 }
@@ -197,16 +196,6 @@ ip4_src_address_for_packet (ip4_main_t * im, vlib_buffer_t * p, ip4_address_t * 
   ip_interface_address_t * ia = ip_interface_address_for_packet (lm, p, sw_if_index);
   ip4_address_t * a = ip_interface_address_get_address (lm, ia);
   *src = a[0];
-}
-
-always_inline u32
-ip4_src_lookup_for_packet (ip4_main_t * im, vlib_buffer_t * p, ip4_header_t * i)
-{
-  ip_buffer_opaque_t * o = vlib_get_buffer_opaque (p);
-  if (o->src_adj_index == ~0)
-    o->src_adj_index =
-      ip4_fib_lookup_buffer (im, p->sw_if_index[VLIB_RX], &i->src_address, p);
-  return o->src_adj_index;
 }
 
 /* Find interface address which matches destination. */
