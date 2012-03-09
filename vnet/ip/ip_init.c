@@ -31,6 +31,7 @@ clib_error_t *
 ip_main_init (vlib_main_t * vm)
 {
   ip_main_t * im = &ip_main;
+  clib_error_t * error = 0;
 
   memset (im, 0, sizeof (im[0]));
 
@@ -88,32 +89,31 @@ do {						\
       }
   }
 
-  {
-    clib_error_t * error;
-
-    if ((error = vlib_call_init_function (vm, ip4_init)))
-      return error;
-
-    if ((error = vlib_call_init_function (vm, ip6_init)))
-      return error;
-
-    if ((error = vlib_call_init_function (vm, icmp4_init)))
-      return error;
-
-    if ((error = vlib_call_init_function (vm, icmp6_init)))
-      return error;
-
-    if ((error = vlib_call_init_function (vm, tcp_udp_lookup_init)))
-      return error;
-
-    if ((error = vlib_call_init_function (vm, tcp_init)))
-      return error;
-
-    if ((error = vlib_call_init_function (vm, udp_init)))
-      return error;
-
+  if ((error = vlib_call_init_function (vm, vnet_main_init)))
     return error;
-  }
+
+  if ((error = vlib_call_init_function (vm, ip4_init)))
+    return error;
+
+  if ((error = vlib_call_init_function (vm, ip6_init)))
+    return error;
+
+  if ((error = vlib_call_init_function (vm, icmp4_init)))
+    return error;
+
+  if ((error = vlib_call_init_function (vm, icmp6_init)))
+    return error;
+
+  if ((error = vlib_call_init_function (vm, tcp_udp_lookup_init)))
+    return error;
+
+  if ((error = vlib_call_init_function (vm, tcp_init)))
+    return error;
+
+  if ((error = vlib_call_init_function (vm, udp_init)))
+    return error;
+
+  return error;
 }
 
 VLIB_INIT_FUNCTION (ip_main_init);
