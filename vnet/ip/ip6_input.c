@@ -135,8 +135,8 @@ ip6_input (vlib_main_t * vm,
 	  i0->current_config_index = vec_elt (cm0->config_index_by_sw_if_index, sw_if_index0);
 	  i1->current_config_index = vec_elt (cm1->config_index_by_sw_if_index, sw_if_index1);
 
-	  i0->src_adj_index = ~0;
-	  i1->src_adj_index = ~0;
+	  i0->adj_index[VLIB_RX] = ~0;
+	  i1->adj_index[VLIB_RX] = ~0;
 
 	  vnet_get_config_data (&cm0->config_main,
 				&i0->current_config_index,
@@ -196,7 +196,7 @@ ip6_input (vlib_main_t * vm,
 	  cast0 = ip6_address_is_multicast (&ip0->dst_address) ? VNET_MULTICAST : VNET_UNICAST;
 	  cm0 = lm->rx_config_mains + cast0;
 	  i0->current_config_index = vec_elt (cm0->config_index_by_sw_if_index, sw_if_index0);
-	  i0->src_adj_index = ~0;
+	  i0->adj_index[VLIB_RX] = ~0;
 
 	  vnet_get_config_data (&cm0->config_main,
 				&i0->current_config_index,
