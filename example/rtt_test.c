@@ -668,7 +668,6 @@ rtt_test_command (vlib_main_t * vm,
     vlib_packet_template_init (vm, &s->packet_template,
 			       t, sizeof (t[0]) + s->n_bytes_payload,
 			       /* alloc chunk size */ VLIB_FRAME_SIZE,
-			       VNET_BUFFER_LOCALLY_GENERATED,
 			       "rtt-test stream %d data", s - tm->stream_pool);
 
     clib_mem_free (t);
@@ -776,7 +775,6 @@ rtt_test_init (vlib_main_t * vm)
 			       &ack,
 			       sizeof (ack),
 			       /* alloc chunk size */ VLIB_FRAME_SIZE,
-			       VNET_BUFFER_LOCALLY_GENERATED,
 			       "rtt-test ack");
   }
 
