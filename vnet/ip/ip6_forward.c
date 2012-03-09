@@ -28,8 +28,7 @@
 #include <vnet/srp/srp.h>	/* for srp_hw_interface_class */
 #include <vnet/vnet/l3_types.h>
 
-always_inline u32
-ip6_fib_lookup_buffer_flags (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst, uword b_flags)
+u32 ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
 {
   ip_lookup_main_t * lm = &im->lookup_main;
   u32 fib_index;
@@ -39,8 +38,6 @@ ip6_fib_lookup_buffer_flags (ip6_main_t * im, u32 sw_if_index, ip6_address_t * d
   uword i, * p;
 
   fib_index = vec_elt (im->fib_index_by_sw_if_index, sw_if_index);
-
-  fib_index = (b_flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : fib_index;
 
   fib = vec_elt_at_index (im->fibs, fib_index);
 
@@ -58,14 +55,6 @@ ip6_fib_lookup_buffer_flags (ip6_main_t * im, u32 sw_if_index, ip6_address_t * d
   /* Nothing matches in table. */
   return lm->miss_adj_index;
 }
-
-u32
-ip6_fib_lookup_buffer (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst, vlib_buffer_t * b)
-{ return ip6_fib_lookup_buffer_flags (im, sw_if_index, dst, b->flags); }
-
-u32
-ip6_fib_lookup (ip6_main_t * im, u32 sw_if_index, ip6_address_t * dst)
-{ return ip6_fib_lookup_buffer_flags (im, sw_if_index, dst, /* buffer flags */ 0); }
 
 static void
 ip6_fib_init (ip6_main_t * im, u32 fib_index)
@@ -809,8 +798,8 @@ ip6_lookup (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  adj_index0 = ip6_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
-	  adj_index1 = ip6_fib_lookup_buffer (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address, p1);
+	  adj_index0 = ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
+	  adj_index1 = ip6_fib_lookup (im, p1->sw_if_index[VLIB_RX], &ip1->dst_address);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 	  adj1 = ip_get_adjacency (lm, adj_index1);
@@ -831,8 +820,8 @@ ip6_lookup (vlib_main_t * vm,
 	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
 	  adj_index1 += (i1->flow_hash & (adj1->n_adj - 1));
 
-	  i0->dst_adj_index = adj_index0;
-	  i1->dst_adj_index = adj_index1;
+	  i0->adj_index[VLIB_TX] = adj_index0;
+	  i1->adj_index[VLIB_TX] = adj_index1;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
 					   vlib_buffer_length_in_chain (vm, p0));
@@ -897,7 +886,7 @@ ip6_lookup (vlib_main_t * vm,
 
 	  ip0 = vlib_buffer_get_current (p0);
 
-	  adj_index0 = ip6_fib_lookup_buffer (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address, p0);
+	  adj_index0 = ip6_fib_lookup (im, p0->sw_if_index[VLIB_RX], &ip0->dst_address);
 
 	  adj0 = ip_get_adjacency (lm, adj_index0);
 
@@ -911,7 +900,7 @@ ip6_lookup (vlib_main_t * vm,
 	  ASSERT (is_pow2 (adj0->n_adj));
 	  adj_index0 += (i0->flow_hash & (adj0->n_adj - 1));
 
-	  i0->dst_adj_index = adj_index0;
+	  i0->adj_index[VLIB_TX] = adj_index0;
 
 	  vlib_increment_combined_counter (cm, adj_index0, 1,
 					   vlib_buffer_length_in_chain (vm, p0));
@@ -1471,7 +1460,8 @@ static u8 * format_ip6_forward_next_trace (u8 * s, va_list * args)
 static void
 ip6_forward_next_trace (vlib_main_t * vm,
 			vlib_node_runtime_t * node,
-			vlib_frame_t * frame)
+			vlib_frame_t * frame,
+			vlib_rx_or_tx_t which_adj_index)
 {
   u32 * from, n_left;
 
@@ -1501,7 +1491,7 @@ ip6_forward_next_trace (vlib_main_t * vm,
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
-	  t0->adj_index = i0->dst_adj_index;
+	  t0->adj_index = i0->adj_index[which_adj_index];
 	  memcpy (t0->packet_data,
 		  vlib_buffer_get_current (b0),
 		  sizeof (t0->packet_data));
@@ -1509,7 +1499,7 @@ ip6_forward_next_trace (vlib_main_t * vm,
       if (b1->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t1 = vlib_add_trace (vm, node, b1, sizeof (t1[0]));
-	  t1->adj_index = i1->dst_adj_index;
+	  t1->adj_index = i1->adj_index[which_adj_index];
 	  memcpy (t1->packet_data,
 		  vlib_buffer_get_current (b1),
 		  sizeof (t1->packet_data));
@@ -1533,7 +1523,7 @@ ip6_forward_next_trace (vlib_main_t * vm,
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
 	{
 	  t0 = vlib_add_trace (vm, node, b0, sizeof (t0[0]));
-	  t0->adj_index = i0->dst_adj_index;
+	  t0->adj_index = i0->adj_index[which_adj_index];
 	  memcpy (t0->packet_data,
 		  vlib_buffer_get_current (b0),
 		  sizeof (t0->packet_data));
@@ -1561,7 +1551,7 @@ ip6_drop_or_punt (vlib_main_t * vm,
 			   error_code);
 
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip6_forward_next_trace (vm, node, frame);
+    ip6_forward_next_trace (vm, node, frame, VLIB_TX);
 
   return n_packets;
 }
@@ -1720,7 +1710,7 @@ ip6_local (vlib_main_t * vm,
   next_index = node->cached_next_index;
   
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip6_forward_next_trace (vm, node, frame);
+    ip6_forward_next_trace (vm, node, frame, VLIB_TX);
 
   while (n_left_from > 0)
     {
@@ -1980,7 +1970,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
   f64 time_now;
 
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip6_forward_next_trace (vm, node, frame);
+    ip6_forward_next_trace (vm, node, frame, VLIB_TX);
 
   time_now = vlib_time_now (vm);
   if (time_now - time_last_seed_change > 1e-3)
@@ -2021,7 +2011,7 @@ ip6_discover_neighbor (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  i0 = vlib_get_buffer_opaque (p0);
 
-	  adj_index0 = i0->dst_adj_index;
+	  adj_index0 = i0->adj_index[VLIB_TX];
 
 	  ip0 = vlib_buffer_get_current (p0);
 
@@ -2218,15 +2208,17 @@ typedef enum {
   IP6_REWRITE_NEXT_DROP,
 } ip6_rewrite_next_t;
 
-static uword
-ip6_rewrite (vlib_main_t * vm,
-	     vlib_node_runtime_t * node,
-	     vlib_frame_t * frame)
+always_inline uword
+ip6_rewrite_inline (vlib_main_t * vm,
+		    vlib_node_runtime_t * node,
+		    vlib_frame_t * frame,
+		    int rewrite_for_locally_received_packets)
 {
   ip_lookup_main_t * lm = &ip6_main.lookup_main;
   u32 * from = vlib_frame_vector_args (frame);
   u32 n_left_from, n_left_to_next, * to_next, next_index;
   vlib_node_runtime_t * error_node = vlib_node_get_runtime (vm, ip6_input_node.index);
+  vlib_rx_or_tx_t adj_rx_tx = rewrite_for_locally_received_packets ? VLIB_RX : VLIB_TX;
 
   n_left_from = frame->n_vectors;
   next_index = node->cached_next_index;
@@ -2275,30 +2267,31 @@ ip6_rewrite (vlib_main_t * vm,
 	  i0 = vlib_get_buffer_opaque (p0);
 	  i1 = vlib_get_buffer_opaque (p1);
 
-	  adj_index0 = i0->dst_adj_index;
-	  adj_index1 = i1->dst_adj_index;
+	  adj_index0 = i0->adj_index[adj_rx_tx];
+	  adj_index1 = i1->adj_index[adj_rx_tx];
 
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
 	  error0 = error1 = IP6_ERROR_NONE;
 
-	  {
-	    i32 hop_limit0 = ip0->hop_limit, hop_limit1 = ip1->hop_limit;
+	  if (! rewrite_for_locally_received_packets)
+	    {
+	      i32 hop_limit0 = ip0->hop_limit, hop_limit1 = ip1->hop_limit;
 
-	    /* Input node should have reject packets with hop limit 0. */
-	    ASSERT (ip0->hop_limit > 0);
-	    ASSERT (ip1->hop_limit > 0);
+	      /* Input node should have reject packets with hop limit 0. */
+	      ASSERT (ip0->hop_limit > 0);
+	      ASSERT (ip1->hop_limit > 0);
 
-	    hop_limit0 -= (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
-	    hop_limit1 -= (p1->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
+	      hop_limit0 -= 1;
+	      hop_limit1 -= 1;
 
-	    ip0->hop_limit = hop_limit0;
-	    ip1->hop_limit = hop_limit1;
+	      ip0->hop_limit = hop_limit0;
+	      ip1->hop_limit = hop_limit1;
 
-	    error0 = hop_limit0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
-	    error1 = hop_limit1 <= 0 ? IP6_ERROR_TIME_EXPIRED : error1;
-	  }
+	      error0 = hop_limit0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
+	      error1 = hop_limit1 <= 0 ? IP6_ERROR_TIME_EXPIRED : error1;
+	    }
 
 	  /* Rewrite packet header and updates lengths. */
 	  adj0 = ip_get_adjacency (lm, adj_index0);
@@ -2360,7 +2353,7 @@ ip6_rewrite (vlib_main_t * vm,
 	  p0 = vlib_get_buffer (vm, pi0);
 	  i0 = vlib_get_buffer_opaque (p0);
 
-	  adj_index0 = i0->dst_adj_index;
+	  adj_index0 = i0->adj_index[adj_rx_tx];
 	  adj0 = ip_get_adjacency (lm, adj_index0);
       
 	  ip0 = vlib_buffer_get_current (p0);
@@ -2368,17 +2361,18 @@ ip6_rewrite (vlib_main_t * vm,
 	  error0 = IP6_ERROR_NONE;
 
 	  /* Check hop limit */
-	  {
-	    i32 hop_limit0 = ip0->hop_limit;
+	  if (! rewrite_for_locally_received_packets)
+	    {
+	      i32 hop_limit0 = ip0->hop_limit;
 
-	    ASSERT (ip0->hop_limit > 0);
+	      ASSERT (ip0->hop_limit > 0);
 
-	    hop_limit0 -= (p0->flags & VNET_BUFFER_LOCALLY_GENERATED) ? 0 : 1;
+	      hop_limit0 -= 1;
 
-	    ip0->hop_limit = hop_limit0;
+	      ip0->hop_limit = hop_limit0;
 
-	    error0 = hop_limit0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
-	  }
+	      error0 = hop_limit0 <= 0 ? IP6_ERROR_TIME_EXPIRED : error0;
+	    }
 
 	  /* Guess we are only writing on simple Ethernet header. */
 	  vnet_rewrite_one_header (adj0[0], ip0, sizeof (ethernet_header_t));
@@ -2420,15 +2414,48 @@ ip6_rewrite (vlib_main_t * vm,
 
   /* Need to do trace after rewrites to pick up new packet data. */
   if (node->flags & VLIB_NODE_FLAG_TRACE)
-    ip6_forward_next_trace (vm, node, frame);
+    ip6_forward_next_trace (vm, node, frame, adj_rx_tx);
 
   return frame->n_vectors;
 }
 
+static uword
+ip6_rewrite_transit (vlib_main_t * vm,
+		     vlib_node_runtime_t * node,
+		     vlib_frame_t * frame)
+{
+  return ip6_rewrite_inline (vm, node, frame,
+			     /* rewrite_for_locally_received_packets */ 0);
+}
+
+static uword
+ip6_rewrite_local (vlib_main_t * vm,
+		   vlib_node_runtime_t * node,
+		   vlib_frame_t * frame)
+{
+  return ip6_rewrite_inline (vm, node, frame,
+			     /* rewrite_for_locally_received_packets */ 1);
+}
+
 VLIB_REGISTER_NODE (ip6_rewrite_node) = {
-  .function = ip6_rewrite,
+  .function = ip6_rewrite_transit,
   .name = "ip6-rewrite",
   .vector_size = sizeof (u32),
+
+  .format_trace = format_ip6_forward_next_trace,
+
+  .n_next_nodes = 1,
+  .next_nodes = {
+    [IP6_REWRITE_NEXT_DROP] = "error-drop",
+  },
+};
+
+static VLIB_REGISTER_NODE (ip6_rewrite_local_node) = {
+  .function = ip6_rewrite_local,
+  .name = "ip6-rewrite-local",
+  .vector_size = sizeof (u32),
+
+  .sibling_of = "ip6-rewrite",
 
   .format_trace = format_ip6_forward_next_trace,
 
@@ -2493,7 +2520,6 @@ ip6_lookup_init (vlib_main_t * vm)
 			       &im->discover_neighbor_packet_template,
 			       &p, sizeof (p),
 			       /* alloc chunk size */ 8,
-			       VNET_BUFFER_LOCALLY_GENERATED,
 			       "ip6 neighbor discovery");
   }
 
