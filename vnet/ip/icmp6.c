@@ -294,8 +294,8 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  ip0->hop_limit = im->host_config.ttl;
 	  ip1->hop_limit = im->host_config.ttl;
 
-	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
-	  p1->flags |= VNET_BUFFER_LOCALLY_GENERATED;
+	  p0->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
+	  p1->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 	}
   
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -335,7 +335,7 @@ ip6_icmp_echo_request (vlib_main_t * vm,
 	  ip0->dst_address = tmp0;
 
 	  ip0->hop_limit = im->host_config.ttl;
-	  p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
+	  p0->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 	}
   
       vlib_put_next_frame (vm, node, next, n_left_to_next);
@@ -358,7 +358,7 @@ static VLIB_REGISTER_NODE (ip6_icmp_echo_request_node) = {
 
   .n_next_nodes = 1,
   .next_nodes = {
-    [0] = CLIB_DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [0] = "ip6-rewrite-local",
   },
 };
 
