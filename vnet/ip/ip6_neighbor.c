@@ -331,8 +331,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 		(ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_SOLICITED
 		 | ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_OVERRIDE);
 
-	      /* Don't want forwarding code to decrement hop_limit. */
-	      p0->flags |= VNET_BUFFER_LOCALLY_GENERATED;
+	      p0->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 
 	      h0->icmp.checksum = 0;
 	      h0->icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (vm, p0, ip0);
