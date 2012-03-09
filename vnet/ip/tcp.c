@@ -871,7 +871,7 @@ ip46_tcp_lookup (vlib_main_t * vm,
 	    state0 = is_min_match0 ? min0->state : TCP_CONNECTION_STATE_unused;
 	    state0 = is_est_match0 ? TCP_CONNECTION_STATE_established : state0;
 
-	    pi0->tcp_udp.src_adj_index = pi0->ip.src_adj_index;
+	    pi0->tcp_udp.src_adj_index = pi0->ip.adj_index[VLIB_RX];
 	    pi0->tcp_udp.established_connection_index = iest0;
 	    pi0->tcp_udp.mini_connection_index = imin0;
 	    pi0->tcp_udp.listener_index = li0 = tm->listener_index_by_dst_port[tcp0->ports.dst];
@@ -1170,7 +1170,7 @@ do {								\
      &tm->ip4.packet_templates[t].vlib,				\
      &x, sizeof (x),						\
      /* alloc chunk size */ VLIB_FRAME_SIZE,			\
-     VNET_BUFFER_LOCALLY_GENERATED, (n));			\
+     (n));							\
   tm->ip4.packet_templates[t].tcp_checksum_net_byte_order	\
     = x.tcp.header.checksum;					\
   tm->ip4.packet_templates[t].ip4_checksum_net_byte_order	\
@@ -1192,7 +1192,7 @@ do {								\
      &tm->ip6.packet_templates[t].vlib,				\
      &x, sizeof (x),						\
      /* alloc chunk size */ VLIB_FRAME_SIZE,			\
-     VNET_BUFFER_LOCALLY_GENERATED, (n));			\
+     (n));							\
   tm->ip6.packet_templates[t].tcp_checksum_net_byte_order	\
     = x.tcp.header.checksum;					\
   tm->ip6.packet_templates[t].ip4_checksum_net_byte_order	\
