@@ -26,7 +26,7 @@
 #ifndef included_snap_h
 #define included_snap_h
 
-#include <vnet/vnet/rewrite.h>
+#include <vnet/vnet.h>
 #include <vnet/pg/pg.h>
 
 #define foreach_ieee_oui			\

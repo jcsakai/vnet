@@ -23,9 +23,8 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vlib/vlib.h>
+#include <vnet/vnet.h>
 #include <vnet/hdlc/hdlc.h>
-#include <vnet/vnet/l3_types.h>
 
 /* Global main structure. */
 hdlc_main_t hdlc_main;
@@ -154,7 +153,7 @@ unformat_hdlc_header (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-static uword hdlc_set_rewrite (vlib_main_t * vm,
+static uword hdlc_set_rewrite (vnet_main_t * vm,
 			       u32 sw_if_index,
 			       u32 l3_type,
 			       void * dst_address,
@@ -185,7 +184,7 @@ static uword hdlc_set_rewrite (vlib_main_t * vm,
   return sizeof (h[0]);
 }
 
-VLIB_HW_INTERFACE_CLASS (hdlc_hw_interface_class) = {
+VNET_HW_INTERFACE_CLASS (hdlc_hw_interface_class) = {
   .name = "HDLC",
   .format_header = format_hdlc_header_with_length,
   .unformat_header = unformat_hdlc_header,

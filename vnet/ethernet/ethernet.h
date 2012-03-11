@@ -26,6 +26,7 @@
 #ifndef included_ethernet_h
 #define included_ethernet_h
 
+#include <vnet/vnet.h>
 #include <vnet/ethernet/packet.h>
 #include <vnet/ethernet/phy.h>
 #include <vnet/pg/pg.h>
@@ -62,7 +63,7 @@ typedef struct {
   ethernet_phy_t phy;
 } ethernet_interface_t;
 
-extern vlib_hw_interface_class_t ethernet_hw_interface_class;
+vnet_hw_interface_class_t ethernet_hw_interface_class;
 
 typedef struct {
   /* Name (a c string). */
@@ -130,6 +131,8 @@ typedef struct {
   int format_ethernet_address_16bit;
 } ethernet_main_t;
 
+ethernet_main_t ethernet_main;
+
 always_inline ethernet_type_info_t *
 ethernet_get_type_info (ethernet_main_t * em, ethernet_type_t type)
 {
@@ -137,15 +140,10 @@ ethernet_get_type_info (ethernet_main_t * em, ethernet_type_t type)
   return p ? vec_elt_at_index (em->type_infos, p[0]) : 0;
 }
 
-extern ethernet_main_t ethernet_main;
-
-/* Fetch ethernet main structure possibly calling init function. */
-ethernet_main_t * ethernet_get_main (vlib_main_t * vm);
-
 always_inline ethernet_interface_t *
 ethernet_get_interface (ethernet_main_t * em, u32 hw_if_index)
 {
-  vlib_hw_interface_t * i = vlib_get_hw_interface (em->vlib_main, hw_if_index);
+  vnet_hw_interface_t * i = vnet_get_hw_interface (&vnet_main, hw_if_index);
   return (i->hw_class_index == ethernet_hw_interface_class.index
 	  ? pool_elt_at_index (em->interfaces, i->hw_instance)
 	  : 0);
@@ -162,14 +160,14 @@ ethernet_vlan_to_sw_if_index (ethernet_vlan_mapping_t * m,
 }
 
 clib_error_t *
-ethernet_register_interface (vlib_main_t * vm,
+ethernet_register_interface (vnet_main_t * vm,
 			     u32 dev_class_index,
 			     u32 dev_instance,
 			     u8 * address,
 			     ethernet_phy_t * phy,
 			     u32 * hw_if_index_return);
 
-void ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index);
+void ethernet_delete_interface (vnet_main_t * vm, u32 hw_if_index);
 
 /* Register given node index to take input for given ethernet type. */
 void

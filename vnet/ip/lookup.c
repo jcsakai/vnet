@@ -537,6 +537,7 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
 			      u32 is_del,
 			      u32 * result_if_address_index)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip_interface_address_t * a, * prev, * next;
   uword * p = mhash_get (&lm->address_to_if_address_index, address);
 
@@ -548,19 +549,17 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
     return clib_error_create ("%U wrong length (expected %d) for interface %U",
 			      lm->format_address_and_length, address, address_length,
 			      a->address_length,
-			      format_vlib_sw_if_index_name, &vlib_global_main, sw_if_index);
+			      format_vnet_sw_if_index_name, vnm, sw_if_index);
 
   if (is_del)
     {
       if (!a) 
         {
-          vlib_sw_interface_t * si = vlib_get_sw_interface (&vlib_global_main, 
-                                                            sw_if_index);
+          vnet_sw_interface_t * si = vnet_get_sw_interface (vnm, sw_if_index);
           return clib_error_create ("%U not found for interface %U",
                                     lm->format_address_and_length, 
                                     address, address_length,
-                                    format_vlib_sw_interface_name, 
-                                    &vlib_global_main, si);
+                                    format_vnet_sw_interface_name, vnm, si);
         }
 
       if (a->prev_this_sw_interface != ~0)
@@ -888,7 +887,7 @@ static u8 * format_ip_interface_address (u8 * s, va_list * args)
 
 u8 * format_ip_adjacency (u8 * s, va_list * args)
 {
-  vlib_main_t * vm = va_arg (*args, vlib_main_t *);
+  vnet_main_t * vm = va_arg (*args, vnet_main_t *);
   ip_lookup_main_t * lm = va_arg (*args, ip_lookup_main_t *);
   u32 adj_index = va_arg (*args, u32);
   ip_adjacency_t * adj = ip_get_adjacency (lm, adj_index);
@@ -898,16 +897,16 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
     case IP_LOOKUP_NEXT_REWRITE:
       s = format (s, "%U",
 		  format_vnet_rewrite,
-		  vm, &adj->rewrite_header, sizeof (adj->rewrite_data));
+		  vm->vlib_main, &adj->rewrite_header, sizeof (adj->rewrite_data));
       break;
 
     default:
       s = format (s, "%U", format_ip_lookup_next, adj->lookup_next_index);
       if (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP)
 	s = format (s, " %U",
-		    format_vlib_sw_interface_name,
+		    format_vnet_sw_interface_name,
 		    vm,
-		    vlib_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
+		    vnet_get_sw_interface (vm, adj->rewrite_header.sw_if_index));
       switch (adj->lookup_next_index)
 	{
 	case IP_LOOKUP_NEXT_ARP:
@@ -927,7 +926,7 @@ u8 * format_ip_adjacency (u8 * s, va_list * args)
 
 u8 * format_ip_adjacency_packet_data (u8 * s, va_list * args)
 {
-  vlib_main_t * vm = va_arg (*args, vlib_main_t *);
+  vnet_main_t * vm = va_arg (*args, vnet_main_t *);
   ip_lookup_main_t * lm = va_arg (*args, ip_lookup_main_t *);
   u32 adj_index = va_arg (*args, u32);
   u8 * packet_data = va_arg (*args, u8 *);
@@ -939,7 +938,7 @@ u8 * format_ip_adjacency_packet_data (u8 * s, va_list * args)
     case IP_LOOKUP_NEXT_REWRITE:
       s = format (s, "%U",
 		  format_vnet_rewrite_header,
-		  vm, &adj->rewrite_header, packet_data, n_packet_data_bytes);
+		  vm->vlib_main, &adj->rewrite_header, packet_data, n_packet_data_bytes);
       break;
 
     default:
@@ -978,6 +977,7 @@ static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
   vlib_main_t * vm = va_arg (*args, vlib_main_t *);
   ip_adjacency_t * adj = va_arg (*args, ip_adjacency_t *);
   u32 node_index = va_arg (*args, u32);
+  vnet_main_t * vnm = &vnet_main;
   u32 sw_if_index, is_ip6;
   ip46_address_t a46;
   ip_lookup_next_t next;
@@ -986,7 +986,7 @@ static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
   adj->rewrite_header.node_index = node_index;
 
   if (unformat (input, "arp %U %U",
-		unformat_vlib_sw_interface, vm, &sw_if_index,
+		unformat_vnet_sw_interface, vnm, &sw_if_index,
 		unformat_ip46_address, &a46, is_ip6))
     {
       ip_lookup_main_t * lm = is_ip6 ? &ip6_main.lookup_main : &ip4_main.lookup_main;
@@ -1004,9 +1004,9 @@ static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 	return 0;
 
       if (is_ip6)
-	ip6_adjacency_set_interface_route (vm, adj, sw_if_index, a_adj->if_address_index);
+	ip6_adjacency_set_interface_route (vnm, adj, sw_if_index, a_adj->if_address_index);
       else
-	ip4_adjacency_set_interface_route (vm, adj, sw_if_index, a_adj->if_address_index);
+	ip4_adjacency_set_interface_route (vnm, adj, sw_if_index, a_adj->if_address_index);
     }
 
   else if (unformat_user (input, unformat_ip_lookup_next, &next))
@@ -1031,6 +1031,7 @@ static uword unformat_ip_adjacency (unformat_input_t * input, va_list * args)
 static clib_error_t *
 ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   clib_error_t * error = 0;
   u32 table_id, is_del;
   u32 weight, * weights = 0;
@@ -1079,7 +1080,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 
       else if (unformat (line_input, "via %U %U weight %u",
 			 unformat_ip4_address, &ip4_addr,
-			 unformat_vlib_sw_interface, vm, &sw_if_index,
+			 unformat_vnet_sw_interface, vnm, &sw_if_index,
 			 &weight))
 	{
 	  vec_add1 (ip4_via_next_hops, ip4_addr);
@@ -1089,7 +1090,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 
       else if (unformat (line_input, "via %U %U weight %u",
 			 unformat_ip6_address, &ip6_addr,
-			 unformat_vlib_sw_interface, vm, &sw_if_index,
+			 unformat_vnet_sw_interface, vnm, &sw_if_index,
 			 &weight))
 	{
 	  vec_add1 (ip6_via_next_hops, ip6_addr);
@@ -1099,7 +1100,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 
       else if (unformat (line_input, "via %U %U",
 			 unformat_ip4_address, &ip4_addr,
-			 unformat_vlib_sw_interface, vm, &sw_if_index))
+			 unformat_vnet_sw_interface, vnm, &sw_if_index))
 	{
 	  vec_add1 (ip4_via_next_hops, ip4_addr);
 	  vec_add1 (sw_if_indices, sw_if_index);
@@ -1108,7 +1109,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 			 
       else if (unformat (line_input, "via %U %U",
 			 unformat_ip6_address, &ip6_addr,
-			 unformat_vlib_sw_interface, vm, &sw_if_index))
+			 unformat_vnet_sw_interface, vnm, &sw_if_index))
 	{
 	  vec_add1 (ip6_via_next_hops, ip6_addr);
 	  vec_add1 (sw_if_indices, sw_if_index);
@@ -1356,13 +1357,14 @@ probe_neighbor_address (vlib_main_t * vm,
 			unformat_input_t * input,
 			vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip4_address_t a4;
   ip6_address_t a6;
   clib_error_t * error = 0;
   u32 sw_if_index;
 
   sw_if_index = ~0;
-  if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
+  if (! unformat_user (input, unformat_vnet_sw_interface, vnm, &sw_if_index))
     {
       error = clib_error_return (0, "unknown interface `%U'",
 				 format_unformat_error, input);
@@ -1401,6 +1403,7 @@ typedef CLIB_PACKED (struct {
 static clib_error_t *
 ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip4_main_t * im4 = &ip4_main;
   ip4_route_t * routes, * r;
   ip4_fib_t * fib;
@@ -1559,7 +1562,7 @@ ip4_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 				nhs[j].weight, adj_index + i,
 				format_white_space, indent,
 				format_ip_adjacency,
-				vm, lm, adj_index + i);
+				vnm, lm, adj_index + i);
 
 		  vlib_cli_output (vm, "%v", msg);
 		  vec_free (msg);
@@ -1604,6 +1607,7 @@ typedef struct {
 static clib_error_t *
 ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip6_main_t * im6 = &ip6_main;
   ip6_route_t * routes, * r;
   ip6_fib_t * fib;
@@ -1723,7 +1727,7 @@ ip6_show_fib (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * c
 				nhs[j].weight, adj_index + i,
 				format_white_space, indent,
 				format_ip_adjacency,
-				vm, lm, adj_index + i);
+				vnm, lm, adj_index + i);
 
 		  vlib_cli_output (vm, "%v", msg);
 		  vec_free (msg);

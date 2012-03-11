@@ -26,7 +26,7 @@
 #ifndef included_osi_h
 #define included_osi_h
 
-#include <vnet/vnet/rewrite.h>
+#include <vnet/vnet.h>
 #include <vnet/pg/pg.h>
 
 #define foreach_osi_protocol			\

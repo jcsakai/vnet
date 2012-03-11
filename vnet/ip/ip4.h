@@ -29,7 +29,6 @@
 #include <vnet/ip/ip4_mtrie.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/lookup.h>
-#include <vnet/vnet/buffer.h>	/* for VNET_BUFFER_LOCALLY_GENERATED */
 
 typedef struct ip4_fib_t {
   /* Hash table for each prefix length mapping. */
@@ -298,7 +297,7 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 				  u32 table_index_or_table_id,
 				  u32 flags);
 
-void ip4_adjacency_set_interface_route (vlib_main_t * vm,
+void ip4_adjacency_set_interface_route (vnet_main_t * vm,
 					ip_adjacency_t * adj,
 					u32 sw_if_index,
 					u32 if_address_index);

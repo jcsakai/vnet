@@ -23,19 +23,18 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vlib/vlib.h>
-#include <vnet/vnet/l3_types.h>
+#include <vnet/vnet.h>
 #include <vnet/pg/pg.h>
 #include <vnet/srp/srp.h>
 
-static uword srp_set_rewrite (vlib_main_t * vm,
+static uword srp_set_rewrite (vnet_main_t * vm,
 			      u32 sw_if_index,
 			      u32 l3_type,
 			      void * dst_address,
 			      void * rewrite,
 			      uword max_rewrite_bytes)
 {
-  vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
+  vnet_hw_interface_t * hw = vnet_get_sup_hw_interface (vm, sw_if_index);
   srp_main_t * sm = &srp_main;
   srp_and_ethernet_header_t * h = rewrite;
   u16 type;
@@ -138,10 +137,11 @@ static MC_SERIALIZE_MSG (srp_register_interface_msg) = {
 
 static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redistribute)
 {
+  vnet_main_t * vnm = &vnet_main;
   srp_main_t * sm = &srp_main;
   vlib_main_t * vm = sm->vlib_main;
   srp_interface_t * si;
-  vlib_hw_interface_t * hws[SRP_N_RING];
+  vnet_hw_interface_t * hws[SRP_N_RING];
   uword s, * p;
 
   if (vm->mc_main && redistribute)
@@ -168,7 +168,7 @@ static void srp_register_interface_helper (u32 * hw_if_indices_by_side, u32 redi
     }
   for (s = 0; s < SRP_N_SIDE; s++)
     {
-      hws[s] = vlib_get_hw_interface (sm->vlib_main, hw_if_indices_by_side[s]);
+      hws[s] = vnet_get_hw_interface (vnm, hw_if_indices_by_side[s]);
       si->rings[s].ring = s;
       si->rings[s].hw_if_index = hw_if_indices_by_side[s];
       si->rings[s].sw_if_index = hws[s]->sw_if_index;
@@ -191,20 +191,20 @@ void srp_register_interface (u32 * hw_if_indices_by_side)
 
 void srp_interface_set_hw_wrap_function (u32 hw_if_index, srp_hw_wrap_function_t * f)
 {
-  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  srp_interface_t * si = srp_get_interface_from_vnet_hw_interface (hw_if_index);
   si->hw_wrap_function = f;
 }
 
 void srp_interface_set_hw_enable_function (u32 hw_if_index, srp_hw_enable_function_t * f)
 {
-  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  srp_interface_t * si = srp_get_interface_from_vnet_hw_interface (hw_if_index);
   si->hw_enable_function = f;
 }
 
 void srp_interface_enable_ips (u32 hw_if_index)
 {
   srp_main_t * sm = &srp_main;
-  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  srp_interface_t * si = srp_get_interface_from_vnet_hw_interface (hw_if_index);
 
   si->ips_process_enable = 1;
 
@@ -212,30 +212,30 @@ void srp_interface_enable_ips (u32 hw_if_index)
 }
 
 static uword
-srp_is_valid_class_for_interface (vlib_main_t * vm, u32 hw_if_index, u32 hw_class_index)
+srp_is_valid_class_for_interface (vnet_main_t * vm, u32 hw_if_index, u32 hw_class_index)
 {
-  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  srp_interface_t * si = srp_get_interface_from_vnet_hw_interface (hw_if_index);
 
   if (! si)
     return 0;
 
   /* Both sides must be admin down. */
-  if (vlib_sw_interface_is_admin_up (vm, si->rings[SRP_RING_OUTER].sw_if_index))
+  if (vnet_sw_interface_is_admin_up (vm, si->rings[SRP_RING_OUTER].sw_if_index))
     return 0;
-  if (vlib_sw_interface_is_admin_up (vm, si->rings[SRP_RING_INNER].sw_if_index))
+  if (vnet_sw_interface_is_admin_up (vm, si->rings[SRP_RING_INNER].sw_if_index))
     return 0;
 					 
   return 1;
 }
 
 static void
-srp_interface_hw_class_change (vlib_main_t * vm, u32 hw_if_index,
+srp_interface_hw_class_change (vnet_main_t * vm, u32 hw_if_index,
 			       u32 old_hw_class_index, u32 new_hw_class_index)
 {
   srp_main_t * sm = &srp_main;
-  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
-  vlib_hw_interface_t * hi;
-  vlib_device_class_t * dc;
+  srp_interface_t * si = srp_get_interface_from_vnet_hw_interface (hw_if_index);
+  vnet_hw_interface_t * hi;
+  vnet_device_class_t * dc;
   u32 r, to_srp;
 
   if (!si) {
@@ -251,13 +251,13 @@ srp_interface_hw_class_change (vlib_main_t * vm, u32 hw_if_index,
     {
       srp_interface_ring_t * ir = &si->rings[r];
 
-      hi = vlib_get_hw_interface (vm, ir->hw_if_index);
-      dc = vlib_get_device_class (vm, hi->dev_class_index);
+      hi = vnet_get_hw_interface (vm, ir->hw_if_index);
+      dc = vnet_get_device_class (vm, hi->dev_class_index);
 
       /* hw_if_index itself will be handled by caller. */
       if (ir->hw_if_index != hw_if_index)
 	{
-	  vlib_hw_interface_init_for_class (vm, ir->hw_if_index,
+	  vnet_hw_interface_init_for_class (vm, ir->hw_if_index,
 					    new_hw_class_index,
 					    to_srp ? si - sm->interface_pool : ~0);
 
@@ -272,7 +272,7 @@ srp_interface_hw_class_change (vlib_main_t * vm, u32 hw_if_index,
     si->hw_enable_function (si, /* enable */ to_srp);
 }
 
-VLIB_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
+VNET_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
   .name = "SRP",
   .format_address = format_ethernet_address,
   .format_header = format_srp_header_with_length,
@@ -316,7 +316,7 @@ static MC_SERIALIZE_MSG (srp_interface_config_msg) = {
 
 void srp_interface_get_interface_config (u32 hw_if_index, srp_interface_config_t * c)
 {
-  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  srp_interface_t * si = srp_get_interface_from_vnet_hw_interface (hw_if_index);
   ASSERT (si != 0);
   c[0] = si->config;
 }
@@ -325,7 +325,7 @@ void srp_interface_set_interface_config (u32 hw_if_index, srp_interface_config_t
 {
   srp_main_t * sm = &srp_main;
   vlib_main_t * vm = sm->vlib_main;
-  srp_interface_t * si = srp_get_interface_from_vlib_hw_interface (hw_if_index);
+  srp_interface_t * si = srp_get_interface_from_vnet_hw_interface (hw_if_index);
   ASSERT (si != 0);
   if (memcmp (&si->config, &c[0], sizeof (c[0])))
     {
@@ -337,7 +337,7 @@ void srp_interface_set_interface_config (u32 hw_if_index, srp_interface_config_t
 
 #if DEBUG > 0
 
-#define VNET_SIMULATED_SRP_TX_NEXT_SRP_INPUT VLIB_INTERFACE_TX_N_NEXT
+#define VNET_SIMULATED_SRP_TX_NEXT_SRP_INPUT VNET_INTERFACE_TX_N_NEXT
 
 /* Echo packets back to srp input. */
 static uword
@@ -381,7 +381,7 @@ static u8 * format_simulated_srp_name (u8 * s, va_list * args)
   return format (s, "fake-srp%d", dev_instance);
 }
 
-static VLIB_DEVICE_CLASS (srp_simulated_device_class) = {
+static VNET_DEVICE_CLASS (srp_simulated_device_class) = {
   .name = "Simulated srp",
   .format_device_name = format_simulated_srp_name,
   .tx_function = simulated_srp_interface_tx,
@@ -392,9 +392,10 @@ create_simulated_srp_interfaces (vlib_main_t * vm,
 				 unformat_input_t * input,
 				 vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   u8 address[6];
   u32 hw_if_index;
-  vlib_hw_interface_t * hi;
+  vnet_hw_interface_t * hi;
   static u32 instance;
 
   if (! unformat_user (input, unformat_ethernet_address, &address))
@@ -405,12 +406,12 @@ create_simulated_srp_interfaces (vlib_main_t * vm,
       address[5] = instance;
     }
 
-  hw_if_index = vlib_register_interface (vm,
+  hw_if_index = vnet_register_interface (vnm,
 					 srp_simulated_device_class.index,
 					 instance++,
 					 srp_hw_interface_class.index, 0);
 
-  hi = vlib_get_hw_interface (vm, hw_if_index);
+  hi = vnet_get_hw_interface (vnm, hw_if_index);
 
   srp_setup_node (vm, hi->output_node_index);
 

@@ -23,14 +23,16 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vlib/vlib.h>
+#include <vnet/vnet.h>
 #include <vnet/pg/pg.h>
 
 /* Mark stream active or inactive. */
 void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled)
 {
-  want_enabled = want_enabled != 0;
+  vnet_main_t * vnm = &vnet_main;
   pg_interface_t * pi = vec_elt_at_index (pg->interfaces, s->pg_if_index);
+
+  want_enabled = want_enabled != 0;
 
   if (pg_stream_is_enabled (s) == want_enabled)
     /* No change necessary. */
@@ -47,14 +49,14 @@ void pg_stream_enable_disable (pg_main_t * pg, pg_stream_t * s, int want_enabled
   pg->enabled_streams
     = clib_bitmap_set (pg->enabled_streams, s - pg->streams, want_enabled);
 
-  vlib_hw_interface_set_flags (pg->vlib_main, pi->hw_if_index,
+  vnet_hw_interface_set_flags (vnm, pi->hw_if_index,
 			       (want_enabled
-				? VLIB_HW_INTERFACE_FLAG_LINK_UP
+				? VNET_HW_INTERFACE_FLAG_LINK_UP
 				: 0));
 
-  vlib_sw_interface_set_flags (pg->vlib_main, pi->sw_if_index,
+  vnet_sw_interface_set_flags (vnm, pi->sw_if_index,
 			       (want_enabled
-				? VLIB_SW_INTERFACE_FLAG_ADMIN_UP
+				? VNET_SW_INTERFACE_FLAG_ADMIN_UP
 				: 0));
 			       
   vlib_node_set_state (pg->vlib_main,
@@ -79,13 +81,13 @@ static u8 * format_pg_interface_name (u8 * s, va_list * args)
   return s;
 }
 
-static VLIB_DEVICE_CLASS (pg_dev_class) = {
+static VNET_DEVICE_CLASS (pg_dev_class) = {
   .name = "pg",
   .tx_function = pg_output,
   .format_device_name = format_pg_interface_name,
 };
 
-static uword pg_set_rewrite (vlib_main_t * vm,
+static uword pg_set_rewrite (vnet_main_t * vm,
 			     u32 sw_if_index,
 			     u32 l3_type,
 			     void * dst_address,
@@ -101,16 +103,16 @@ static uword pg_set_rewrite (vlib_main_t * vm,
   return sizeof (h[0]);
 }
 
-static VLIB_HW_INTERFACE_CLASS (pg_interface_class) = {
+static VNET_HW_INTERFACE_CLASS (pg_interface_class) = {
   .name = "Packet generator",
   .set_rewrite = pg_set_rewrite,
 };
 
 u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
 {
-  vlib_main_t * vm = pg->vlib_main;
+  vnet_main_t * vm = &vnet_main;
   pg_interface_t * pi;
-  vlib_hw_interface_t * hi;
+  vnet_hw_interface_t * hi;
   u32 i, l;
 
   if ((l = vec_len (pg->free_interfaces)) > 0)
@@ -126,10 +128,10 @@ u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)
       vec_add2 (pg->interfaces, pi, 1);
 
       pi->stream_index = stream_index;
-      pi->hw_if_index = vlib_register_interface (vm,
+      pi->hw_if_index = vnet_register_interface (vm,
 						 pg_dev_class.index, i,
 						 pg_interface_class.index, stream_index);
-      hi = vlib_get_hw_interface (vm, pi->hw_if_index);
+      hi = vnet_get_hw_interface (vm, pi->hw_if_index);
       pi->sw_if_index = hi->sw_if_index;
     }
 

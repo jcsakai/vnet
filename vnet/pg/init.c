@@ -37,7 +37,7 @@ static clib_error_t * pg_init (vlib_main_t * vm)
 
   pg->vlib_main = vm;
 
-  if ((error = vlib_call_init_function (vm, vlib_interface_init)))
+  if ((error = vlib_call_init_function (vm, vnet_main_init)))
     goto done;
 
   if ((error = vlib_call_init_function (vm, pg_cli_init)))

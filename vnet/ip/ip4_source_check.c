@@ -95,7 +95,6 @@ ip4_source_check_inline (vlib_main_t * vm,
 	  ip4_header_t * ip0, * ip1;
 	  ip4_fib_mtrie_t * mtrie0, * mtrie1;
 	  ip4_fib_mtrie_leaf_t leaf0, leaf1;
-	  ip_buffer_opaque_t * i0, * i1;
 	  ip4_source_check_config_t * c0, * c1;
 	  ip_adjacency_t * adj0, * adj1;
 	  u32 pi0, next0, pass0, adj_index0;
@@ -128,15 +127,12 @@ ip4_source_check_inline (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
 
-	  i0 = vlib_get_buffer_opaque (p0);
-	  i1 = vlib_get_buffer_opaque (p1);
-
 	  c0 = vnet_get_config_data (&cm->config_main,
-				     &i0->current_config_index,
+				     &vnet_buffer (p0)->ip.current_config_index,
 				     &next0,
 				     sizeof (c0[0]));
 	  c1 = vnet_get_config_data (&cm->config_main,
-				     &i1->current_config_index,
+				     &vnet_buffer (p1)->ip.current_config_index,
 				     &next1,
 				     sizeof (c1[0]));
 
@@ -176,10 +172,10 @@ ip4_source_check_inline (vlib_main_t * vm,
 
 	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
 		    && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
-			|| p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
+			|| vnet_buffer (p0)->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
 	  pass1 |= (adj1->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
 		    && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
-			|| p1->sw_if_index[VLIB_RX] == adj1->rewrite_header.sw_if_index));
+			|| vnet_buffer (p1)->sw_if_index[VLIB_RX] == adj1->rewrite_header.sw_if_index));
 
 	  next0 = (pass0 ? next0 : IP4_SOURCE_CHECK_NEXT_DROP);
 	  next1 = (pass1 ? next1 : IP4_SOURCE_CHECK_NEXT_DROP);
@@ -198,7 +194,6 @@ ip4_source_check_inline (vlib_main_t * vm,
 	  ip4_header_t * ip0;
 	  ip4_fib_mtrie_t * mtrie0;
 	  ip4_fib_mtrie_leaf_t leaf0;
-	  ip_buffer_opaque_t * i0;
 	  ip4_source_check_config_t * c0;
 	  ip_adjacency_t * adj0;
 	  u32 pi0, next0, pass0, adj_index0;
@@ -212,10 +207,9 @@ ip4_source_check_inline (vlib_main_t * vm,
 
 	  p0 = vlib_get_buffer (vm, pi0);
 	  ip0 = vlib_buffer_get_current (p0);
-	  i0 = vlib_get_buffer_opaque (p0);
 
 	  c0 = vnet_get_config_data (&cm->config_main,
-				     &i0->current_config_index,
+				     &vnet_buffer (p0)->ip.current_config_index,
 				     &next0,
 				     sizeof (c0[0]));
 
@@ -243,7 +237,7 @@ ip4_source_check_inline (vlib_main_t * vm,
 
 	  pass0 |= (adj0->lookup_next_index == IP_LOOKUP_NEXT_REWRITE
 		    && (source_check_type == IP4_SOURCE_CHECK_REACHABLE_VIA_ANY
-			|| p0->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
+			|| vnet_buffer (p0)->sw_if_index[VLIB_RX] == adj0->rewrite_header.sw_if_index));
 
 	  next0 = (pass0 ? next0 : IP4_SOURCE_CHECK_NEXT_DROP);
 	  p0->error = error_node->errors[IP4_ERROR_UNICAST_SOURCE_CHECK_FAILS];
@@ -308,6 +302,7 @@ set_ip_source_check (vlib_main_t * vm,
 		     unformat_input_t * input,
 		     vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip4_main_t * im = &ip4_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   ip_config_main_t * rx_cm = &lm->rx_config_mains[VNET_UNICAST];
@@ -318,7 +313,7 @@ set_ip_source_check (vlib_main_t * vm,
 
   sw_if_index = ~0;
 
-  if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
+  if (! unformat_user (input, unformat_vnet_sw_interface, vnm, &sw_if_index))
     {
       error = clib_error_return (0, "unknown interface `%U'",
 				 format_unformat_error, input);

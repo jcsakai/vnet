@@ -55,30 +55,31 @@ static u8 * format_ip6_neighbor_ip6_entry (u8 * s, va_list * va)
 {
   vlib_main_t * vm = va_arg (*va, vlib_main_t *);
   ip6_neighbor_t * n = va_arg (*va, ip6_neighbor_t *);
-  vlib_sw_interface_t * si;
+  vnet_main_t * vnm = &vnet_main;
+  vnet_sw_interface_t * si;
 
   if (! n)
     return format (s, "%=12s%=20s%=20s%=40s", "Time", "Address", "Link layer", "Interface");
 
-  si = vlib_get_sw_interface (vm, n->key.sw_if_index);
+  si = vnet_get_sw_interface (vnm, n->key.sw_if_index);
   s = format (s, "%=12U%=20U%=20U%=40U",
 	      format_vlib_cpu_time, vm, n->cpu_time_last_updated,
 	      format_ip6_address, &n->key.ip6_address,
 	      format_ethernet_address, n->link_layer_address,
-	      format_vlib_sw_interface_name, vm, si);
+	      format_vnet_sw_interface_name, vnm, si);
 
   return s;
 }
 
 static clib_error_t *
-ip6_neighbor_sw_interface_up_down (vlib_main_t * vm,
+ip6_neighbor_sw_interface_up_down (vnet_main_t * vm,
 				   u32 sw_if_index,
 				   u32 flags)
 {
   ip6_neighbor_main_t * nm = &ip6_neighbor_main;
   ip6_neighbor_t * n;
 
-  if (! (flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP))
+  if (! (flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP))
     {
       u32 i, * to_delete = 0;
 
@@ -100,6 +101,8 @@ ip6_neighbor_sw_interface_up_down (vlib_main_t * vm,
   return 0;
 }
 
+static VNET_SW_INTERFACE_ADMIN_UP_DOWN_FUNCTION (ip6_neighbor_sw_interface_up_down);
+
 static void
 set_ethernet_neighbor (vlib_main_t * vm,
 		       ip6_neighbor_main_t * nm,
@@ -108,6 +111,7 @@ set_ethernet_neighbor (vlib_main_t * vm,
 		       u8 * link_layer_address,
 		       uword n_bytes_link_layer_address)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip6_neighbor_key_t k;
   ip6_neighbor_t * n;
   ip6_main_t * im = &ip6_main;
@@ -127,7 +131,7 @@ set_ethernet_neighbor (vlib_main_t * vm,
       adj.lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
 
       vnet_rewrite_for_sw_interface
-	(vm,
+	(vnm,
 	 VNET_L3_PACKET_TYPE_IP6,
 	 sw_if_index,
 	 ip6_rewrite_node.index,
@@ -156,11 +160,11 @@ set_ethernet_neighbor (vlib_main_t * vm,
 }
 
 static int
-ip6_neighbor_sort (vlib_main_t * vm,
+ip6_neighbor_sort (vnet_main_t * vm,
 		   ip6_neighbor_t * n1, ip6_neighbor_t * n2)
 {
   int cmp;
-  cmp = vlib_sw_interface_compare (vm, n1->key.sw_if_index, n2->key.sw_if_index);
+  cmp = vnet_sw_interface_compare (vm, n1->key.sw_if_index, n2->key.sw_if_index);
   if (! cmp)
     cmp = ip6_address_compare (&n1->key.ip6_address, &n2->key.ip6_address);
   return cmp;
@@ -171,6 +175,7 @@ show_ip6_neighbors (vlib_main_t * vm,
 		    unformat_input_t * input,
 		    vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip6_neighbor_main_t * nm = &ip6_neighbor_main;
   ip6_neighbor_t * n, * ns;
   clib_error_t * error = 0;
@@ -178,11 +183,11 @@ show_ip6_neighbors (vlib_main_t * vm,
 
   /* Filter entries by interface if given. */
   sw_if_index = ~0;
-  unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index);
+  unformat_user (input, unformat_vnet_sw_interface, vnm, &sw_if_index);
 
   ns = 0;
   pool_foreach (n, nm->neighbor_pool, ({ vec_add1 (ns, n[0]); }));
-  vec_sort (ns, n1, n2, ip6_neighbor_sort (vm, n1, n2));
+  vec_sort (ns, n1, n2, ip6_neighbor_sort (vnm, n1, n2));
   vlib_cli_output (vm, "%U", format_ip6_neighbor_ip6_entry, vm, 0);
   vec_foreach (n, ns) {
     if (sw_if_index != ~0 && n->key.sw_if_index != sw_if_index)
@@ -212,6 +217,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 					      vlib_frame_t * frame,
 					      uword is_solicitation)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip6_main_t * im = &ip6_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   ip6_neighbor_main_t * nm = &ip6_neighbor_main;
@@ -262,7 +268,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	  error0 = ICMP6_ERROR_NONE;
 
-	  sw_if_index0 = p0->sw_if_index[VLIB_RX];
+	  sw_if_index0 = vnet_buffer (p0)->sw_if_index[VLIB_RX];
 
 	  /* Check that source address is unspecified, link-local or else on-link. */
 	  if (! ip6_address_is_unspecified (&ip0->src_address)
@@ -311,15 +317,15 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	  if (is_solicitation && error0 == ICMP6_ERROR_NONE)
 	    {
-	      vlib_sw_interface_t * sw_if0;
+	      vnet_sw_interface_t * sw_if0;
 	      ethernet_interface_t * eth_if0;
 
 	      ip0->dst_address = ip0->src_address;
 	      ip0->src_address = h0->target_address;
 	      h0->icmp.type = ICMP6_neighbor_advertisement;
 
-	      sw_if0 = vlib_get_sup_sw_interface (vm, sw_if_index0);
-	      ASSERT (sw_if0->type == VLIB_SW_INTERFACE_TYPE_HARDWARE);
+	      sw_if0 = vnet_get_sup_sw_interface (vnm, sw_if_index0);
+	      ASSERT (sw_if0->type == VNET_SW_INTERFACE_TYPE_HARDWARE);
 	      eth_if0 = ethernet_get_interface (&ethernet_main, sw_if0->hw_if_index);
 	      if (eth_if0 && o0)
 		{
@@ -331,7 +337,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 		(ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_SOLICITED
 		 | ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_OVERRIDE);
 
-	      p0->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
+	      vnet_buffer (p0)->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 
 	      h0->icmp.checksum = 0;
 	      h0->icmp.checksum = ip6_tcp_udp_icmp_compute_checksum (vm, p0, ip0);
@@ -374,8 +380,6 @@ static VLIB_REGISTER_NODE (ip6_icmp_neighbor_solicitation_node) = {
   .vector_size = sizeof (u32),
 
   .format_trace = format_icmp6_input_trace,
-
-  .sw_interface_admin_up_down_function = ip6_neighbor_sw_interface_up_down,
 
   .n_next_nodes = ICMP6_NEIGHBOR_SOLICITATION_N_NEXT,
   .next_nodes = {

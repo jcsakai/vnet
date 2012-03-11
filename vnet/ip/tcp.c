@@ -582,18 +582,6 @@ typedef enum {
   TCP_LOOKUP_N_NEXT,
 } tcp_lookup_next_t;
 
-typedef struct {
-  /* Adjacency from src address lookup.  We'll use this to avoid
-     having to perform lookup again for replies. */
-  u32 src_adj_index;
-
-  u32 listener_index;
-
-  u32 established_connection_index;
-
-  u32 mini_connection_index;
-} tcp_lookup_buffer_opaque_t;
-
 #define foreach_tcp_error						\
   _ (NONE, "no error")							\
   _ (LOOKUP_DROPS, "lookup drops")					\
@@ -665,10 +653,6 @@ ip46_tcp_lookup (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  union {
-	    ip_buffer_opaque_t ip;
-	    tcp_lookup_buffer_opaque_t tcp_udp;
-	  } * pi0;
 	  ip6_header_t * ip60;
 	  ip4_header_t * ip40;
 	  tcp_header_t * tcp0;
@@ -686,7 +670,6 @@ ip46_tcp_lookup (vlib_main_t * vm,
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, bi0);
-	  pi0 = vlib_get_buffer_opaque (p0);
 
 #ifdef TCP_HAVE_VEC128
 	  {
@@ -871,10 +854,9 @@ ip46_tcp_lookup (vlib_main_t * vm,
 	    state0 = is_min_match0 ? min0->state : TCP_CONNECTION_STATE_unused;
 	    state0 = is_est_match0 ? TCP_CONNECTION_STATE_established : state0;
 
-	    pi0->tcp_udp.src_adj_index = pi0->ip.adj_index[VLIB_RX];
-	    pi0->tcp_udp.established_connection_index = iest0;
-	    pi0->tcp_udp.mini_connection_index = imin0;
-	    pi0->tcp_udp.listener_index = li0 = tm->listener_index_by_dst_port[tcp0->ports.dst];
+	    vnet_buffer (p0)->ip.tcp.established_connection_index = iest0;
+	    vnet_buffer (p0)->ip.tcp.mini_connection_index = imin0;
+	    vnet_buffer (p0)->ip.tcp.listener_index = li0 = tm->listener_index_by_dst_port[tcp0->ports.dst];
 
 	    flags0 = tcp0->flags & (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
 
@@ -1359,6 +1341,16 @@ tcp_options_decode_init (tcp_main_t * tm)
   m->time_stamps.his_net_byte_order = 0;
 }
 
+/* Initialize target buffer as "related" to given buffer. */
+always_inline void
+vlib_buffer_copy_shared_fields (vlib_main_t * vm, vlib_buffer_t * b, u32 bi_target)
+{
+  vlib_buffer_t * b_target = vlib_get_buffer (vm, bi_target);
+  vnet_buffer (b_target)->sw_if_index[VLIB_RX] = vnet_buffer (b)->sw_if_index[VLIB_RX];
+  b_target->trace_index = b->trace_index;
+  b_target->flags |= b->flags & VLIB_BUFFER_IS_TRACED;
+}
+
 typedef enum {
   TCP_LISTEN_NEXT_DROP,
   TCP_LISTEN_NEXT_REPLY,
@@ -1403,7 +1395,6 @@ ip46_tcp_listen (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_reply > 0 && n_left_to_drop > 0)
 	{
 	  vlib_buffer_t * p0;
-	  tcp_lookup_buffer_opaque_t * pi0;
 	  ip6_header_t * ip60;
 	  ip4_header_t * ip40;
 	  tcp_header_t * tcp0;
@@ -1421,11 +1412,10 @@ ip46_tcp_listen (vlib_main_t * vm,
 	  n_left_to_drop -= 1;
       
 	  p0 = vlib_get_buffer (vm, bi0);
-	  pi0 = vlib_get_buffer_opaque (p0);
 
 	  p0->error = error_node->errors[TCP_ERROR_LISTEN_RESPONSES];
 
-	  imin0 = pi0->mini_connection_index;
+	  imin0 = vnet_buffer (p0)->ip.tcp.mini_connection_index;
 	  i0 = imin0 % 4;
 
 	  if (is_ip6)
@@ -1533,7 +1523,7 @@ ip46_tcp_listen (vlib_main_t * vm,
 	  tcp_sum0 = ip_csum_add_even (tcp_sum0, his_seq_net0);
 
 	  {
-	    ip_adjacency_t * adj0 = ip_get_adjacency (&ip4_main.lookup_main, pi0->src_adj_index);
+	    ip_adjacency_t * adj0 = ip_get_adjacency (&ip4_main.lookup_main, vnet_buffer (p0)->ip.adj_index[VLIB_RX]);
 	    u16 my_mss =
 	      (adj0->rewrite_header.max_l3_packet_bytes
 	       - (is_ip6 ? sizeof (ip60[0]) : sizeof (ip40[0]))
@@ -1775,7 +1765,6 @@ ip46_tcp_establish (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  tcp_lookup_buffer_opaque_t * pi0;
 	  ip6_header_t * ip60;
 	  ip4_header_t * ip40;
 	  tcp_header_t * tcp0;
@@ -1793,10 +1782,9 @@ ip46_tcp_establish (vlib_main_t * vm,
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, bi0);
-	  pi0 = vlib_get_buffer_opaque (p0);
 
-	  imin0 = pi0->mini_connection_index;
-	  iest0 = pi0->established_connection_index;
+	  imin0 = vnet_buffer (p0)->ip.tcp.mini_connection_index;
+	  iest0 = vnet_buffer (p0)->ip.tcp.established_connection_index;
 
 	  i0 = imin0 % 4;
 	  e0 = iest0 % 4;
@@ -1880,7 +1868,7 @@ ip46_tcp_establish (vlib_main_t * vm,
 	  est0->my_window_scale = 7;
 	  est0->my_window = 256;
 
-	  l0 = pool_elt_at_index (tm->listener_pool, pi0->listener_index);
+	  l0 = pool_elt_at_index (tm->listener_pool, vnet_buffer (p0)->ip.tcp.listener_index);
 	  vec_add1 (l0->event_connections[is_ip6], tcp_connection_handle_set (iest0, is_ip6));
 
 	  next0 = TCP_ESTABLISH_NEXT_DROP;
@@ -2313,7 +2301,6 @@ ip46_tcp_established (vlib_main_t * vm,
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * p0;
-	  tcp_lookup_buffer_opaque_t * pi0;
 	  ip6_header_t * ip60;
 	  ip4_header_t * ip40;
 	  tcp_header_t * tcp0;
@@ -2330,7 +2317,6 @@ ip46_tcp_established (vlib_main_t * vm,
 	  n_left_to_next -= 1;
       
 	  p0 = vlib_get_buffer (vm, bi0);
-	  pi0 = vlib_get_buffer_opaque (p0);
 
 	  if (is_ip6)
 	    {
@@ -2350,7 +2336,7 @@ ip46_tcp_established (vlib_main_t * vm,
 	      n_data_bytes0 = clib_net_to_host_u16 (ip40->length) - n_advance_bytes0;
 	    }
 
-	  iest0 = pi0->established_connection_index;
+	  iest0 = vnet_buffer (p0)->ip.tcp.established_connection_index;
 	  est0 = vec_elt_at_index (tm46->established_connections, iest0);
 
 	  error0 = TCP_ERROR_NO_DATA;
@@ -2404,13 +2390,13 @@ ip46_tcp_established (vlib_main_t * vm,
 	  
 	  send_ack0 = ((est0->flags & TCP_CONNECTION_FLAG_ack_pending) == 0
 		       && (n_data_bytes0 > 0 || is_fin0));
-	  vec_add1 (tm46->connections_pending_acks, pi0->established_connection_index);
+	  vec_add1 (tm46->connections_pending_acks, vnet_buffer (p0)->ip.tcp.established_connection_index);
 	  _vec_len (tm46->connections_pending_acks) -= ! send_ack0;
 	  est0->flags |= send_ack0 << LOG2_TCP_CONNECTION_FLAG_ack_pending;
 
 	  est0->flags |= is_fin0 << LOG2_TCP_CONNECTION_FLAG_fin_received;
 
-	  l0 = pool_elt_at_index (tm->listener_pool, pi0->listener_index);
+	  l0 = pool_elt_at_index (tm->listener_pool, vnet_buffer (p0)->ip.tcp.listener_index);
 
 	  {
 	    u32 ch0 = tcp_connection_handle_set (iest0, is_ip6);

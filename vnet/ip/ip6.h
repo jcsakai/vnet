@@ -212,12 +212,13 @@ ip6_src_address_for_packet (ip6_main_t * im, vlib_buffer_t * p, ip6_address_t * 
 }
 
 always_inline u32
-ip6_src_lookup_for_packet (ip6_main_t * im, vlib_buffer_t * p, ip6_header_t * i)
+ip6_src_lookup_for_packet (ip6_main_t * im, vlib_buffer_t * b, ip6_header_t * i)
 {
-  ip_buffer_opaque_t * o = vlib_get_buffer_opaque (p);
-  if (o->adj_index[VLIB_RX] == ~0)
-    o->adj_index[VLIB_RX] = ip6_fib_lookup (im, p->sw_if_index[VLIB_RX], &i->src_address);
-  return o->adj_index[VLIB_RX];
+  if (vnet_buffer (b)->ip.adj_index[VLIB_RX] == ~0)
+    vnet_buffer (b)->ip.adj_index[VLIB_RX]
+      = ip6_fib_lookup (im, vnet_buffer (b)->sw_if_index[VLIB_RX],
+			&i->src_address);
+  return vnet_buffer (b)->ip.adj_index[VLIB_RX];
 }
 
 /* Find interface address which matches destination. */
@@ -319,7 +320,7 @@ void ip6_maybe_remap_adjacencies (ip6_main_t * im,
 				  u32 table_index_or_table_id,
 				  u32 flags);
 
-void ip6_adjacency_set_interface_route (vlib_main_t * vm,
+void ip6_adjacency_set_interface_route (vnet_main_t * vm,
 					ip_adjacency_t * adj,
 					u32 sw_if_index,
 					u32 if_address_index);

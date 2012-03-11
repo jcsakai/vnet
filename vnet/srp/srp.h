@@ -26,11 +26,12 @@
 #ifndef included_srp_h
 #define included_srp_h
 
+#include <vnet/vnet.h>
 #include <vnet/srp/packet.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/pg/pg.h>
 
-extern vlib_hw_interface_class_t srp_hw_interface_class;
+extern vnet_hw_interface_class_t srp_hw_interface_class;
 
 /* See RFC 2892. */
 #define foreach_srp_ips_state			\
@@ -157,7 +158,7 @@ void srp_interface_set_interface_config (u32 hw_if_index, srp_interface_config_t
 srp_main_t srp_main;
 
 always_inline srp_interface_t *
-srp_get_interface_from_vlib_hw_interface (u32 hw_if_index)
+srp_get_interface_from_vnet_hw_interface (u32 hw_if_index)
 {
   srp_main_t * sm = &srp_main;
   uword * p = hash_get (sm->interface_index_by_hw_if_index, hw_if_index);

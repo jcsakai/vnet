@@ -10,16 +10,22 @@ nobase_include_HEADERS =
 # Generic stuff
 ########################################
 libvnet_la_SOURCES +=					\
-  vnet/vnet/config.c					\
-  vnet/vnet/interface.c					\
-  vnet/vnet/rewrite.c				
+  vnet/config.c						\
+  vnet/interface.c					\
+  vnet/interface_cli.c					\
+  vnet/interface_format.c				\
+  vnet/interface_output.c				\
+  vnet/misc.c						\
+  vnet/rewrite.c				
 
 nobase_include_HEADERS +=			\
-  vnet/vnet/buffer.h				\
-  vnet/vnet/config.h				\
-  vnet/vnet/l3_types.h				\
-  vnet/vnet/rewrite.h				\
-  vnet/vnet/vnet.h
+  vnet/buffer.h					\
+  vnet/config.h					\
+  vnet/interface.h				\
+  vnet/interface_funcs.h			\
+  vnet/l3_types.h				\
+  vnet/rewrite.h				\
+  vnet/vnet.h
 
 ########################################
 # Layer 2 protocols go here

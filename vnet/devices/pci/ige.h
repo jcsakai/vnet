@@ -1,7 +1,7 @@
 #ifndef included_ige_h
 #define included_ige_h
 
-#include <vlib/vlib.h>
+#include <vnet/vnet.h>
 #include <vlib/pci/pci.h>
 #include <vnet/devices/optics/sfp.h>
 #include <vnet/devices/pci/ixge.h> /* for shared definitions between ige/ixge */
@@ -653,6 +653,6 @@ typedef struct ige_main_t {
 } ige_main_t;
 
 ige_main_t ige_main;
-vlib_device_class_t ige_device_class;
+vnet_device_class_t ige_device_class;
 
 #endif /* included_ige_h */

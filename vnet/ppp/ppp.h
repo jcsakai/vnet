@@ -26,11 +26,11 @@
 #ifndef included_ppp_h
 #define included_ppp_h
 
-#include <vnet/vnet/rewrite.h>
+#include <vnet/vnet.h>
 #include <vnet/ppp/packet.h>
 #include <vnet/pg/pg.h>
 
-extern vlib_hw_interface_class_t ppp_hw_interface_class;
+vnet_hw_interface_class_t ppp_hw_interface_class;
 
 typedef enum {
 #define ppp_error(n,s) PPP_ERROR_##n,

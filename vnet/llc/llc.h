@@ -26,7 +26,7 @@
 #ifndef included_llc_h
 #define included_llc_h
 
-#include <vnet/vnet/rewrite.h>
+#include <vnet/vnet.h>
 #include <vnet/pg/pg.h>
 
 /* Protocol (SSAP/DSAP) types. */

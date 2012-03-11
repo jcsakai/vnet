@@ -27,7 +27,7 @@
 #define included_vnet_rewrite_h
 
 #include <vlib/vlib.h>
-#include <vnet/vnet/l3_types.h>
+#include <vnet/l3_types.h>
 
 /* Consider using vector types for speed? */
 typedef uword vnet_rewrite_data_t;
@@ -193,7 +193,7 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
 			     (most_likely_size))
 
 #define VNET_REWRITE_FOR_SW_INTERFACE_ADDRESS_BROADCAST ((void *) 0)
-void vnet_rewrite_for_sw_interface (vlib_main_t * vm,
+void vnet_rewrite_for_sw_interface (struct vnet_main_t * vm,
 				    vnet_l3_packet_type_t packet_type,
 				    u32 sw_if_index,
 				    u32 node_index,

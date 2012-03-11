@@ -23,9 +23,8 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vlib/vlib.h>
+#include <vnet/vnet.h>
 #include <vnet/osi/osi.h>
-#include <vnet/vnet/l3_types.h>
 
 /* Global main structure. */
 osi_main_t osi_main;

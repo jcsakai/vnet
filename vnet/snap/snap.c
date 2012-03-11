@@ -23,8 +23,7 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vlib/vlib.h>
-#include <vnet/vnet/l3_types.h>
+#include <vnet/vnet.h>
 #include <vnet/snap/snap.h>
 #include <vnet/ethernet/ethernet.h>
 

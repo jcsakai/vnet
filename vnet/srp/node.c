@@ -93,6 +93,7 @@ srp_input (vlib_main_t * vm,
 	   vlib_node_runtime_t * node,
 	   vlib_frame_t * from_frame)
 {
+  vnet_main_t * vnm = &vnet_main;
   srp_main_t * sm = &srp_main;
   u32 n_left_from, next_index, * from, * to_next;
 
@@ -121,7 +122,7 @@ srp_input (vlib_main_t * vm,
 	  u8 next0, next1, error0, error1;
 	  srp_header_t * s0, * s1;
 	  srp_input_disposition_t * d0, * d1;
-	  vlib_hw_interface_t * hi0, * hi1;
+	  vnet_hw_interface_t * hi0, * hi1;
 	  srp_interface_t * si0, * si1;
 
 	  /* Prefetch next iteration. */
@@ -154,11 +155,11 @@ srp_input (vlib_main_t * vm,
 	  s1 = (void *) (b1->data + b1->current_data);
 
 	  /* Data packets are always assigned to side A (outer ring) interface. */
-	  sw_if_index0 = b0->sw_if_index[VLIB_RX];
-	  sw_if_index1 = b1->sw_if_index[VLIB_RX];
+	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+	  sw_if_index1 = vnet_buffer (b1)->sw_if_index[VLIB_RX];
 
-	  hi0 = vlib_get_sup_hw_interface (vm, sw_if_index0);
-	  hi1 = vlib_get_sup_hw_interface (vm, sw_if_index1);
+	  hi0 = vnet_get_sup_hw_interface (vnm, sw_if_index0);
+	  hi1 = vnet_get_sup_hw_interface (vnm, sw_if_index1);
 
 	  si0 = pool_elt_at_index (sm->interface_pool, hi0->hw_instance);
 	  si1 = pool_elt_at_index (sm->interface_pool, hi1->hw_instance);
@@ -170,8 +171,8 @@ srp_input (vlib_main_t * vm,
 			  ? si1->rings[SRP_RING_OUTER].sw_if_index
 			  : sw_if_index1);
 	    
-	  b0->sw_if_index[VLIB_RX] = sw_if_index0;
-	  b1->sw_if_index[VLIB_RX] = sw_if_index1;
+	  vnet_buffer (b0)->sw_if_index[VLIB_RX] = sw_if_index0;
+	  vnet_buffer (b1)->sw_if_index[VLIB_RX] = sw_if_index1;
 
 	  d0 = srp_input_disposition_by_mode + s0->mode;
 	  d1 = srp_input_disposition_by_mode + s1->mode;
@@ -201,7 +202,7 @@ srp_input (vlib_main_t * vm,
 	  srp_header_t * s0;
 	  srp_input_disposition_t * d0;
 	  srp_interface_t * si0;
-	  vlib_hw_interface_t * hi0;
+	  vnet_hw_interface_t * hi0;
 
 	  bi0 = from[0];
 	  to_next[0] = bi0;
@@ -215,9 +216,9 @@ srp_input (vlib_main_t * vm,
 	  s0 = (void *) (b0->data + b0->current_data);
 
 	  /* Data packets are always assigned to side A (outer ring) interface. */
-	  sw_if_index0 = b0->sw_if_index[VLIB_RX];
+	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
-	  hi0 = vlib_get_sup_hw_interface (vm, sw_if_index0);
+	  hi0 = vnet_get_sup_hw_interface (vnm, sw_if_index0);
 
 	  si0 = pool_elt_at_index (sm->interface_pool, hi0->hw_instance);
 
@@ -225,7 +226,7 @@ srp_input (vlib_main_t * vm,
 			  ? si0->rings[SRP_RING_OUTER].sw_if_index
 			  : sw_if_index0);
 	    
-	  b0->sw_if_index[VLIB_RX] = sw_if_index0;
+	  vnet_buffer (b0)->sw_if_index[VLIB_RX] = sw_if_index0;
 
 	  d0 = srp_input_disposition_by_mode + s0->mode;
 
@@ -278,7 +279,8 @@ static VLIB_REGISTER_NODE (srp_input_node) = {
 static uword
 srp_topology_packet (vlib_main_t * vm, u32 sw_if_index, u8 ** contents)
 {
-  vlib_hw_interface_t * hi = vlib_get_sup_hw_interface (vm, sw_if_index);
+  vnet_main_t * vnm = &vnet_main;
+  vnet_hw_interface_t * hi = vnet_get_sup_hw_interface (vnm, sw_if_index);
   srp_topology_header_t * t;
   srp_topology_mac_binding_t * mb;
   u32 nb, nmb;
@@ -319,7 +321,7 @@ srp_topology_packet (vlib_main_t * vm, u32 sw_if_index, u8 ** contents)
 			       /* buffer to append to */ 0,
 			       *contents, vec_len (*contents));
     b = vlib_get_buffer (vm, bi);
-    b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX] = sw_if_index;
+    vnet_buffer (b)->sw_if_index[VLIB_RX] = vnet_buffer (b)->sw_if_index[VLIB_TX] = sw_if_index;
     to_next[0] = bi;
     f->n_vectors = 1;
     vlib_put_frame_to_node (vm, hi->output_node_index, f);
@@ -408,7 +410,7 @@ srp_control_input (vlib_main_t * vm,
 		{
 		  vec_validate (contents, l2_len0 - 1);
 		  vlib_buffer_contents (vm, bi0, contents);
-		  error0 = f (vm, b0->sw_if_index[VLIB_RX], &contents);
+		  error0 = f (vm, vnet_buffer (b0)->sw_if_index[VLIB_RX], &contents);
 		}
 	      else
 		error0 = SRP_ERROR_UNKNOWN_CONTROL;
@@ -528,8 +530,9 @@ static u8 * format_srp_interface (u8 * s, va_list * args)
 u8 * format_srp_device (u8 * s, va_list * args)
 {
   u32 hw_if_index = va_arg (*args, u32);
+  vnet_main_t * vnm = &vnet_main;
   srp_main_t * sm = &srp_main;
-  vlib_hw_interface_t * hi = vlib_get_hw_interface (sm->vlib_main, hw_if_index);
+  vnet_hw_interface_t * hi = vnet_get_hw_interface (vnm, hw_if_index);
   srp_interface_t * si = pool_elt_at_index (sm->interface_pool, hi->hw_instance);
   return format (s, "%U", format_srp_interface, si);
 }
@@ -537,8 +540,9 @@ u8 * format_srp_device (u8 * s, va_list * args)
 always_inline srp_interface_t *
 srp_get_interface (u32 sw_if_index, srp_ring_type_t * ring)
 {
+  vnet_main_t * vnm = &vnet_main;
   srp_main_t * sm = &srp_main;
-  vlib_hw_interface_t * hi = vlib_get_sup_hw_interface (sm->vlib_main, sw_if_index);
+  vnet_hw_interface_t * hi = vnet_get_sup_hw_interface (vnm, sw_if_index);
   srp_interface_t * si;
 
   ASSERT (hi->hw_class_index == srp_hw_interface_class.index);
@@ -583,13 +587,14 @@ static void tx_ips_packet (srp_interface_t * si,
 			   srp_ips_header_t * i)
 {
   srp_main_t * sm = &srp_main;
+  vnet_main_t * vnm = &vnet_main;
   vlib_main_t * vm = sm->vlib_main;
-  vlib_hw_interface_t * hi = vlib_get_hw_interface (vm, si->rings[tx_ring].hw_if_index);
+  vnet_hw_interface_t * hi = vnet_get_hw_interface (vnm, si->rings[tx_ring].hw_if_index);
   vlib_frame_t * f;
   vlib_buffer_t * b;
   u32 * to_next, bi;
 
-  if (! vlib_sw_interface_is_admin_up (vm, hi->sw_if_index))
+  if (! vnet_sw_interface_is_admin_up (vnm, hi->sw_if_index))
     return;
   if (hi->hw_class_index != srp_hw_interface_class.index)
     return;
@@ -605,13 +610,13 @@ static void tx_ips_packet (srp_interface_t * si,
   /* FIXME trace. */
   if (0)
     clib_warning ("%U %U",
-		  format_vlib_sw_if_index_name, vm, hi->sw_if_index,
+		  format_vnet_sw_if_index_name, vnm, hi->sw_if_index,
 		  format_srp_ips_header, i);
 
   b = vlib_get_buffer (vm, bi);
-  b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX] = hi->sw_if_index;
+  vnet_buffer (b)->sw_if_index[VLIB_RX] = vnet_buffer (b)->sw_if_index[VLIB_TX] = hi->sw_if_index;
 
-  f =  vlib_get_frame_to_node (vm, hi->output_node_index);
+  f = vlib_get_frame_to_node (vm, hi->output_node_index);
   to_next = vlib_frame_vector_args (f);
   to_next[0] = bi;
   f->n_vectors = 1;
@@ -689,6 +694,7 @@ static int requests_switch (srp_ips_request_type_t r)
 /* Called when an IPS control packet is received on given interface. */
 void srp_ips_rx_packet (u32 sw_if_index, srp_ips_header_t * h)
 {
+  vnet_main_t * vnm = &vnet_main;
   vlib_main_t * vm = srp_main.vlib_main;
   srp_ring_type_t rx_ring;
   srp_interface_t * si = srp_get_interface (sw_if_index, &rx_ring);
@@ -699,7 +705,7 @@ void srp_ips_rx_packet (u32 sw_if_index, srp_ips_header_t * h)
   if (0)
     clib_warning ("%U %U %U",
 		  format_time_interval, "h:m:s:u", vlib_time_now (vm),
-		  format_vlib_sw_if_index_name, vm, sw_if_index,
+		  format_vnet_sw_if_index_name, vnm, sw_if_index,
 		  format_srp_ips_header, h);
 
   /* Ignore self-generated IPS packets. */
@@ -776,6 +782,7 @@ void srp_ips_rx_packet (u32 sw_if_index, srp_ips_header_t * h)
 /* Preform local IPS request on given interface. */
 void srp_ips_local_request (u32 sw_if_index, srp_ips_request_type_t request)
 {
+  vnet_main_t * vnm = &vnet_main;
   srp_main_t * sm = &srp_main;
   vlib_main_t * vm = sm->vlib_main;
   srp_ring_type_t rx_ring;
@@ -805,7 +812,7 @@ void srp_ips_local_request (u32 sw_if_index, srp_ips_request_type_t request)
   /* FIXME trace. */
   if (0)
     clib_warning ("%U %U",
-		  format_vlib_sw_if_index_name, sm->vlib_main, sw_if_index,
+		  format_vnet_sw_if_index_name, vnm, sw_if_index,
 		  format_srp_ips_request_type, request);
 
   if (vm->mc_main && si_needs_broadcast)

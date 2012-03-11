@@ -23,7 +23,7 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vlib/vlib.h>
+#include <vnet/vnet.h>
 #include <vnet/pg/pg.h>
 
 #ifdef CLIB_UNIX
@@ -225,6 +225,7 @@ new_stream (vlib_main_t * vm,
   u32 hw_if_index;
   unformat_input_t sub_input = {0};
   int sub_input_given = 0;
+  vnet_main_t * vnm = &vnet_main;
   pg_main_t * pg = &pg_main;
   pg_stream_t s = {0};
   char * pcap_file_name;
@@ -244,9 +245,9 @@ new_stream (vlib_main_t * vm,
 	}
 
       else if (unformat (input, "node %U",
-			 unformat_vlib_hw_interface, vm, &hw_if_index))
+			 unformat_vnet_hw_interface, vnm, &hw_if_index))
 	{
-	  vlib_hw_interface_t * hi = vlib_get_hw_interface (vm, hw_if_index);
+	  vnet_hw_interface_t * hi = vnet_get_hw_interface (vnm, hw_if_index);
 
 	  s.node_index = hi->output_node_index;
 	  s.sw_if_index[VLIB_TX] = hi->sw_if_index;
@@ -257,7 +258,7 @@ new_stream (vlib_main_t * vm,
 	;
 			 
       else if (unformat (input, "interface %U",
-			 unformat_vlib_sw_interface, vm, &s.sw_if_index[VLIB_RX]))
+			 unformat_vnet_sw_interface, vnm, &s.sw_if_index[VLIB_RX]))
 	;
 
       else if (unformat (input, "pcap %s", &pcap_file_name))

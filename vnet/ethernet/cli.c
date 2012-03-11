@@ -67,8 +67,9 @@ static VLIB_CLI_COMMAND (ethernet_set_media_command) = {
 static clib_error_t *
 phy_status (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   ethernet_main_t * em = &ethernet_main;
-  vlib_hw_interface_t * hi;
+  vnet_hw_interface_t * hi;
   ethernet_interface_t * ei;
   clib_error_t * error;
   u32 hw_if_index;
@@ -86,7 +87,7 @@ phy_status (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd
   if (error)
     goto done;
 
-  hi = vlib_get_hw_interface (vm, hw_if_index);
+  hi = vnet_get_hw_interface (vnm, hw_if_index);
   vlib_cli_output (vm, "%v: phy status %U",
 		 hi->name,
 		 format_ethernet_media, &ei->phy.media);

@@ -50,6 +50,7 @@ add_del_ip_address (vlib_main_t * vm,
 		    unformat_input_t * input,
 		    vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   ip4_address_t a4;
   ip6_address_t a6;
   clib_error_t * error = 0;
@@ -61,7 +62,7 @@ add_del_ip_address (vlib_main_t * vm,
   if (unformat (input, "del"))
     is_del = 1;
 
-  if (! unformat_user (input, unformat_vlib_sw_interface, vm, &sw_if_index))
+  if (! unformat_user (input, unformat_vnet_sw_interface, vnm, &sw_if_index))
     {
       error = clib_error_return (0, "unknown interface `%U'",
 				 format_unformat_error, input);

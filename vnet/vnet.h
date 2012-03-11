@@ -1,7 +1,7 @@
 /*
- * vnet/buffer.h: vnet buffer flags
+ * vnet.h: general networking definitions
  *
- * Copyright (c) 2008 Eliot Dresselhaus
+ * Copyright (c) 2011 Eliot Dresselhaus
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -23,14 +23,33 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef included_vnet_buffer_h
-#define included_vnet_buffer_h
+#ifndef included_vnet_vnet_h
+#define included_vnet_vnet_h
 
-/* VLIB buffer flags for ip4/ip6 packets.  Set by input interfaces for ip4/ip6
-   tcp/udp packets with hardware computed checksums. */
-#define LOG2_IP_BUFFER_L4_CHECKSUM_COMPUTED LOG2_VLIB_BUFFER_FLAG_USER(1)
-#define LOG2_IP_BUFFER_L4_CHECKSUM_CORRECT  LOG2_VLIB_BUFFER_FLAG_USER(2)
-#define IP_BUFFER_L4_CHECKSUM_COMPUTED (1 << LOG2_IP_BUFFER_L4_CHECKSUM_COMPUTED)
-#define IP_BUFFER_L4_CHECKSUM_CORRECT  (1 << LOG2_IP_BUFFER_L4_CHECKSUM_CORRECT)
+#include <clib/types.h>
 
-#endif /* included_vnet_buffer_h */
+typedef enum {
+  VNET_UNICAST,
+  VNET_MULTICAST,
+  VNET_N_CAST,
+} vnet_cast_t;
+
+#include <vnet/buffer.h>
+#include <vnet/config.h>
+#include <vnet/interface.h>
+#include <vnet/rewrite.h>
+
+typedef struct vnet_main_t {
+  u32 local_interface_hw_if_index;
+  u32 local_interface_sw_if_index;
+
+  vnet_interface_main_t interface_main;
+
+  vlib_main_t * vlib_main;
+} vnet_main_t;
+
+vnet_main_t vnet_main;
+
+#include <vnet/interface_funcs.h>
+
+#endif /* included_vnet_vnet_h */

@@ -1,7 +1,7 @@
 #ifndef included_ixge_h
 #define included_ixge_h
 
-#include <vlib/vlib.h>
+#include <vnet/vnet.h>
 #include <vlib/pci/pci.h>
 #include <vnet/devices/i2c/i2c.h>
 #include <vnet/devices/optics/sfp.h>
@@ -1181,6 +1181,6 @@ typedef struct {
 } ixge_main_t;
 
 ixge_main_t ixge_main;
-vlib_device_class_t ixge_device_class;
+vnet_device_class_t ixge_device_class;
 
 #endif /* included_ixge_h */

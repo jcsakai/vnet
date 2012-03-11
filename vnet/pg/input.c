@@ -25,7 +25,7 @@
 
 #include <vlib/vlib.h>
 #include <vnet/pg/pg.h>
-#include <vnet/vnet/vnet.h>
+#include <vnet/vnet.h>
 
 static int
 validate_buffer_data2 (vlib_buffer_t * b, pg_stream_t * s,
@@ -919,12 +919,12 @@ pg_generate_set_lengths (pg_main_t * pg,
     }
 
   {
-    vlib_main_t * vm = pg->vlib_main;
-    vlib_interface_main_t * im = &vm->interface_main;
-    vlib_sw_interface_t * si = vlib_get_sw_interface (vm, s->sw_if_index[VLIB_RX]);
+    vnet_main_t * vm = &vnet_main;
+    vnet_interface_main_t * im = &vm->interface_main;
+    vnet_sw_interface_t * si = vnet_get_sw_interface (vm, s->sw_if_index[VLIB_RX]);
 
     vlib_increment_combined_counter (im->combined_sw_if_counters
-				     + VLIB_INTERFACE_COUNTER_RX,
+				     + VNET_INTERFACE_COUNTER_RX,
 				     si->sw_if_index,
 				     n_buffers,
 				     length_sum);
@@ -1120,8 +1120,8 @@ init_replay_buffers_inline (vlib_main_t * vm,
 
       b0 = vlib_get_buffer (vm, bi0);
 
-      b0->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
-      b0->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
+      vnet_buffer (b0)->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
+      vnet_buffer (b0)->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
       d0 = vec_elt (s->replay_packet_templates, i);
 
@@ -1183,10 +1183,10 @@ init_buffers_inline (vlib_main_t * vm,
       b0 = vlib_get_buffer (vm, bi0);
       b1 = vlib_get_buffer (vm, bi1);
 
-      b0->sw_if_index[VLIB_RX] =
-	b1->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
-      b0->sw_if_index[VLIB_TX] =
-	b1->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
+      vnet_buffer (b0)->sw_if_index[VLIB_RX] =
+	vnet_buffer (b1)->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
+      vnet_buffer (b0)->sw_if_index[VLIB_TX] =
+	vnet_buffer (b1)->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
       if (set_data)
 	{
@@ -1211,8 +1211,8 @@ init_buffers_inline (vlib_main_t * vm,
 
       b0 = vlib_get_buffer (vm, bi0);
 
-      b0->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
-      b0->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
+      vnet_buffer (b0)->sw_if_index[VLIB_RX] = s->sw_if_index[VLIB_RX];
+      vnet_buffer (b0)->sw_if_index[VLIB_TX] = s->sw_if_index[VLIB_TX];
 
       if (set_data)
 	memcpy (b0->data, data, n_data);
@@ -1258,7 +1258,7 @@ pg_stream_fill_helper (pg_main_t * pg,
     f->buffer_init_function = pg_buffer_init;
   f->buffer_init_function_opaque = (s - pg->streams) | ((bi - s->buffer_indices) << 24);
   if (is_start_of_packet)
-    f->buffer_init_template.sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
+    vnet_buffer (&f->buffer_init_template)->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 
   if (! vlib_buffer_alloc_from_free_list (vm,
 					  buffers,
@@ -1283,14 +1283,15 @@ pg_stream_fill_helper (pg_main_t * pg,
     {
       if (vec_len (s->replay_packet_templates) > 0)
 	{
-	  vlib_interface_main_t * im = &vm->interface_main;
-	  vlib_sw_interface_t * si = vlib_get_sw_interface (vm, s->sw_if_index[VLIB_RX]);
+	  vnet_main_t * vnm = &vnet_main;
+	  vnet_interface_main_t * im = &vnm->interface_main;
+	  vnet_sw_interface_t * si = vnet_get_sw_interface (vnm, s->sw_if_index[VLIB_RX]);
 	  u32 l = 0;
 	  u32 i;
 	  for (i = 0; i < n_alloc; i++)
 	    l += vlib_buffer_index_length_in_chain (vm, buffers[i]);
 	  vlib_increment_combined_counter (im->combined_sw_if_counters
-					   + VLIB_INTERFACE_COUNTER_RX,
+					   + VNET_INTERFACE_COUNTER_RX,
 					   si->sw_if_index,
 					   n_alloc,
 					   l);

@@ -257,8 +257,8 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  icmp0 = ip4_next_header (ip0);
 	  icmp1 = ip4_next_header (ip1);
 
-	  p0->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
-	  p1->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
+	  vnet_buffer (p0)->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
+	  vnet_buffer (p1)->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 
 	  /* Update ICMP checksum. */
 	  sum0 = icmp0->checksum;
@@ -334,7 +334,7 @@ ip4_icmp_echo_request (vlib_main_t * vm,
 	  ip0 = vlib_buffer_get_current (p0);
 	  icmp0 = ip4_next_header (ip0);
 
-	  p0->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
+	  vnet_buffer (p0)->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 
 	  /* Update ICMP checksum. */
 	  sum0 = icmp0->checksum;

@@ -29,9 +29,8 @@
 #include <clib/hash.h>
 #include <clib/heap.h>		/* adjacency heap */
 
-#include <vlib/vlib.h>
+#include <vnet/vnet.h>
 
-#include <vnet/vnet/buffer.h>
 #include <vnet/ip/format.h>
 #include <vnet/ip/ip_packet.h>
 #include <vnet/ip/lookup.h>

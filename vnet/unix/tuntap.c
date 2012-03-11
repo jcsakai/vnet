@@ -225,8 +225,8 @@ tuntap_rx (vlib_main_t * vm,
       }
 
     /* Interface counters for tuntap interface. */
-    vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
-				     + VLIB_INTERFACE_COUNTER_RX,
+    vlib_increment_combined_counter (vnet_main.interface_main.combined_sw_if_counters
+				     + VNET_INTERFACE_COUNTER_RX,
 				     tm->sw_if_index,
 				     1, n_bytes_in_packet);
 
@@ -246,7 +246,7 @@ tuntap_rx (vlib_main_t * vm,
     u32 next_index;
     uword n_trace = vlib_get_trace_count (vm, node);
 
-    b->sw_if_index[VLIB_RX] = tm->sw_if_index;
+    vnet_buffer (b)->sw_if_index[VLIB_RX] = tm->sw_if_index;
     b->error = node->errors[0];
 
     switch (b->data[0] & 0xf0)
@@ -674,7 +674,7 @@ tuntap_punt_frame (vlib_main_t * vm,
   vlib_frame_free (vm, node, frame);
 }
 
-static VLIB_HW_INTERFACE_CLASS (tuntap_interface_class) = {
+static VNET_HW_INTERFACE_CLASS (tuntap_interface_class) = {
   .name = "Linux punt/inject (tuntap)",
 };
 
@@ -696,7 +696,7 @@ tuntap_dummy_tx (vlib_main_t * vm,
   return n_buffers;
 }
 
-static VLIB_DEVICE_CLASS (tuntap_dev_class) = {
+static VNET_DEVICE_CLASS (tuntap_dev_class) = {
   .name = "tuntap",
   .tx_function = tuntap_dummy_tx,
   .format_device_name = format_tuntap_interface_name,
@@ -706,6 +706,7 @@ static clib_error_t *
 tuntap_init (vlib_main_t * vm)
 {
   clib_error_t * error;
+  vnet_main_t * vnm = &vnet_main;
   ip4_main_t * im4 = &ip4_main;
   ip6_main_t * im6 = &ip6_main;
   ip4_add_del_interface_address_callback_t cb4;
@@ -729,18 +730,18 @@ tuntap_init (vlib_main_t * vm)
   vm->os_punt_frame = tuntap_punt_frame;
 
   {
-    vlib_hw_interface_t * hi;
+    vnet_hw_interface_t * hi;
 
-    tm->hw_if_index = vlib_register_interface
-      (vm,
+    tm->hw_if_index = vnet_register_interface
+      (vnm,
        tuntap_dev_class.index, 0,
        tuntap_interface_class.index, 0);
-    hi = vlib_get_hw_interface (vm, tm->hw_if_index);
+    hi = vnet_get_hw_interface (vnm, tm->hw_if_index);
     tm->sw_if_index = hi->sw_if_index;
 
     /* Interface is always up. */
-    vlib_hw_interface_set_flags (vm, tm->hw_if_index, VLIB_HW_INTERFACE_FLAG_LINK_UP);
-    vlib_sw_interface_set_flags (vm, tm->sw_if_index, VLIB_SW_INTERFACE_FLAG_ADMIN_UP);
+    vnet_hw_interface_set_flags (vnm, tm->hw_if_index, VNET_HW_INTERFACE_FLAG_LINK_UP);
+    vnet_sw_interface_set_flags (vnm, tm->sw_if_index, VNET_SW_INTERFACE_FLAG_ADMIN_UP);
   }
 
   return 0;

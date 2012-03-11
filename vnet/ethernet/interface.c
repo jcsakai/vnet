@@ -23,22 +23,21 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vlib/vlib.h>
-#include <vnet/vnet/l3_types.h>
+#include <vnet/vnet.h>
 #include <vnet/pg/pg.h>
 #include <vnet/ethernet/ethernet.h>
 
-static uword ethernet_set_rewrite (vlib_main_t * vm,
+static uword ethernet_set_rewrite (vnet_main_t * vm,
 				   u32 sw_if_index,
 				   u32 l3_type,
 				   void * dst_address,
 				   void * rewrite,
 				   uword max_rewrite_bytes)
 {
-  vlib_sw_interface_t * sub_sw = vlib_get_sw_interface (vm, sw_if_index);
-  vlib_sw_interface_t * sup_sw = vlib_get_sup_sw_interface (vm, sw_if_index);
-  vlib_hw_interface_t * hw = vlib_get_sup_hw_interface (vm, sw_if_index);
-  ethernet_main_t * em = ethernet_get_main (vm);
+  vnet_sw_interface_t * sub_sw = vnet_get_sw_interface (vm, sw_if_index);
+  vnet_sw_interface_t * sup_sw = vnet_get_sup_sw_interface (vm, sw_if_index);
+  vnet_hw_interface_t * hw = vnet_get_sup_hw_interface (vm, sw_if_index);
+  ethernet_main_t * em = &ethernet_main;
   ethernet_interface_t * ei;
   ethernet_header_t * h = rewrite;
   ethernet_type_t type;
@@ -84,7 +83,7 @@ static uword ethernet_set_rewrite (vlib_main_t * vm,
   return n_bytes;
 }
 
-VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
+VNET_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
   .name = "Ethernet",
   .format_address = format_ethernet_address,
   .format_header = format_ethernet_header_with_length,
@@ -95,13 +94,13 @@ VLIB_HW_INTERFACE_CLASS (ethernet_hw_interface_class) = {
 
 uword unformat_ethernet_interface (unformat_input_t * input, va_list * args)
 {
-  vlib_main_t * vm = va_arg (*args, vlib_main_t *);
+  vnet_main_t * vm = va_arg (*args, vnet_main_t *);
   u32 * result = va_arg (*args, u32 *);
   u32 hw_if_index;
-  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_main_t * em = &ethernet_main;
   ethernet_interface_t * eif;
 
-  if (! unformat_user (input, unformat_vlib_hw_interface, vm, &hw_if_index))
+  if (! unformat_user (input, unformat_vnet_hw_interface, vm, &hw_if_index))
     return 0;
 
   eif = ethernet_get_interface (em, hw_if_index);
@@ -114,7 +113,7 @@ uword unformat_ethernet_interface (unformat_input_t * input, va_list * args)
 }
 
 static void ethernet_interface_update_media (ethernet_interface_t * ei,
-					     vlib_hw_interface_t * hi)
+					     vnet_hw_interface_t * hi)
 {
   switch (ei->phy.media.type)
     {
@@ -138,16 +137,16 @@ static void ethernet_interface_update_media (ethernet_interface_t * ei,
 }
 
 clib_error_t *
-ethernet_register_interface (vlib_main_t * vm,
+ethernet_register_interface (vnet_main_t * vm,
 			     u32 dev_class_index,
 			     u32 dev_instance,
 			     u8 * address,
 			     ethernet_phy_t * phy,
 			     u32 * hw_if_index_return)
 {
-  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_main_t * em = &ethernet_main;
   ethernet_interface_t * ei;
-  vlib_hw_interface_t * hi;
+  vnet_hw_interface_t * hi;
   clib_error_t * error = 0;
   u32 hw_if_index;
 
@@ -155,7 +154,7 @@ ethernet_register_interface (vlib_main_t * vm,
 
   if (phy)
     {
-      ei->phy.vlib_main = vm;
+      ei->phy.vlib_main = vm->vlib_main;
       ei->phy.opaque = phy->opaque;
       ei->phy.read_write = phy->read_write;
       ei->phy.phy_address = phy->phy_address;
@@ -164,15 +163,16 @@ ethernet_register_interface (vlib_main_t * vm,
 	goto done;
     }
 
-  hw_if_index = vlib_register_interface (vm,
-					 dev_class_index, dev_instance,
-					 ethernet_hw_interface_class.index,
-					 ei - em->interfaces);
+  hw_if_index = vnet_register_interface
+    (vm,
+     dev_class_index, dev_instance,
+     ethernet_hw_interface_class.index,
+     ei - em->interfaces);
   *hw_if_index_return = hw_if_index;
 
-  hi = vlib_get_hw_interface (vm, hw_if_index);
+  hi = vnet_get_hw_interface (vm, hw_if_index);
 
-  ethernet_setup_node (vm, hi->output_node_index);
+  ethernet_setup_node (vm->vlib_main, hi->output_node_index);
 
   hi->min_packet_bytes = 64;
   hi->per_packet_overhead_bytes =
@@ -197,26 +197,26 @@ ethernet_register_interface (vlib_main_t * vm,
 }
 			     
 void
-ethernet_delete_interface (vlib_main_t * vm, u32 hw_if_index)
+ethernet_delete_interface (vnet_main_t * vm, u32 hw_if_index)
 {
-  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_main_t * em = &ethernet_main;
   ethernet_interface_t * ei;
-  vlib_hw_interface_t * hi;
+  vnet_hw_interface_t * hi;
 
-  hi = vlib_get_hw_interface (vm, hw_if_index);
+  hi = vnet_get_hw_interface (vm, hw_if_index);
   ei = pool_elt_at_index (em->interfaces, hi->hw_instance);
 
   /* Delete vlan mapping table. */
   if (hi->sw_if_index < vec_len (em->vlan_mapping_by_sw_if_index))
     vec_free (em->vlan_mapping_by_sw_if_index[hi->sw_if_index].vlan_to_sw_if_index);
 
-  vlib_delete_hw_interface (vm, hw_if_index);
+  vnet_delete_hw_interface (vm, hw_if_index);
   pool_put (em->interfaces, ei);
 }
 
 #if CLIB_DEBUG > 0
 
-#define VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT VLIB_INTERFACE_TX_N_NEXT
+#define VNET_SIMULATED_ETHERNET_TX_NEXT_ETHERNET_INPUT VNET_INTERFACE_TX_N_NEXT
 
 /* Echo packets back to ethernet input. */
 static uword
@@ -245,7 +245,7 @@ simulated_ethernet_interface_tx (vlib_main_t * vm,
 	{
 	  b = vlib_get_buffer (vm, from[i]);
 	  /* TX interface will be fake eth; copy to RX for benefit of ethernet-input. */
-	  b->sw_if_index[VLIB_RX] = b->sw_if_index[VLIB_TX];
+	  vnet_buffer (b)->sw_if_index[VLIB_RX] = vnet_buffer (b)->sw_if_index[VLIB_TX];
 	}
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
@@ -260,7 +260,7 @@ static u8 * format_simulated_ethernet_name (u8 * s, va_list * args)
   return format (s, "fake-eth%d", dev_instance);
 }
 
-static VLIB_DEVICE_CLASS (ethernet_simulated_device_class) = {
+static VNET_DEVICE_CLASS (ethernet_simulated_device_class) = {
   .name = "Simulated ethernet",
   .format_device_name = format_simulated_ethernet_name,
   .tx_function = simulated_ethernet_interface_tx,
@@ -271,6 +271,7 @@ create_simulated_ethernet_interfaces (vlib_main_t * vm,
 				      unformat_input_t * input,
 				      vlib_cli_command_t * cmd)
 {
+  vnet_main_t * vnm = &vnet_main;
   clib_error_t * error;
   static u32 instance;
   u8 address[6];
@@ -285,7 +286,7 @@ create_simulated_ethernet_interfaces (vlib_main_t * vm,
     }
 
   error = ethernet_register_interface
-    (vm,
+    (vnm,
      ethernet_simulated_device_class.index,
      instance++,
      address,
@@ -293,10 +294,10 @@ create_simulated_ethernet_interfaces (vlib_main_t * vm,
      &hw_if_index);
 
   {
-    vlib_hw_interface_t * hw_if;
+    vnet_hw_interface_t * hw_if;
     u32 slot;
 
-    hw_if = vlib_get_hw_interface (vm, hw_if_index);
+    hw_if = vnet_get_hw_interface (vnm, hw_if_index);
     slot = vlib_node_add_named_next_with_slot
       (vm, hw_if->tx_node_index,
        "ethernet-input",

@@ -26,7 +26,7 @@
 #ifndef included_ip_lookup_h
 #define included_ip_lookup_h
 
-#include <vnet/vnet/vnet.h>
+#include <vnet/vnet.h>
 
 /* Next index stored in adjacency. */
 typedef enum {
@@ -166,22 +166,6 @@ typedef struct {
   u32 next_this_sw_interface;
   u32 prev_this_sw_interface;
 } ip_interface_address_t;
-
-/* Stored in 32 byte VLIB buffer opaque by ip lookup for benefit of
-   next nodes. */
-typedef struct {
-  /* Adjacency from destination IP address lookup [VLIB_TX].
-     Adjacency from source IP address lookup [VLIB_RX].
-     This gets set to ~0 until source lookup is performed. */
-  u32 adj_index[VLIB_N_RX_TX];
-
-  /* Flow hash value for this packet computed from IP src/dst address
-     protocol and ports. */
-  u32 flow_hash;
-
-  /* Current configuration index. */
-  u32 current_config_index;
-} ip_buffer_opaque_t;
 
 typedef enum {
   IP_LOCAL_NEXT_DROP,
@@ -345,12 +329,10 @@ ip_interface_address_get_address (ip_lookup_main_t * lm, ip_interface_address_t 
 always_inline ip_interface_address_t *
 ip_interface_address_for_packet (ip_lookup_main_t * lm, vlib_buffer_t * b, u32 sw_if_index)
 {
-  ip_buffer_opaque_t * o;
   ip_adjacency_t * adj;
   u32 if_address_index;
 
-  o = vlib_get_buffer_opaque (b);
-  adj = ip_get_adjacency (lm, o->adj_index[VLIB_TX]);
+  adj = ip_get_adjacency (lm, vnet_buffer (b)->ip.adj_index[VLIB_TX]);
 
   ASSERT (adj->lookup_next_index == IP_LOOKUP_NEXT_ARP
 	  || adj->lookup_next_index == IP_LOOKUP_NEXT_LOCAL);

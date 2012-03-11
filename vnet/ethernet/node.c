@@ -69,7 +69,8 @@ ethernet_input_inline (vlib_main_t * vm,
 		       vlib_frame_t * from_frame,
 		       ethernet_input_variant_t variant)
 {
-  ethernet_main_t * em = ethernet_get_main (vm);
+  vnet_main_t * vnm = &vnet_main;
+  ethernet_main_t * em = &ethernet_main;
   vlib_node_runtime_t * error_node;
   u32 n_left_from, next_index, * from, * to_next;
   u32 stats_sw_if_index, stats_n_packets, stats_n_bytes;
@@ -191,8 +192,8 @@ ethernet_input_inline (vlib_main_t * vm,
 	      vlib_buffer_advance (b0, sizeof (h0[0]));
 	      vlib_buffer_advance (b1, sizeof (h1[0]));
 
-	      old_sw_if_index0 = b0->sw_if_index[VLIB_RX];
-	      old_sw_if_index1 = b1->sw_if_index[VLIB_RX];
+	      old_sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+	      old_sw_if_index1 = vnet_buffer (b1)->sw_if_index[VLIB_RX];
 
 	      m0 = vec_elt_at_index (em->vlan_mapping_by_sw_if_index, old_sw_if_index0);
 	      m1 = vec_elt_at_index (em->vlan_mapping_by_sw_if_index, old_sw_if_index1);
@@ -213,8 +214,8 @@ ethernet_input_inline (vlib_main_t * vm,
 	      stats_n_packets += 2;
 	      stats_n_bytes += len0 + len1;
 
-	      b0->sw_if_index[VLIB_RX] = error0 != ETHERNET_ERROR_NONE ? old_sw_if_index0 : new_sw_if_index0;
-	      b1->sw_if_index[VLIB_RX] = error1 != ETHERNET_ERROR_NONE ? old_sw_if_index1 : new_sw_if_index1;
+	      vnet_buffer (b0)->sw_if_index[VLIB_RX] = error0 != ETHERNET_ERROR_NONE ? old_sw_if_index0 : new_sw_if_index0;
+	      vnet_buffer (b1)->sw_if_index[VLIB_RX] = error1 != ETHERNET_ERROR_NONE ? old_sw_if_index1 : new_sw_if_index1;
 
 	      if (PREDICT_FALSE (! (new_sw_if_index0 == stats_sw_if_index && new_sw_if_index1 == stats_sw_if_index)))
 		{
@@ -222,14 +223,14 @@ ethernet_input_inline (vlib_main_t * vm,
 		  stats_n_bytes -= len0 + len1;
 
 		  if (new_sw_if_index0 != ~0)
-		    vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
-						     + VLIB_INTERFACE_COUNTER_RX,
+		    vlib_increment_combined_counter (vnm->interface_main.combined_sw_if_counters
+						     + VNET_INTERFACE_COUNTER_RX,
 						     new_sw_if_index0,
 						     1,
 						     len0);
 		  if (new_sw_if_index1 != ~0)
-		    vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
-						     + VLIB_INTERFACE_COUNTER_RX,
+		    vlib_increment_combined_counter (vnm->interface_main.combined_sw_if_counters
+						     + VNET_INTERFACE_COUNTER_RX,
 						     new_sw_if_index1,
 						     1,
 						     len1);
@@ -238,8 +239,8 @@ ethernet_input_inline (vlib_main_t * vm,
 		    {
 		      if (stats_n_packets > 0)
 			{
-			  vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
-							   + VLIB_INTERFACE_COUNTER_RX,
+			  vlib_increment_combined_counter (vnm->interface_main.combined_sw_if_counters
+							   + VNET_INTERFACE_COUNTER_RX,
 							   stats_sw_if_index,
 							   stats_n_packets,
 							   stats_n_bytes);
@@ -378,7 +379,7 @@ ethernet_input_inline (vlib_main_t * vm,
 
 	      vlib_buffer_advance (b0, sizeof (h0[0]));
 
-	      old_sw_if_index0 = b0->sw_if_index[VLIB_RX];
+	      old_sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
 	      m0 = vec_elt_at_index (em->vlan_mapping_by_sw_if_index, old_sw_if_index0);
 
@@ -393,7 +394,7 @@ ethernet_input_inline (vlib_main_t * vm,
 	      stats_n_packets += 1;
 	      stats_n_bytes += len0;
 
-	      b0->sw_if_index[VLIB_RX] = error0 != ETHERNET_ERROR_NONE ? old_sw_if_index0 : new_sw_if_index0;
+	      vnet_buffer (b0)->sw_if_index[VLIB_RX] = error0 != ETHERNET_ERROR_NONE ? old_sw_if_index0 : new_sw_if_index0;
 
 	      if (PREDICT_FALSE (new_sw_if_index0 != stats_sw_if_index))
 		{
@@ -401,15 +402,15 @@ ethernet_input_inline (vlib_main_t * vm,
 		  stats_n_bytes -= len0;
 
 		  if (new_sw_if_index0 != ~0)
-		    vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
-						     + VLIB_INTERFACE_COUNTER_RX,
+		    vlib_increment_combined_counter (vnm->interface_main.combined_sw_if_counters
+						     + VNET_INTERFACE_COUNTER_RX,
 						     new_sw_if_index0,
 						     1,
 						     len0);
 		  if (stats_n_packets > 0)
 		    {
-		      vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
-						       + VLIB_INTERFACE_COUNTER_RX,
+		      vlib_increment_combined_counter (vnm->interface_main.combined_sw_if_counters
+						       + VNET_INTERFACE_COUNTER_RX,
 						       stats_sw_if_index,
 						       stats_n_packets,
 						       stats_n_bytes);
@@ -462,8 +463,8 @@ ethernet_input_inline (vlib_main_t * vm,
   if (variant == ETHERNET_INPUT_VARIANT_VLAN)
     {
       if (stats_n_packets > 0)
-	vlib_increment_combined_counter (vm->interface_main.combined_sw_if_counters
-					 + VLIB_INTERFACE_COUNTER_RX,
+	vlib_increment_combined_counter (vnm->interface_main.combined_sw_if_counters
+					 + VNET_INTERFACE_COUNTER_RX,
 					 stats_sw_if_index,
 					 stats_n_packets,
 					 stats_n_bytes);
@@ -493,17 +494,17 @@ ethernet_input_vlan (vlib_main_t * vm,
 { return ethernet_input_inline (vm, node, from_frame, ETHERNET_INPUT_VARIANT_VLAN); }
 
 static clib_error_t *
-ethernet_sw_interface_up_down (vlib_main_t * vm,
+ethernet_sw_interface_up_down (vnet_main_t * vm,
 			       u32 sw_if_index,
 			       u32 flags)
 {
-  ethernet_main_t * em = ethernet_get_main (vm);
-  vlib_sw_interface_t * si;
+  ethernet_main_t * em = &ethernet_main;
+  vnet_sw_interface_t * si;
   ethernet_vlan_mapping_t * m;
   clib_error_t * error = 0;
 
-  si = vlib_get_sw_interface (vm, sw_if_index);
-  if (si->type != VLIB_SW_INTERFACE_TYPE_SUB)
+  si = vnet_get_sw_interface (vm, sw_if_index);
+  if (si->type != VNET_SW_INTERFACE_TYPE_SUB)
     goto done;
 
   m = vec_elt_at_index (em->vlan_mapping_by_sw_if_index,
@@ -514,25 +515,27 @@ ethernet_sw_interface_up_down (vlib_main_t * vm,
     goto done;
 
   m->vlan_to_sw_if_index[si->sub.id] =
-    ((flags & VLIB_SW_INTERFACE_FLAG_ADMIN_UP) ? sw_if_index : ~0);
+    ((flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP) ? sw_if_index : ~0);
 
  done:
   return error;
 }
 
+static VNET_SW_INTERFACE_ADMIN_UP_DOWN_FUNCTION (ethernet_sw_interface_up_down);
+
 static clib_error_t *
-ethernet_sw_interface_add_del (vlib_main_t * vm,
+ethernet_sw_interface_add_del (vnet_main_t * vm,
 			       u32 sw_if_index,
 			       u32 is_create)
 {
-  ethernet_main_t * em = ethernet_get_main (vm);
-  vlib_hw_interface_t * hi;
-  vlib_sw_interface_t * sup_si;
+  ethernet_main_t * em = &ethernet_main;
+  vnet_hw_interface_t * hi;
+  vnet_sw_interface_t * sup_si;
 
   vec_validate (em->vlan_mapping_by_sw_if_index, sw_if_index);
-  sup_si = vlib_get_sup_sw_interface (vm, sw_if_index);
+  sup_si = vnet_get_sup_sw_interface (vm, sw_if_index);
 
-  hi = vlib_get_sup_hw_interface (vm, sw_if_index);
+  hi = vnet_get_sup_hw_interface (vm, sw_if_index);
 
   /* Initialize vlan mapping table to all vlans disabled. */
   if (hi && hi->hw_class_index == ethernet_hw_interface_class.index)
@@ -541,6 +544,8 @@ ethernet_sw_interface_add_del (vlib_main_t * vm,
 			     ~0);
   return 0;
 }
+
+static VNET_SW_INTERFACE_ADD_DEL_FUNCTION (ethernet_sw_interface_add_del);
 
 static char * ethernet_error_strings[] = {
 #define ethernet_error(n,c,s) s,
@@ -567,9 +572,6 @@ static VLIB_REGISTER_NODE (ethernet_input_node) = {
   .format_buffer = format_ethernet_header_with_length,
   .format_trace = format_ethernet_input_trace,
   .unformat_buffer = unformat_ethernet_header,
-
-  .sw_interface_admin_up_down_function = ethernet_sw_interface_up_down,
-  .sw_interface_add_del_function = ethernet_sw_interface_add_del,
 };
 
 static VLIB_REGISTER_NODE (ethernet_input_type_node) = {
@@ -602,7 +604,7 @@ static VLIB_REGISTER_NODE (ethernet_input_vlan_node) = {
 
 static clib_error_t * ethernet_input_init (vlib_main_t * vm)
 {
-  ethernet_main_t * em = ethernet_get_main (vm);
+  ethernet_main_t * em = &ethernet_main;
 
   ethernet_setup_node (vm, ethernet_input_node.index);
   ethernet_setup_node (vm, ethernet_input_type_node.index);
@@ -631,17 +633,18 @@ ethernet_register_input_type (vlib_main_t * vm,
 			      ethernet_type_t type,
 			      u32 node_index)
 {
-  ethernet_main_t * em = ethernet_get_main (vm);
-  ethernet_type_info_t * ti = ethernet_get_type_info (em, type);
+  ethernet_main_t * em = &ethernet_main;
+  ethernet_type_info_t * ti;
   u16 * n;
   u32 i;
 
   {
-    clib_error_t * error = vlib_call_init_function (vm, ethernet_input_init);
+    clib_error_t * error = vlib_call_init_function (vm, ethernet_init);
     if (error)
       clib_error_report (error);
   }
 
+  ti = ethernet_get_type_info (em, type);
   ti->node_index = node_index;
   ti->next_index = vlib_node_add_next (vm, 
 				       ethernet_input_node.index,

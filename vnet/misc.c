@@ -1,5 +1,5 @@
 /*
- * interface.c: vnet interfaces
+ * misc.c: vnet misc
  *
  * Copyright (c) 2012 Eliot Dresselhaus
  *
@@ -23,7 +23,7 @@
  *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <vnet/vnet/vnet.h>
+#include <vnet/vnet.h>
 
 vnet_main_t vnet_main;
 
@@ -36,33 +36,36 @@ vnet_local_interface_tx (vlib_main_t * vm,
   return f->n_vectors;
 }
 
-static VLIB_DEVICE_CLASS (vnet_local_interface_device_class) = {
+static VNET_DEVICE_CLASS (vnet_local_interface_device_class) = {
   .name = "local",
   .tx_function = vnet_local_interface_tx,
 };
 
-static VLIB_HW_INTERFACE_CLASS (vnet_local_interface_hw_class) = {
+static VNET_HW_INTERFACE_CLASS (vnet_local_interface_hw_class) = {
   .name = "local",
 };
 
 static clib_error_t *
 vnet_main_init (vlib_main_t * vm)
 {
+  vnet_main_t * vnm = &vnet_main;
   clib_error_t * error;
   u32 hw_if_index;
-  vlib_hw_interface_t * hw;
+  vnet_hw_interface_t * hw;
 
-  if ((error = vlib_call_init_function (vm, vlib_interface_init)))
+  if ((error = vlib_call_init_function (vm, vnet_interface_init)))
     return error;
 
-  hw_if_index = vlib_register_interface
-    (vm,
+  vnm->vlib_main = vm;
+
+  hw_if_index = vnet_register_interface
+    (vnm,
      vnet_local_interface_device_class.index, /* instance */ 0,
      vnet_local_interface_hw_class.index, /* instance */ 0);
-  hw = vlib_get_hw_interface (vm, hw_if_index);
+  hw = vnet_get_hw_interface (vnm, hw_if_index);
 
-  vnet_main.local_interface_hw_if_index = hw_if_index;
-  vnet_main.local_interface_sw_if_index = hw->sw_if_index;
+  vnm->local_interface_hw_if_index = hw_if_index;
+  vnm->local_interface_sw_if_index = hw->sw_if_index;
 
   return 0;
 }
