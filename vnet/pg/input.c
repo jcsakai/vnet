@@ -1315,7 +1315,7 @@ static u32
 pg_stream_fill (pg_main_t * pg, pg_stream_t * s, u32 n_buffers)
 {
   pg_buffer_index_t * bi;
-  word i, n_in_fifo, n_alloc, n_free, n_added;
+  word i, n_in_fifo, n_alloc, n_free, n_added = 0;
   u32 * tail, * start, * end, * last_tail, * last_start;
 
   bi = s->buffer_indices;
