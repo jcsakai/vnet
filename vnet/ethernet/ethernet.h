@@ -214,16 +214,12 @@ ethernet_setup_node (vlib_main_t * vm, u32 node_index)
   pn->unformat_edit = unformat_pg_ethernet_header;
 }
 
-typedef struct {
-  /* Saved value of current header by ethernet-input. */
-  u32 start_of_ethernet_header;
-} ethernet_buffer_opaque_t;
-
 always_inline ethernet_header_t *
 ethernet_buffer_get_header (vlib_buffer_t * b)
 {
-  ethernet_buffer_opaque_t * o = vlib_get_buffer_opaque (b);
-  return (void *) (b->data + o->start_of_ethernet_header);
+  return (void *)
+    (b->data
+     + vnet_buffer (b)->ethernet.start_of_ethernet_header);
 }
 
 #endif /* included_ethernet_h */

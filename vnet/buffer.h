@@ -39,6 +39,12 @@ typedef struct {
   u32 sw_if_index[VLIB_N_RX_TX];
 
   union {
+    /* Ethernet. */
+    struct {
+      /* Saved value of current header by ethernet-input. */
+      u32 start_of_ethernet_header;
+    } ethernet;
+
     /* IP4/6 buffer opaque. */
     struct {
       /* Adjacency from destination IP address lookup [VLIB_TX].

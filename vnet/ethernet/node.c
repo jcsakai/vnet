@@ -104,7 +104,6 @@ ethernet_input_inline (vlib_main_t * vm,
 	{
 	  u32 bi0, bi1;
 	  vlib_buffer_t * b0, * b1;
-	  ethernet_buffer_opaque_t * o0, * o1;
 	  u32 i0, i1, type0, type1;
 	  u8 next0, next1, error0, error1, enqueue_code;
 
@@ -134,9 +133,6 @@ ethernet_input_inline (vlib_main_t * vm,
 	  b0 = vlib_get_buffer (vm, bi0);
 	  b1 = vlib_get_buffer (vm, bi1);
 
-	  o0 = vlib_get_buffer_opaque (b0);
-	  o1 = vlib_get_buffer_opaque (b1);
-
 	  error0 = error1 = ETHERNET_ERROR_NONE;
 
 	  if (variant == ETHERNET_INPUT_VARIANT_ETHERNET)
@@ -146,8 +142,8 @@ ethernet_input_inline (vlib_main_t * vm,
 	      e0 = (void *) (b0->data + b0->current_data);
 	      e1 = (void *) (b1->data + b1->current_data);
 
-	      o0->start_of_ethernet_header = b0->current_data;
-	      o1->start_of_ethernet_header = b1->current_data;
+	      vnet_buffer (b0)->ethernet.start_of_ethernet_header = b0->current_data;
+	      vnet_buffer (b1)->ethernet.start_of_ethernet_header = b1->current_data;
 
 	      vlib_buffer_advance (b0, sizeof (e0[0]));
 	      vlib_buffer_advance (b1, sizeof (e1[0]));
@@ -208,8 +204,10 @@ ethernet_input_inline (vlib_main_t * vm,
 	      error0 = new_sw_if_index0 != ~0 ? error0 : ETHERNET_ERROR_UNKNOWN_VLAN;
 	      error1 = new_sw_if_index1 != ~0 ? error1 : ETHERNET_ERROR_UNKNOWN_VLAN;
 
-	      len0 = vlib_buffer_length_in_chain (vm, b0) + b0->current_data - o0->start_of_ethernet_header;
-	      len1 = vlib_buffer_length_in_chain (vm, b1) + b1->current_data - o1->start_of_ethernet_header;
+	      len0 = vlib_buffer_length_in_chain (vm, b0) + b0->current_data
+                  - vnet_buffer (b0)->ethernet.start_of_ethernet_header;
+	      len1 = vlib_buffer_length_in_chain (vm, b1) + b1->current_data
+                  - vnet_buffer (b1)->ethernet.start_of_ethernet_header;
 
 	      stats_n_packets += 2;
 	      stats_n_bytes += len0 + len1;
@@ -323,7 +321,6 @@ ethernet_input_inline (vlib_main_t * vm,
 	{
 	  u32 bi0;
 	  vlib_buffer_t * b0;
-	  ethernet_buffer_opaque_t * o0;
 	  u32 i0, next0, type0;
 	  u8 error0;
 
@@ -336,7 +333,6 @@ ethernet_input_inline (vlib_main_t * vm,
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
-	  o0 = vlib_get_buffer_opaque (b0);
 	  error0 = ETHERNET_ERROR_NONE;
 
 	  if (variant == ETHERNET_INPUT_VARIANT_ETHERNET)
@@ -345,7 +341,7 @@ ethernet_input_inline (vlib_main_t * vm,
 
 	      e0 = (void *) (b0->data + b0->current_data);
 
-	      o0->start_of_ethernet_header = b0->current_data;
+	      vnet_buffer (b0)->ethernet.start_of_ethernet_header = b0->current_data;
 
 	      vlib_buffer_advance (b0, sizeof (e0[0]));
 
@@ -389,7 +385,8 @@ ethernet_input_inline (vlib_main_t * vm,
 
 	      error0 = new_sw_if_index0 != ~0 ? error0 : ETHERNET_ERROR_UNKNOWN_VLAN;
 
-	      len0 = vlib_buffer_length_in_chain (vm, b0) + b0->current_data - o0->start_of_ethernet_header;
+	      len0 = vlib_buffer_length_in_chain (vm, b0) + b0->current_data
+                  - vnet_buffer (b0)->ethernet.start_of_ethernet_header;
 
 	      stats_n_packets += 1;
 	      stats_n_bytes += len0;
