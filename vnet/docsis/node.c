@@ -611,7 +611,7 @@ static clib_error_t * docsis_input_init (vlib_main_t * vm)
       for (j = 0; j < ARRAY_LEN (dm->input_functions_for_role[i].control); j++)
 	dm->input_functions_for_role[i].control[j] = docsis_input_unknown_control;
       for (j = 0; j < ARRAY_LEN (dm->input_functions_for_role[i].management); j++)
-	dm->input_functions_for_role[i].control[j] = docsis_input_unknown_management;
+	dm->input_functions_for_role[i].management[j] = docsis_input_unknown_management;
 
 #define _(f,n) dm->input_functions_for_role[i].control[n] = docsis_input_unexpected_control;
       foreach_docsis_control_packet_type

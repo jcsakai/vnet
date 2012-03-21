@@ -183,7 +183,7 @@ static clib_error_t * docsis_input_cmts_init (vlib_main_t * vm)
 
   /* Control packet types we want. */
 #define _(f) \
-  dm->input_functions_for_role[DOCSIS_ROLE_CMTS].management[DOCSIS_CONTROL_PACKET_TYPE_##f] = cmts_input_##f;
+  dm->input_functions_for_role[DOCSIS_ROLE_CMTS].control[DOCSIS_CONTROL_PACKET_TYPE_##f] = cmts_input_##f;
 
   _ (request_frame);
   _ (fragmentation);
