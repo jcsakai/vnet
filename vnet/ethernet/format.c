@@ -25,6 +25,7 @@
 
 #include <vlib/vlib.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/llc/llc.h>	/* for format_llc_header_with_length */
 
 u8 * format_ethernet_address (u8 * s, va_list * args)
 {
@@ -62,7 +63,7 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
   ethernet_vlan_header_t * v;
   ethernet_type_t type = clib_net_to_host_u16 (e->type);
   u32 n_vlan = 0, i, header_bytes;
-  uword indent;
+  uword indent, is_llc;
 
   while (type == ETHERNET_TYPE_VLAN
 	 && n_vlan < ARRAY_LEN (m->vlan))
@@ -78,8 +79,13 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
 
   indent = format_get_indent (s);
 
-  s = format (s, "%U: %U -> %U",
-	      format_ethernet_type, type,
+  is_llc = type < ETHERNET_TYPE_LLC_LENGTH;
+  if (is_llc)
+    s = format (s, "LLC length %d: ", type);
+  else
+    s = format (s, "%U: ", format_ethernet_type, type);
+
+  s = format (s, "%U -> %U",
 	      format_ethernet_address, e->src_address,
 	      format_ethernet_address, e->dst_address);
 
@@ -99,16 +105,26 @@ u8 * format_ethernet_header_with_length (u8 * s, va_list * args)
 
   if (max_header_bytes != 0 && header_bytes < max_header_bytes)
     {
-      ethernet_type_info_t * ti;
-      vlib_node_t * node;
+      if (is_llc)
+	{
+	  s = format (s, "\n%U%U",
+		      format_white_space, indent,
+		      format_llc_header_with_length, (void *) m + header_bytes,
+		      max_header_bytes - header_bytes);
+	}
+      else
+	{
+	  ethernet_type_info_t * ti;
+	  vlib_node_t * node;
 
-      ti = ethernet_get_type_info (em, type);
-      node = ti ? vlib_get_node (em->vlib_main, ti->node_index) : 0;
-      if (node && node->format_buffer)
-	s = format (s, "\n%U%U",
-		    format_white_space, indent,
-		    node->format_buffer, (void *) m + header_bytes,
-		    max_header_bytes - header_bytes);
+	  ti = ethernet_get_type_info (em, type);
+	  node = ti ? vlib_get_node (em->vlib_main, ti->node_index) : 0;
+	  if (node && node->format_buffer)
+	    s = format (s, "\n%U%U",
+			format_white_space, indent,
+			node->format_buffer, (void *) m + header_bytes,
+			max_header_bytes - header_bytes);
+	}
     }
 
   return s;
