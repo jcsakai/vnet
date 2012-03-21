@@ -110,6 +110,15 @@ libvnet_la_SOURCES +=				\
   vnet/snap/node.c				\
   vnet/snap/pg.c
 
+########################################
+# Layer 2 protocol: DOCSIS
+########################################
+libvnet_la_SOURCES +=				\
+  vnet/docsis/format.c				\
+  vnet/docsis/input_cm.c			\
+  vnet/docsis/input_cmts.c			\
+  vnet/docsis/node.c
+
 nobase_include_HEADERS +=			\
  vnet/snap/snap.h
 

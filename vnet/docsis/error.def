@@ -1,0 +1,38 @@
+/*
+ * docsis/error.def: docsis errors
+ *
+ * Copyright (c) 2008 Eliot Dresselhaus
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ *  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ *  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ *  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+_ (NONE, "no error")
+_ (CONTROL_FRAME_HANDLED, "valid control frames handled")
+_ (WRONG_LENGTH, "DOCSIS header length != packet length")
+_ (WRONG_HEADER_CRC, "bad header crc")
+_ (WRONG_ETHERNET_CRC, "bad ethernet crc")
+_ (ATM_DROP, "ATM packets dropped")
+_ (EXTENDED_HEADER_NOT_ALLOWED, "extended header not allowed for control packet")
+_ (UNKNOWN_CONTROL_PACKET_TYPE, "unknown control packet type")
+_ (UNEXPECTED_CONTROL_PACKET_TYPE_FOR_ROLE, "unexpected control packet type for role")
+_ (EXTENDED_HEADER_TLV_UNKNOWN, "unknown tlv type in extended header")
+_ (EXTENDED_HEADER_TLV_BAD_LENGTH, "tlv with wrong length in extended header")
+_ (UNKNOWN_MANAGEMENT_PACKET_TYPE, "unknown management packet type")
+_ (UNEXPECTED_MANAGEMENT_PACKET_TYPE_FOR_ROLE, "unexpected management packet type for role")
