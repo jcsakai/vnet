@@ -110,6 +110,9 @@ libvnet_la_SOURCES +=				\
   vnet/snap/node.c				\
   vnet/snap/pg.c
 
+nobase_include_HEADERS +=			\
+ vnet/snap/snap.h
+
 ########################################
 # Layer 2 protocol: DOCSIS
 ########################################
@@ -120,7 +123,8 @@ libvnet_la_SOURCES +=				\
   vnet/docsis/node.c
 
 nobase_include_HEADERS +=			\
- vnet/snap/snap.h
+ vnet/docsis/packet.h				\
+ vnet/docsis/docsis.h
 
 ########################################
 # Layer 3 protocols go here
