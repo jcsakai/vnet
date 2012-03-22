@@ -26,6 +26,8 @@
 #ifndef included_vnet_interface_h
 #define included_vnet_interface_h
 
+#include <vnet/l3_types.h>
+
 struct vnet_main_t;
 
 /* Interface up/down callback. */
@@ -130,14 +132,28 @@ typedef struct {
   /* Parser for packet header for e.g. rewrite string. */
   unformat_function_t * unformat_header;
 
+  /* Node to fixup rewrite strings before output. */
+  char * rewrite_fixup_node;
+
+  /* To be filled in when class is registered. */
+  u32 rewrite_fixup_node_index;
+
   /* Forms adjacency for given l3 packet type and destination address.
      Returns number of bytes in adjacency. */
-  uword (* set_rewrite) (struct vnet_main_t * vm,
-			 u32 sw_if_index,
-			 u32 l3_packet_type,
-			 void * dst_address,
-			 void * rewrite,
-			 uword max_rewrite_bytes);
+  uword (* rewrite_for_sw_interface)
+    (struct vnet_main_t * vm,
+     u32 sw_if_index,
+     vnet_l3_packet_type_t l3_packet_type,
+     void * dst_address,
+     void * rewrite,
+     uword max_rewrite_bytes);
+
+  /* Set up rewrite string for hardware interface.  This is used by
+     rewrite fixup routines to stash away per-rewrite data for fixup node. */
+  void (* rewrite_for_hw_interface)
+    (struct vnet_main_t * vm,
+     u32 hw_if_index,
+     void * rewrite);
 
   uword (* is_valid_class_for_interface) (struct vnet_main_t * vm, u32 hw_if_index, u32 hw_class_index);
 

@@ -853,6 +853,7 @@ vnet_interface_init (vlib_main_t * vm)
 	for (c = lo; c < hi; c = clib_elf_section_data_next (c, 0))
 	  {
 	    c->index = vec_len (im->hw_interface_classes);
+	    c->rewrite_fixup_node_index = ~0;
 	    hash_set_mem (im->hw_interface_class_by_name, c->name, c->index);
 	    vec_add1 (im->hw_interface_classes, c[0]);
 	  }
@@ -870,3 +871,29 @@ vnet_interface_init (vlib_main_t * vm)
 }
 
 VLIB_INIT_FUNCTION (vnet_interface_init);
+
+static clib_error_t *
+vnet_interface_main_loop_enter (vlib_main_t * vm)
+{
+  vnet_main_t * vnm = &vnet_main;
+  vnet_interface_main_t * im = &vnm->interface_main;
+  vnet_hw_interface_class_t * hc;
+
+  vec_foreach (hc, im->hw_interface_classes)
+    {
+      if (hc->rewrite_fixup_node)
+	{
+	  vlib_node_t * n = vlib_get_node_by_name (vm, (u8 *) hc->rewrite_fixup_node);
+	  if (! n)
+	    return clib_error_return_fatal
+	      (0, "interface class `%s' rewrite fixup node `%s' not found",
+	       hc->name, hc->rewrite_fixup_node);
+	  else
+	    hc->rewrite_fixup_node_index = n->index;
+	}
+    }
+
+  return 0;
+}
+
+VLIB_MAIN_LOOP_ENTER_FUNCTION (vnet_interface_main_loop_enter);
