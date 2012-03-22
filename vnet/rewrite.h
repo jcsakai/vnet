@@ -103,17 +103,6 @@ vnet_rewrite_get_data_internal (vnet_rewrite_header_t * rw, int max_size)
   vnet_rewrite_get_data_internal (&((rw).rewrite_header), sizeof ((rw).rewrite_data))
 
 always_inline void
-vnet_rewrite_copy_one (vnet_rewrite_data_t * p0, vnet_rewrite_data_t * rw0, int i)
-{
-  p0[-i] = rw0[-i];
-}
-
-void vnet_rewrite_copy_slow_path (vnet_rewrite_data_t * p0,
-				  vnet_rewrite_data_t * rw0,
-				  word n_left,
-				  uword most_likely_size);
-
-always_inline void
 _vnet_rewrite_one_header (vnet_rewrite_header_t * h0,
 			  void * packet0,
 			  int max_size,
@@ -121,24 +110,16 @@ _vnet_rewrite_one_header (vnet_rewrite_header_t * h0,
 {
   vnet_rewrite_data_t * p0 = packet0;
   vnet_rewrite_data_t * rw0 = (vnet_rewrite_data_t *) (h0->data + max_size);
-  word n_left0;
+  word n_left = h0->data_bytes;
 
-#define _(i)								\
-  do {									\
-    if (most_likely_size > ((i)-1)*sizeof (vnet_rewrite_data_t))	\
-      vnet_rewrite_copy_one (p0, rw0, (i));				\
-  } while (0)
-
-  _ (4);
-  _ (3);
-  _ (2);
-  _ (1);
-
+  do {
+#define _(i) p0[-i] = rw0[-i];
+    _ (1); _ (2); _ (3); _ (4);
 #undef _
-    
-  n_left0 = ((int) h0->data_bytes - most_likely_size) / (int) sizeof (rw0[0]);
-  if (PREDICT_FALSE (n_left0 > 0))
-    vnet_rewrite_copy_slow_path (p0, rw0, n_left0, most_likely_size);
+    n_left -= 4 * sizeof (rw0[0]);
+    p0 -= 4;
+    rw0 -= 4;
+  } while (n_left > 0);
 }
 
 always_inline void
@@ -153,32 +134,18 @@ _vnet_rewrite_two_headers (vnet_rewrite_header_t * h0,
   vnet_rewrite_data_t * p1 = packet1;
   vnet_rewrite_data_t * rw0 = (vnet_rewrite_data_t *) (h0->data + max_size);
   vnet_rewrite_data_t * rw1 = (vnet_rewrite_data_t *) (h1->data + max_size);
-  word n_left0, n_left1;
+  word n_left;
 
-#define _(i)								\
-  do {									\
-    if (most_likely_size > ((i)-1)*sizeof (vnet_rewrite_data_t))	\
-      {									\
-	vnet_rewrite_copy_one (p0, rw0, (i));				\
-	vnet_rewrite_copy_one (p1, rw1, (i));				\
-      }									\
-  } while (0)
+  n_left = clib_max (h0->data_bytes, h1->data_bytes);
 
-  _ (4);
-  _ (3);
-  _ (2);
-  _ (1);
-
+  do {
+#define _(i) p0[-i] = rw0[-i]; p1[-i] = rw1[-i];
+    _ (1); _ (2); _ (3); _ (4);
 #undef _
-    
-  n_left0 = ((int) h0->data_bytes - most_likely_size) / (int) sizeof (rw0[0]);
-  n_left1 = ((int) h1->data_bytes - most_likely_size) / (int) sizeof (rw1[0]);
-
-  if (PREDICT_FALSE (n_left0 > 0 || n_left1 > 0))
-    {
-      vnet_rewrite_copy_slow_path (p0, rw0, n_left0, most_likely_size);
-      vnet_rewrite_copy_slow_path (p1, rw1, n_left1, most_likely_size);
-    }
+    n_left -= 4 * sizeof (rw0[0]);
+    p0 -= 4; p1 -= 4;
+    rw0 -= 4; rw1 -= 4;
+  } while (n_left > 0);
 }
 
 #define vnet_rewrite_one_header(rw0,p0,most_likely_size)	\
