@@ -365,17 +365,17 @@ nobase_include_HEADERS = vnet/buffer.h vnet/config.h vnet/interface.h \
 	vnet/srp/packet.h vnet/srp/srp.h vnet/ppp/error.def \
 	vnet/ppp/ppp.h vnet/ppp/packet.h vnet/hdlc/error.def \
 	vnet/hdlc/hdlc.h vnet/hdlc/packet.h vnet/llc/llc.h \
-	vnet/snap/snap.h vnet/ip/format.h vnet/ip/icmp46_packet.h \
-	vnet/ip/icmp6.h vnet/ip/igmp_packet.h vnet/ip/ip.h \
-	vnet/ip/ip4.h vnet/ip/ip4_error.h vnet/ip/ip4_packet.h \
-	vnet/ip/ip6.h vnet/ip/ip6_error.h vnet/ip/ip6_packet.h \
-	vnet/ip/lookup.h vnet/ip/ip_packet.h vnet/ip/ports.def \
-	vnet/ip/protocols.def vnet/ip/tcp.h vnet/ip/tcp_packet.h \
-	vnet/ip/udp_packet.h vnet/osi/osi.h vnet/pg/pg.h \
-	vnet/pg/edit.h vnet/devices/i2c/i2c.h \
-	vnet/devices/optics/sfp.h vnet/devices/pci/ige.h \
-	vnet/devices/pci/ixge.h vnet/devices/xge/xge.h \
-	vnet/unix/pcap.h vnet/unix/tuntap.h
+	vnet/snap/snap.h vnet/docsis/packet.h vnet/docsis/docsis.h \
+	vnet/ip/format.h vnet/ip/icmp46_packet.h vnet/ip/icmp6.h \
+	vnet/ip/igmp_packet.h vnet/ip/ip.h vnet/ip/ip4.h \
+	vnet/ip/ip4_error.h vnet/ip/ip4_packet.h vnet/ip/ip6.h \
+	vnet/ip/ip6_error.h vnet/ip/ip6_packet.h vnet/ip/lookup.h \
+	vnet/ip/ip_packet.h vnet/ip/ports.def vnet/ip/protocols.def \
+	vnet/ip/tcp.h vnet/ip/tcp_packet.h vnet/ip/udp_packet.h \
+	vnet/osi/osi.h vnet/pg/pg.h vnet/pg/edit.h \
+	vnet/devices/i2c/i2c.h vnet/devices/optics/sfp.h \
+	vnet/devices/pci/ige.h vnet/devices/pci/ixge.h \
+	vnet/devices/xge/xge.h vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
 vnet_unix_SOURCES = \
   example/main_stub.c				\
