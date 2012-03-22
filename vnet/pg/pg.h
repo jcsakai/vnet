@@ -1,5 +1,5 @@
 /*
- * pg.h: VLIB packet generator
+ * pg.h: VNET packet generator
  *
  * Copyright (c) 2008 Eliot Dresselhaus
  *
