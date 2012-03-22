@@ -103,26 +103,12 @@ do {									\
 static inline uword
 pg_edit_n_alloc_bytes (pg_edit_t * e)
 {
-  int i0, i1, n_bytes, n_bits_left;
+  u32 lo, hi;
 
-  i0 = e->lsb_bit_offset;
-  i1 = i0 % BITS (u8);
+  lo = e->lsb_bit_offset / BITS (u8);
+  hi = (e->lsb_bit_offset + e->n_bits - 1) / BITS (u8);
 
-  n_bytes = 0;
-  n_bits_left = e->n_bits;
-
-  if (n_bits_left > 0 && i1 != 0)
-    {
-      n_bytes++;
-      n_bits_left -= i1;
-      if (n_bits_left < 0)
-	n_bits_left = 0;
-    }
-
-  n_bytes += (n_bits_left / BITS (u8));
-  n_bytes += (n_bits_left % BITS (u8)) != 0;
-
-  return n_bytes;
+  return e->n_bits > 0 ? (1 + (hi - lo)) : 0;
 }
 
 static inline void
