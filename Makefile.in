@@ -95,9 +95,9 @@ am_libvnet_la_OBJECTS = vnet/config.lo vnet/interface.lo \
 	vnet/llc/llc.lo vnet/llc/node.lo vnet/llc/pg.lo \
 	vnet/snap/snap.lo vnet/snap/node.lo vnet/snap/pg.lo \
 	vnet/docsis/format.lo vnet/docsis/input_cm.lo \
-	vnet/docsis/input_cmts.lo vnet/docsis/node.lo \
-	vnet/ip/format.lo vnet/ip/icmp4.lo vnet/ip/icmp6.lo \
-	vnet/ip/ip46_cli.lo vnet/ip/ip4_format.lo \
+	vnet/docsis/input_cmts.lo vnet/docsis/interface.lo \
+	vnet/docsis/node.lo vnet/ip/format.lo vnet/ip/icmp4.lo \
+	vnet/ip/icmp6.lo vnet/ip/ip46_cli.lo vnet/ip/ip4_format.lo \
 	vnet/ip/ip4_forward.lo vnet/ip/ip4_input.lo \
 	vnet/ip/ip4_mtrie.lo vnet/ip/ip4_pg.lo \
 	vnet/ip/ip4_source_check.lo vnet/ip/ip6_format.lo \
@@ -342,11 +342,12 @@ libvnet_la_SOURCES = vnet/config.c vnet/interface.c \
 	vnet/llc/llc.c vnet/llc/node.c vnet/llc/pg.c vnet/snap/snap.c \
 	vnet/snap/node.c vnet/snap/pg.c vnet/docsis/format.c \
 	vnet/docsis/input_cm.c vnet/docsis/input_cmts.c \
-	vnet/docsis/node.c vnet/ip/format.c vnet/ip/icmp4.c \
-	vnet/ip/icmp6.c vnet/ip/ip46_cli.c vnet/ip/ip4_format.c \
-	vnet/ip/ip4_forward.c vnet/ip/ip4_input.c vnet/ip/ip4_mtrie.c \
-	vnet/ip/ip4_pg.c vnet/ip/ip4_source_check.c \
-	vnet/ip/ip6_format.c vnet/ip/ip6_forward.c vnet/ip/ip6_input.c \
+	vnet/docsis/interface.c vnet/docsis/node.c vnet/ip/format.c \
+	vnet/ip/icmp4.c vnet/ip/icmp6.c vnet/ip/ip46_cli.c \
+	vnet/ip/ip4_format.c vnet/ip/ip4_forward.c vnet/ip/ip4_input.c \
+	vnet/ip/ip4_mtrie.c vnet/ip/ip4_pg.c \
+	vnet/ip/ip4_source_check.c vnet/ip/ip6_format.c \
+	vnet/ip/ip6_forward.c vnet/ip/ip6_input.c \
 	vnet/ip/ip6_neighbor.c vnet/ip/ip6_pg.c vnet/ip/ip_checksum.c \
 	vnet/ip/ip.h vnet/ip/ip_init.c vnet/ip/lookup.c vnet/ip/tcp.c \
 	vnet/ip/tcp_format.c vnet/ip/tcp_init.c vnet/ip/tcp_pg.c \
@@ -564,6 +565,8 @@ vnet/docsis/input_cm.lo: vnet/docsis/$(am__dirstamp) \
 	vnet/docsis/$(DEPDIR)/$(am__dirstamp)
 vnet/docsis/input_cmts.lo: vnet/docsis/$(am__dirstamp) \
 	vnet/docsis/$(DEPDIR)/$(am__dirstamp)
+vnet/docsis/interface.lo: vnet/docsis/$(am__dirstamp) \
+	vnet/docsis/$(DEPDIR)/$(am__dirstamp)
 vnet/docsis/node.lo: vnet/docsis/$(am__dirstamp) \
 	vnet/docsis/$(DEPDIR)/$(am__dirstamp)
 vnet/ip/$(am__dirstamp):
@@ -753,6 +756,8 @@ mostlyclean-compile:
 	-rm -f vnet/docsis/input_cm.lo
 	-rm -f vnet/docsis/input_cmts.$(OBJEXT)
 	-rm -f vnet/docsis/input_cmts.lo
+	-rm -f vnet/docsis/interface.$(OBJEXT)
+	-rm -f vnet/docsis/interface.lo
 	-rm -f vnet/docsis/node.$(OBJEXT)
 	-rm -f vnet/docsis/node.lo
 	-rm -f vnet/ethernet/arp.$(OBJEXT)
@@ -909,6 +914,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/docsis/$(DEPDIR)/format.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/docsis/$(DEPDIR)/input_cm.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/docsis/$(DEPDIR)/input_cmts.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/docsis/$(DEPDIR)/interface.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/docsis/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/arp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/ethernet/$(DEPDIR)/cli.Plo@am__quote@

@@ -120,6 +120,7 @@ libvnet_la_SOURCES +=				\
   vnet/docsis/format.c				\
   vnet/docsis/input_cm.c			\
   vnet/docsis/input_cmts.c			\
+  vnet/docsis/interface.c			\
   vnet/docsis/node.c
 
 nobase_include_HEADERS +=			\
