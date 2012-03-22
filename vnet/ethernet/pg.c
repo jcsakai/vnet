@@ -167,15 +167,18 @@ unformat_pg_ethernet_header_with_crc (unformat_input_t * input, va_list * args)
 {
   pg_stream_t * s = va_arg (*args, pg_stream_t *);
   pg_edit_t * e;
-  u32 eth_group_index, n_bytes_in_ethernet_frame, ok;
+  u32 eth_group_index, n_bytes_in_ethernet_frame, ok, crc;
 
   eth_group_index = vec_len (s->edit_groups);
 
+  /* Correct for presence of CRC; unformat_pg_payload would otherwise
+     make the packet 4 bytes too long for cases where it is used. */ 
   s->max_packet_bytes -= sizeof (u32);
   s->min_packet_bytes -= sizeof (u32);
 
   ok = unformat_user (input, unformat_pg_ethernet_header, s);
 
+  /* Correct for presence of CRC. */ 
   s->max_packet_bytes += sizeof (u32);
   s->min_packet_bytes += sizeof (u32);
 
@@ -188,8 +191,10 @@ unformat_pg_ethernet_header_with_crc (unformat_input_t * input, va_list * args)
 			    /* resulting_group_index not useful */ 0);
 
   e->lsb_bit_offset = n_bytes_in_ethernet_frame * BITS (u8);
-  e->n_bits = 32;
-  pg_edit_set_fixed (e, 0x12345678);
+  e->n_bits = BITS (u32);
+
+  /* FIXME maybe we should actually compute the CRC. */
+  pg_edit_set_fixed (e, 0);
 
   return 1;
 }
