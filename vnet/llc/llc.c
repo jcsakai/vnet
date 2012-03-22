@@ -139,9 +139,10 @@ unformat_llc_header (unformat_input_t * input, va_list * args)
   return 1;
 }
 
-static uword llc_set_rewrite (vnet_main_t * vm,
+static uword
+llc_rewrite_for_sw_interface (vnet_main_t * vm,
 			      u32 sw_if_index,
-			      u32 l3_type,
+			      vnet_l3_packet_type_t l3_type,
 			      void * dst_address,
 			      void * rewrite,
 			      uword max_rewrite_bytes)
@@ -170,7 +171,7 @@ VNET_HW_INTERFACE_CLASS (llc_hw_interface_class) = {
   .name = "LLC",
   .format_header = format_llc_header_with_length,
   .unformat_header = unformat_llc_header,
-  .set_rewrite = llc_set_rewrite,
+  .rewrite_for_sw_interface = llc_rewrite_for_sw_interface,
 };
 
 static void add_protocol (llc_main_t * pm,

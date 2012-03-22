@@ -346,7 +346,7 @@ tuntap_exit (vlib_main_t * vm)
   return 0;
 }
 
-VLIB_EXIT_FUNCTION (tuntap_exit);
+VLIB_MAIN_LOOP_EXIT_FUNCTION (tuntap_exit);
 
 static clib_error_t *
 tuntap_config (vlib_main_t * vm, unformat_input_t * input)

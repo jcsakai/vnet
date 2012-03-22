@@ -87,9 +87,10 @@ static VNET_DEVICE_CLASS (pg_dev_class) = {
   .format_device_name = format_pg_interface_name,
 };
 
-static uword pg_set_rewrite (vnet_main_t * vm,
+static uword
+pg_rewrite_for_sw_interface (vnet_main_t * vm,
 			     u32 sw_if_index,
-			     u32 l3_type,
+			     vnet_l3_packet_type_t l3_type,
 			     void * dst_address,
 			     void * rewrite,
 			     uword max_rewrite_bytes)
@@ -105,7 +106,7 @@ static uword pg_set_rewrite (vnet_main_t * vm,
 
 static VNET_HW_INTERFACE_CLASS (pg_interface_class) = {
   .name = "Packet generator",
-  .set_rewrite = pg_set_rewrite,
+  .rewrite_for_sw_interface = pg_rewrite_for_sw_interface,
 };
 
 u32 pg_interface_find_free (pg_main_t * pg, uword stream_index)

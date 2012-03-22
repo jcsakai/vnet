@@ -27,9 +27,10 @@
 #include <vnet/pg/pg.h>
 #include <vnet/srp/srp.h>
 
-static uword srp_set_rewrite (vnet_main_t * vm,
+static uword
+srp_rewrite_for_sw_interface (vnet_main_t * vm,
 			      u32 sw_if_index,
-			      u32 l3_type,
+			      vnet_l3_packet_type_t l3_type,
 			      void * dst_address,
 			      void * rewrite,
 			      uword max_rewrite_bytes)
@@ -279,7 +280,7 @@ VNET_HW_INTERFACE_CLASS (srp_hw_interface_class) = {
   .format_device = format_srp_device,
   .unformat_hw_address = unformat_ethernet_address,
   .unformat_header = unformat_srp_header,
-  .set_rewrite = srp_set_rewrite,
+  .rewrite_for_sw_interface = srp_rewrite_for_sw_interface,
   .is_valid_class_for_interface = srp_is_valid_class_for_interface,
   .hw_class_change = srp_interface_hw_class_change,
 };
