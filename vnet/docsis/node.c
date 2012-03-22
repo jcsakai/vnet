@@ -93,7 +93,7 @@ u16 crc_itu_t_table[256] = {
 always_inline u16 crc_itu_t_update (u16 crc, u8 data)
 { return (crc << 8) ^ crc_itu_t_table[((crc >> 8) ^ data) & 0xff]; }
 
-u16 crc_itu_t (u16 crc, const u8 *buffer, size_t len)
+u16 docsis_header_crc_itu_t (u16 crc, const u8 * buffer, size_t len)
 {
   while (len--)
     crc = crc_itu_t_update (crc, *buffer++);
@@ -162,7 +162,7 @@ docsis_input_slow_path (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_buffe
 	  length_is_valid0 = h0.control_packet_type == DOCSIS_CONTROL_PACKET_TYPE_timing_management;
 	  break;
 
-	case DOCSIS_CONTROL_PACKET_TYPE_other_management:
+	case DOCSIS_CONTROL_PACKET_TYPE_management:
 	case DOCSIS_CONTROL_PACKET_TYPE_fragmentation:
 	  n_bytes_header0 += d0->generic.n_bytes_in_extended_header;
 	  break;
@@ -240,7 +240,7 @@ docsis_input_slow_path (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_buffe
 
   if (is_control0)
     {
-      if (h0.control_packet_type == DOCSIS_CONTROL_PACKET_TYPE_other_management
+      if (h0.control_packet_type == DOCSIS_CONTROL_PACKET_TYPE_management
 	  || h0.control_packet_type == DOCSIS_CONTROL_PACKET_TYPE_timing_management)
 	{
 	  docsis_management_packet_t * m0;
@@ -463,6 +463,7 @@ docsis_input (vlib_main_t * vm,
 		    }
 		}
 	    }
+	  continue;
 
 	slow_path_x2:
 	  next0 = docsis_input_slow_path (vm, node, b0);
@@ -556,6 +557,7 @@ docsis_input (vlib_main_t * vm,
 	      to_next += 1;
 	      n_left_to_next -= 1;
 	    }
+	  continue;
 
 	slow_path_x1:
 	  next0 = docsis_input_slow_path (vm, node, b0);
@@ -600,6 +602,10 @@ static clib_error_t * docsis_input_init (vlib_main_t * vm)
   docsis_main_t * dm = &docsis_main;
   clib_error_t * error;
   int i, j;
+
+  /* Basic sanity. */
+  ASSERT (sizeof (docsis_packet_header_t) == 1);
+  ASSERT (STRUCT_SIZE_OF (docsis_packet_t, generic) == 6);
 
   dm->role = DOCSIS_ROLE_CMTS;
 

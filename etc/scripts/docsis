@@ -1,0 +1,18 @@
+packet-generator new {
+  name x
+  limit 1
+  node docsis-input
+  size 64-64
+  no-recycle
+  data {
+    ethernet
+    IP4: 1.2.3 -> 4.5.6
+    ICMP: 1.2.3.4 -> 5.6.7.8
+    ICMP echo_request
+    incrementing 100
+  }
+}
+
+tr add pg-input 100
+ip route 5.6.7.8/32 via pg/stream-0 000102030405060708090a0b0c0d
+

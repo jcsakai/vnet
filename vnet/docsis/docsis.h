@@ -102,4 +102,6 @@ docsis_setup_node (vlib_main_t * vm, u32 node_index)
   pn->unformat_edit = unformat_pg_docsis_header;
 }
 
+u16 docsis_header_crc_itu_t (u16 crc, const u8 * buffer, size_t len);
+
 #endif /* included_docsis_h */

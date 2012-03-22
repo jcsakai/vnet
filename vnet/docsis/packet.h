@@ -16,7 +16,7 @@
    _ (symbol, number). */
 #define foreach_docsis_control_packet_type	\
   _ (timing_management, 0x0)			\
-  _ (other_management, 0x1)			\
+  _ (management, 0x1)				\
   _ (request_frame, 0x2)			\
   _ (fragmentation, 0x3)			\
   _ (queue_depth_request, 0x4)			\
@@ -35,36 +35,32 @@ typedef enum {
 } docsis_control_packet_type_t;
 
 /* All packets start with 8 bit header. */
-typedef struct {
+typedef union {
+  CLIB_PACKED (struct {
 #if CLIB_ARCH_IS_BIG_ENDIAN
-  docsis_packet_type_t packet_type : 2;
-
-  union {
-    u8 mac_parm : 5;
+    docsis_packet_type_t packet_type : 2;
 
     /* Extended packet type for packet_type == control. */
     docsis_control_packet_type_t control_packet_type : 5;
-  };
 
-  u8 extended_header_present : 1;
+    u8 extended_header_present : 1;
 #else
-  u8 extended_header_present : 1;
-
-  union {
-    u8 mac_parm : 5;
+    u8 extended_header_present : 1;
 
     /* Extended packet type for packet_type == control. */
     docsis_control_packet_type_t control_packet_type : 5;
-  };
 
-  docsis_packet_type_t packet_type : 2;
+    docsis_packet_type_t packet_type : 2;
 #endif
+  });
+
+  u8 as_u8;
 } docsis_packet_header_t;
 
 always_inline uword
 docsis_packet_header_is_management (docsis_packet_header_t h)
 { return (h.packet_type == DOCSIS_PACKET_TYPE_control
-	  && (h.control_packet_type == DOCSIS_CONTROL_PACKET_TYPE_other_management
+	  && (h.control_packet_type == DOCSIS_CONTROL_PACKET_TYPE_management
 	      || h.control_packet_type == DOCSIS_CONTROL_PACKET_TYPE_timing_management)); }
 
 always_inline uword
@@ -87,7 +83,7 @@ typedef u16 docsis_service_id_t;
    0x3fff => all CMs.
  */
 
-typedef CLIB_PACKED (union {
+typedef union {
   /* For request_frame control packets. */
   struct {
     docsis_packet_header_t header;
@@ -144,7 +140,7 @@ typedef CLIB_PACKED (union {
 
   /* So that CRC can access packet as byte string. */
   u8 as_u8[0];
-}) docsis_packet_t;
+} docsis_packet_t;
 
 always_inline void *
 docsis_packet_get_payload (docsis_packet_t * d)
@@ -270,7 +266,11 @@ typedef CLIB_PACKED (struct {
   /* Packet type and docsis version. */
   u8 docsis_version;
 
-  docsis_management_packet_type_t type : 8;
+  union {
+    docsis_management_packet_type_t type : 8;
+
+    u8 type_as_u8;
+  };
 
   u8 payload[0];
 }) docsis_management_packet_t;
