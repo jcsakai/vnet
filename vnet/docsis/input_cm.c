@@ -29,8 +29,8 @@
 static docsis_node_error_t
 cm_input_time_synchronization (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
-  u32 * cmts_time_stamp = (void *) d->generic.payload;
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
+  u32 * cmts_time_stamp = (void *) d->payload;
   ASSERT (d == 0);
   ASSERT (*cmts_time_stamp == 0);
   return DOCSIS_ERROR_NONE;
@@ -38,175 +38,175 @@ cm_input_time_synchronization (docsis_main_t * dm, vlib_buffer_t * b)
 
 static docsis_node_error_t cm_input_upstream_channel_descriptor (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_upstream_bandwidth_allocation_map (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_ranging_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_registration_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_upstream_channel_change_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_privacy_key_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_registration_ack (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_service_add_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_service_add_ack (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_service_change_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_service_change_ack (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_service_del_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_channel_change_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_channel_change_ack (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_device_class_id_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_upstream_tx_disable (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_upstream_channel_descriptor_docsis_2_or_3 (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_downstream_channel_descriptor (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_mac_domain_descriptor (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_upstream_channel_descriptor_docsis_3 (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_bonding_change_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_dynamic_bonding_change_ack (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_path_verify_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_cable_modem_control_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }
 
 static docsis_node_error_t cm_input_multipart_registration_response (docsis_main_t * dm, vlib_buffer_t * b)
 {
-  docsis_packet_t * d = vlib_buffer_get_current (b);
+  docsis_management_packet_t * d = vlib_buffer_get_current (b);
   ASSERT (d == 0);
   return DOCSIS_ERROR_NONE;
 }

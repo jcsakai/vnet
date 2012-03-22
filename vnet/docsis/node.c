@@ -597,6 +597,221 @@ VLIB_REGISTER_NODE (docsis_input_node) = {
   .unformat_buffer = unformat_docsis_header,
 };
 
+/* Append likely incorrect ethernet checksum to packet. */
+always_inline void
+docsis_fixup_add_ethernet_crc (vlib_main_t * vm, vlib_buffer_t * b)
+{
+  while (b->flags & VLIB_BUFFER_NEXT_PRESENT)
+    b = vlib_get_buffer (vm, b->next_buffer);
+  b->current_length += sizeof (u32);
+}
+
+static uword
+docsis_fixup_rewrite (vlib_main_t * vm,
+		      vlib_node_runtime_t * node,
+		      vlib_frame_t * from_frame)
+{
+  u32 n_left_from, next_index, * from, * to_next;
+
+  from = vlib_frame_vector_args (from_frame);
+  n_left_from = from_frame->n_vectors;
+
+  next_index = node->cached_next_index;
+
+  while (n_left_from > 0)
+    {
+      u32 n_left_to_next;
+
+      vlib_get_next_frame (vm, node, next_index,
+			   to_next, n_left_to_next);
+
+      while (n_left_from >= 4 && n_left_to_next >= 2)
+	{
+	  u32 bi0, bi1;
+	  vlib_buffer_t * b0, * b1;
+	  docsis_rewrite_header_t * r0, * r1;
+	  docsis_packet_t * d0, * d1;
+	  u16 crc0, crc1;
+	  u32 len0, len1, next0, next1, enqueue_code;
+
+	  /* Prefetch next iteration. */
+	  {
+	    vlib_buffer_t * p2, * p3;
+
+	    p2 = vlib_get_buffer (vm, from[2]);
+	    p3 = vlib_get_buffer (vm, from[3]);
+
+	    vlib_prefetch_buffer_header (p2, LOAD);
+	    vlib_prefetch_buffer_header (p3, LOAD);
+
+	    CLIB_PREFETCH (p2->data, CLIB_CACHE_LINE_BYTES, LOAD);
+	    CLIB_PREFETCH (p3->data, CLIB_CACHE_LINE_BYTES, LOAD);
+	  }
+
+	  bi0 = from[0];
+	  bi1 = from[1];
+	  to_next[0] = bi0;
+	  to_next[1] = bi1;
+	  from += 2;
+	  to_next += 2;
+	  n_left_to_next -= 2;
+	  n_left_from -= 2;
+
+	  b0 = vlib_get_buffer (vm, bi0);
+	  b1 = vlib_get_buffer (vm, bi1);
+
+	  r0 = (void *) (b0->data + b0->current_data);
+	  r1 = (void *) (b1->data + b1->current_data);
+
+	  d0 = &r0->docsis;
+	  d1 = &r1->docsis;
+
+	  docsis_fixup_add_ethernet_crc (vm, b0);
+	  docsis_fixup_add_ethernet_crc (vm, b1);
+
+	  len0 = vlib_buffer_length_in_chain (vm, b0) - sizeof (d0->generic);
+	  len1 = vlib_buffer_length_in_chain (vm, b1) - sizeof (d1->generic);
+
+	  /* Hack: next index for interface output stored in length field. */
+	  next0 = docsis_rewrite_header_get_next_index (r0);
+	  next1 = docsis_rewrite_header_get_next_index (r1);
+
+	  d0->generic.n_bytes_in_payload_plus_extended_header
+	    = clib_host_to_net_u16 (d0->generic.n_bytes_in_extended_header + len0);
+
+	  d1->generic.n_bytes_in_payload_plus_extended_header
+	    = clib_host_to_net_u16 (d1->generic.n_bytes_in_extended_header + len1);
+
+	  /* Incremental CRC stored in *host* byte order. */
+	  crc0 = d0->generic.expected_header_crc;
+	  crc1 = d1->generic.expected_header_crc;
+
+	  crc0 = crc_itu_t_update (crc0, d0->as_u8[2]);
+	  crc1 = crc_itu_t_update (crc1, d1->as_u8[2]);
+
+	  crc0 = crc_itu_t_update (crc0, d0->as_u8[3]);
+	  crc1 = crc_itu_t_update (crc1, d1->as_u8[3]);
+
+	  d0->generic.expected_header_crc = clib_host_to_net_u16 (crc0);
+	  d1->generic.expected_header_crc = clib_host_to_net_u16 (crc1);
+
+	  enqueue_code = (next0 != next_index) + 2*(next1 != next_index);
+	  if (PREDICT_FALSE (enqueue_code != 0))
+	    {
+	      switch (enqueue_code)
+		{
+		case 1:
+		  /* A B A */
+		  to_next[-2] = bi1;
+		  to_next -= 1;
+		  n_left_to_next += 1;
+		  vlib_set_next_frame_buffer (vm, node, next0, bi0);
+		  break;
+
+		case 2:
+		  /* A A B */
+		  to_next -= 1;
+		  n_left_to_next += 1;
+		  vlib_set_next_frame_buffer (vm, node, next1, bi1);
+		  break;
+
+		case 3:
+		  /* A B B or A B C */
+		  to_next -= 2;
+		  n_left_to_next += 2;
+		  vlib_set_next_frame_buffer (vm, node, next0, bi0);
+		  vlib_set_next_frame_buffer (vm, node, next1, bi1);
+		  if (next0 == next1)
+		    {
+		      vlib_put_next_frame (vm, node, next_index,
+					   n_left_to_next);
+		      next_index = next1;
+		      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+		    }
+		}
+	    }
+	}
+    
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  u32 bi0;
+	  vlib_buffer_t * b0;
+	  docsis_rewrite_header_t * r0;
+	  docsis_packet_t * d0;
+	  u16 crc0;
+	  u32 len0, next0;
+
+	  bi0 = from[0];
+	  to_next[0] = bi0;
+	  from += 1;
+	  to_next += 1;
+	  n_left_to_next -= 1;
+	  n_left_from -= 1;
+
+	  b0 = vlib_get_buffer (vm, bi0);
+
+	  r0 = (void *) (b0->data + b0->current_data);
+	  d0 = &r0->docsis;
+
+	  docsis_fixup_add_ethernet_crc (vm, b0);
+
+	  len0 = vlib_buffer_length_in_chain (vm, b0) - sizeof (d0->generic);
+
+	  /* Hack: next index for interface output stored in length field. */
+	  next0 = docsis_rewrite_header_get_next_index (r0);
+
+	  d0->generic.n_bytes_in_payload_plus_extended_header
+	    = clib_host_to_net_u16 (d0->generic.n_bytes_in_extended_header + len0);
+
+	  /* Incremental CRC stored in *host* byte order. */
+	  crc0 = d0->generic.expected_header_crc;
+
+	  crc0 = crc_itu_t_update (crc0, d0->as_u8[2]);
+
+	  crc0 = crc_itu_t_update (crc0, d0->as_u8[3]);
+
+	  d0->generic.expected_header_crc = clib_host_to_net_u16 (crc0);
+
+	  /* Sent packet to wrong next? */
+	  if (PREDICT_FALSE (next0 != next_index))
+	    {
+	      /* Return old frame; remove incorrectly enqueued packet. */
+	      vlib_put_next_frame (vm, node, next_index, n_left_to_next + 1);
+
+	      /* Send to correct next. */
+	      next_index = next0;
+	      vlib_get_next_frame (vm, node, next_index,
+				   to_next, n_left_to_next);
+	      to_next[0] = bi0;
+	      to_next += 1;
+	      n_left_to_next -= 1;
+	    }
+	}
+
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
+  if (node->flags & VLIB_NODE_FLAG_TRACE)
+    vlib_trace_frame_buffers_only (vm, node,
+				   from,
+				   n_left_from,
+				   sizeof (from[0]),
+				   sizeof (docsis_input_trace_t));
+
+  return from_frame->n_vectors;
+}
+
+VLIB_REGISTER_NODE (docsis_fixup_rewrite_node) = {
+  .function = docsis_fixup_rewrite,
+  .name = "docsis-fixup-rewrite",
+  /* Takes a vector of packets. */
+  .vector_size = sizeof (u32),
+
+  .format_buffer = format_docsis_header_with_length,
+  .format_trace = format_docsis_input_trace,
+  .unformat_buffer = unformat_docsis_header,
+};
+
 static clib_error_t * docsis_input_init (vlib_main_t * vm)
 {
   docsis_main_t * dm = &docsis_main;

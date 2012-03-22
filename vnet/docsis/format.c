@@ -157,8 +157,26 @@ static uword unformat_docsis_packet_header (unformat_input_t * i, va_list * va)
 
 uword unformat_docsis_header (unformat_input_t * i, va_list * va)
 {
-  ASSERT (0);
-  return 0;
+  u8 ** result = va_arg (*va, u8 **);
+  docsis_packet_header_t dh;
+  docsis_management_packet_t dm;
+  docsis_rewrite_header_t h;
+  u8 * eh = 0, * p;
+
+  memset (&dm, 0, sizeof (dm));
+  if (! unformat_user (i, unformat_docsis_packet_header, &dh, &dm)
+      || ! unformat_user (i, unformat_ethernet_header, &eh)
+      || dh.packet_type != DOCSIS_PACKET_TYPE_ethernet)
+    return 0;
+
+  vec_add2 (*result, p, sizeof (h));
+
+  memset (&h, 0, sizeof (h));
+  h.docsis.generic.header = dh;
+  memcpy (&h.ethernet, eh, sizeof (h.ethernet));
+  vec_free (eh);
+  memcpy (p, &h, sizeof (h));
+  return 1;
 }
 
 typedef struct {
@@ -295,7 +313,8 @@ uword unformat_pg_docsis_header (unformat_input_t * i, va_list * va)
 
     if (docsis_packet_header_is_management (dh))
       {
-	pg_docsis_management_packet_t * me = (void *) (crc_edit + 1);
+	pg_docsis_management_packet_t * me;
+	me = (void *) he + sizeof_edits - sizeof (pg_docsis_management_packet_t);
 	pg_docsis_management_packet_init (me);
 	pg_edit_set_fixed (&me->docsis_version, dm.docsis_version);
 	pg_edit_set_fixed (&me->type, dm.type);

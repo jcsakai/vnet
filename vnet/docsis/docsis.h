@@ -54,6 +54,13 @@ typedef enum {
   DOCSIS_N_ROLE,
 } docsis_role_t;
 
+typedef struct {
+  u32 driver_instance;
+
+  /* Ethernet (MAC) address for this interface. */
+  u8 address[6];
+} docsis_interface_t;
+
 struct docsis_main_t;
 
 typedef docsis_node_error_t (docsis_input_handler_t) (struct docsis_main_t * dm, vlib_buffer_t * b0);
@@ -77,6 +84,8 @@ typedef struct docsis_main_t {
      4 => >= DOCSIS 3.0
      etc. */
   u32 max_supported_version;
+
+  docsis_interface_t * interface_pool;
 } docsis_main_t;
 
 docsis_main_t docsis_main;
@@ -102,6 +111,30 @@ docsis_setup_node (vlib_main_t * vm, u32 node_index)
   pn->unformat_edit = unformat_pg_docsis_header;
 }
 
+clib_error_t *
+docsis_register_interface (vnet_main_t * vm,
+			   u32 dev_class_index,
+			   u32 dev_instance,
+			   u8 * address,
+			   u32 * hw_if_index_return);
+
+typedef struct {
+  docsis_packet_t docsis;
+
+  ethernet_header_t ethernet;
+} docsis_rewrite_header_t;
+
+always_inline u16
+docsis_rewrite_header_get_next_index (docsis_rewrite_header_t * h)
+{ return h->docsis.generic.n_bytes_in_payload_plus_extended_header; }
+
+/* Hack: next index for interface output stored in length field. */
+always_inline void
+docsis_rewrite_header_set_next_index (docsis_rewrite_header_t * h, u16 ni)
+{ h->docsis.generic.n_bytes_in_payload_plus_extended_header = ni; }
+
 u16 docsis_header_crc_itu_t (u16 crc, const u8 * buffer, size_t len);
+
+vlib_node_registration_t docsis_fixup_rewrite_node;
 
 #endif /* included_docsis_h */

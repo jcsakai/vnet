@@ -107,19 +107,6 @@ typedef union {
     u16 expected_header_crc;
   } concatenate;
 
-   /* For queue_depth_request control packets. */
-  struct {
-    docsis_packet_header_t header;
-
-    /* Number of bytes per unit is configured separately for each service id. */
-    u16 n_units_requested;
-
-    /* Service id requesting bandwidth. */
-    u16 service_id;
-
-    u16 expected_header_crc;
-  } queue_depth_request;
-
   /* Generic packet: everything else. */
   struct {
     docsis_packet_header_t header;
@@ -147,6 +134,19 @@ docsis_packet_get_payload (docsis_packet_t * d)
 {
   return d->generic.payload + (d->generic.header.extended_header_present ? d->generic.n_bytes_in_extended_header : 0);
 }
+
+/* For queue_depth_request control packets which have a different size header. */
+typedef struct {
+  docsis_packet_header_t header;
+
+  /* Number of bytes per unit is configured separately for each service id. */
+  u16 n_units_requested;
+
+  /* Service id requesting bandwidth. */
+  u16 service_id;
+
+  u16 expected_header_crc;
+} docsis_packet_queue_depth_request_t;
 
 #define foreach_docsis_extended_header_tlv_type				\
   _ (nop, 0, 0)								\
