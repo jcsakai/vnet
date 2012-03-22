@@ -176,32 +176,27 @@ ethernet_register_input_type (vlib_main_t * vm,
 			      u32 node_index);
 
 /* Formats ethernet address X:X:X:X:X:X */
-u8 * format_ethernet_address (u8 * s, va_list * args);
-u8 * format_ethernet_type (u8 * s, va_list * args);
-u8 * format_ethernet_header (u8 * s, va_list * args);
-u8 * format_ethernet_header_with_length (u8 * s, va_list * args);
+format_function_t format_ethernet_address;
+format_function_t format_ethernet_type;
+format_function_t format_ethernet_header;
+format_function_t format_ethernet_header_with_length;
 
 /* Parse ethernet address in either X:X:X:X:X:X unix or X.X.X cisco format. */
-uword
-unformat_ethernet_address (unformat_input_t * input, va_list * args);
+unformat_function_t unformat_ethernet_address;
 
 /* Parse ethernet type as 0xXXXX or type name from ethernet/types.def.
    In either host or network byte order. */
-uword
-unformat_ethernet_type_host_byte_order (unformat_input_t * input,
-					va_list * args);
-uword
-unformat_ethernet_type_net_byte_order (unformat_input_t * input,
-				       va_list * args);
+unformat_function_t unformat_ethernet_type_host_byte_order;
+unformat_function_t unformat_ethernet_type_net_byte_order;
 
 /* Parse ethernet header. */
-uword
-unformat_ethernet_header (unformat_input_t * input, va_list * args);
+unformat_function_t unformat_ethernet_header;
 
 /* Parse ethernet interface name; return hw_if_index. */
-uword unformat_ethernet_interface (unformat_input_t * input, va_list * args);
+unformat_function_t unformat_ethernet_interface;
 
-uword unformat_pg_ethernet_header (unformat_input_t * input, va_list * args);
+unformat_function_t unformat_pg_ethernet_header;
+unformat_function_t unformat_pg_ethernet_header_with_crc;
 
 always_inline void
 ethernet_setup_node (vlib_main_t * vm, u32 node_index)

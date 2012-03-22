@@ -161,3 +161,35 @@ unformat_pg_ethernet_header (unformat_input_t * input, va_list * args)
   return error == 0;
 }
 
+/* As above but inserts and computes ethernet CRC. */
+uword
+unformat_pg_ethernet_header_with_crc (unformat_input_t * input, va_list * args)
+{
+  pg_stream_t * s = va_arg (*args, pg_stream_t *);
+  pg_edit_t * e;
+  u32 eth_group_index, n_bytes_in_ethernet_frame, ok;
+
+  eth_group_index = vec_len (s->edit_groups);
+
+  s->max_packet_bytes -= sizeof (u32);
+  s->min_packet_bytes -= sizeof (u32);
+
+  ok = unformat_user (input, unformat_pg_ethernet_header, s);
+
+  s->max_packet_bytes += sizeof (u32);
+  s->min_packet_bytes += sizeof (u32);
+
+  if (! ok)
+    return 0;
+
+  n_bytes_in_ethernet_frame = pg_edit_group_n_bytes (s, eth_group_index);
+
+  e = pg_create_edit_group (s, sizeof (e[0]), sizeof (u32),
+			    /* resulting_group_index not useful */ 0);
+
+  e->lsb_bit_offset = n_bytes_in_ethernet_frame * BITS (u8);
+  e->n_bits = 32;
+  pg_edit_set_fixed (e, 0x12345678);
+
+  return 1;
+}
