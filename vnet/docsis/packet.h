@@ -400,12 +400,18 @@ typedef CLIB_PACKED (struct {
   docsis_tlv_t tlvs[0];
 }) docsis_burst_descriptor_t;
 
+typedef struct {
+  /* Total number of fragments. */
+  u8 count;
+
+  /* Starts with 1; last fragment has sequence number equal to count. */
+  u8 this_fragment_sequence_number;
+} docsis_management_packet_fragment_info_t;
+
 typedef CLIB_PACKED (struct {
   u8 configuration_change_count;
   
-  u8 n_fragments;
-
-  u8 this_fragment_sequence_number;
+  docsis_management_packet_fragment_info_t fragment_info;
 
   docsis_tlv_t tlvs[0];
 }) docsis_downstream_channel_descriptor_t;
@@ -413,9 +419,7 @@ typedef CLIB_PACKED (struct {
 typedef struct {
   u8 configuration_change_count;
   
-  u8 n_fragments;
-
-  u8 this_fragment_sequence_number;
+  docsis_management_packet_fragment_info_t fragment_info;
 
   u8 current_channel_downstream_channel_id;
 
@@ -614,9 +618,7 @@ typedef struct {
   /* Temporary service id chosen by CM. */
   u16 temporary_service_id;
 
-  u8 n_fragments;
-
-  u8 this_fragment_sequence_number;
+  docsis_management_packet_fragment_info_t fragment_info;
 
   docsis_tlv_t tlvs[0];
 } docsis_multipart_registration_request_t;
@@ -663,9 +665,7 @@ typedef CLIB_PACKED (struct {
   /* 0 ok, 1 authentication failure, 2 class of service failure. */
   u8 response;
 
-  u8 n_fragments;
-
-  u8 this_fragment_sequence_number;
+  docsis_management_packet_fragment_info_t fragment_info;
 
   docsis_tlv_t tlvs[0];
 }) docsis_multipart_registration_response_t;
@@ -946,8 +946,7 @@ typedef struct {
 
 typedef struct {
   u16 transaction_id;
-  u8 n_fragments;
-  u8 this_fragment_sequence_number;
+  docsis_management_packet_fragment_info_t fragment_info;
   docsis_tlv_t tlvs[0];
 } docsis_fragmented_transaction_request_t;
 
