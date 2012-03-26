@@ -297,7 +297,7 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
   vlib_main_t * vm = &vlib_global_main;
   ip_lookup_main_t * lm = &im->lookup_main;
   ip4_fib_t * fib;
-  u32 dst_address, dst_address_length, adj_index;
+  u32 dst_address, dst_address_length, adj_index, old_adj_index;
   uword * hash, is_del;
   ip4_add_del_route_callback_t * cb;
 
@@ -355,16 +355,17 @@ void ip4_add_del_route (ip4_main_t * im, ip4_add_del_route_args_t * a)
     ip4_fib_set_adj_index (im, fib, a->flags, dst_address, dst_address_length,
 			   adj_index);
 
-  ip4_fib_mtrie_add_del_route (fib, a->dst_address, dst_address_length, adj_index, is_del);
+  old_adj_index = fib->old_hash_values[0];
+
+  ip4_fib_mtrie_add_del_route (fib, a->dst_address, dst_address_length,
+			       is_del ? old_adj_index : adj_index,
+			       is_del);
 
   /* Delete old adjacency index if present and changed. */
-  {
-    u32 old_adj_index = fib->old_hash_values[0];
-    if (! (a->flags & IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY)
-	&& old_adj_index != ~0
-	&& old_adj_index != adj_index)
-      ip_del_adjacency (lm, old_adj_index);
-  }
+  if (! (a->flags & IP4_ROUTE_FLAG_KEEP_OLD_ADJACENCY)
+      && old_adj_index != ~0
+      && old_adj_index != adj_index)
+    ip_del_adjacency (lm, old_adj_index);
 }
 
 static void serialize_ip4_add_del_route_next_hop_msg (serialize_main_t * m, va_list * va)

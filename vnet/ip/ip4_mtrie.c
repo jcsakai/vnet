@@ -239,7 +239,10 @@ unset_leaf (ip4_fib_mtrie_t * m,
 
   n_dst_bits_next_plies = a->dst_address_length - BITS (u8) * (dst_address_byte_index + 1);
 
-  dst_byte = a->dst_address.as_u8[dst_address_byte_index];
+  if (n_dst_bits_next_plies < 0)
+    dst_byte = 0;
+  else
+    dst_byte = a->dst_address.as_u8[dst_address_byte_index];
 
   n_dst_bits_this_ply = n_dst_bits_next_plies <= 0 ? -n_dst_bits_next_plies : 0;
   del_leaf = ip4_fib_mtrie_leaf_set_adj_index (a->adj_index);
