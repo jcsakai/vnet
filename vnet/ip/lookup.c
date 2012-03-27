@@ -544,15 +544,9 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
   vec_validate_init_empty (lm->if_address_pool_index_by_sw_if_index, sw_if_index, ~0);
   a = p ? pool_elt_at_index (lm->if_address_pool, p[0]) : 0;
 
-  /* Verify given length. */
-  if (a && address_length != a->address_length)
-    return clib_error_create ("%U wrong length (expected %d) for interface %U",
-			      lm->format_address_and_length, address, address_length,
-			      a->address_length,
-			      format_vnet_sw_if_index_name, vnm, sw_if_index);
-
   if (is_del)
     {
+      /* Return error if address to delete does not exist. */
       if (!a) 
         {
           vnet_sw_interface_t * si = vnet_get_sw_interface (vnm, sw_if_index);
@@ -585,9 +579,8 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
       u32 pi = lm->if_address_pool_index_by_sw_if_index[sw_if_index];
       u32 ai;
 
-      prev = pi != ~0 ? pool_elt_at_index (lm->if_address_pool, pi) : 0;
-
       pool_get (lm->if_address_pool, a);
+
       memset (a, ~0, sizeof (a[0]));
       ai = a - lm->if_address_pool;
       a->address_key = mhash_set (&lm->address_to_if_address_index, address, ai, /* old_value */ 0);
@@ -596,6 +589,10 @@ ip_interface_address_add_del (ip_lookup_main_t * lm,
       a->flags = 0;
       a->prev_this_sw_interface = pi;
       a->next_this_sw_interface = ~0;
+
+      prev = pi != ~0 ? pool_elt_at_index (lm->if_address_pool, pi) : 0;
+      if (prev)
+	prev->next_this_sw_interface = ai;
 
       lm->if_address_pool_index_by_sw_if_index[sw_if_index] = pi != ~0 ? pi : ai;
       if (result_if_address_index)
