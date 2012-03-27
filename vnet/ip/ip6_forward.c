@@ -1110,6 +1110,32 @@ ip6_add_del_interface_address_internal (vlib_main_t * vm,
   clib_error_t * error;
   u32 if_address_index;
 
+  /* When adding an address check that it does not conflict with an existing address. */
+  if (! is_del)
+    {
+      ip_interface_address_t * ia;
+      foreach_ip_interface_address (&im->lookup_main, ia, sw_if_index, ({
+	ip6_address_t * x = ip_interface_address_get_address (&im->lookup_main, ia);
+
+	if (ip6_destination_matches_route (im, address, x, ia->address_length)
+	    || ip6_destination_matches_route (im, x, address, address_length))
+	  return clib_error_create ("failed to add %U which conflicts with %U for interface %U",
+				    format_ip6_address_and_length, address, address_length,
+				    format_ip6_address_and_length, x, ia->address_length,
+				    format_vnet_sw_if_index_name, vnm, sw_if_index);
+      }));
+    }
+
+  if (vm->mc_main && redistribute)
+    {
+      ip6_interface_address_t a;
+      a.sw_if_index = sw_if_index;
+      a.address = address[0];
+      a.length = address_length;
+      mc_serialize (vm->mc_main, &ip6_set_interface_address_msg, &a);
+      goto done;
+    }
+
   {
     uword elts_before = pool_elts (lm->if_address_pool);
 
@@ -1127,16 +1153,6 @@ ip6_add_del_interface_address_internal (vlib_main_t * vm,
     if (elts_before == pool_elts (lm->if_address_pool))
       goto done;
   }
-
-  if (vm->mc_main && redistribute)
-    {
-      ip6_interface_address_t a;
-      a.sw_if_index = sw_if_index;
-      a.address = address[0];
-      a.length = address_length;
-      mc_serialize (vm->mc_main, &ip6_set_interface_address_msg, &a);
-      goto done;
-    }
 
   if (vnet_sw_interface_is_admin_up (vnm, sw_if_index) && insert_routes)
     {
