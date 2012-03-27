@@ -70,9 +70,9 @@ add_del_ip_address (vlib_main_t * vm,
     }
 
   if (unformat (input, "%U/%d", unformat_ip4_address, &a4, &length))
-    ip4_add_del_interface_address (vm, sw_if_index, &a4, length, is_del);
+    error = ip4_add_del_interface_address (vm, sw_if_index, &a4, length, is_del);
   else if (unformat (input, "%U/%d", unformat_ip6_address, &a6, &length))
-    ip6_add_del_interface_address (vm, sw_if_index, &a6, length, is_del);
+    error = ip6_add_del_interface_address (vm, sw_if_index, &a6, length, is_del);
   else
     {
       error = clib_error_return (0, "expected IP4/IP6 address/length `%U'",
