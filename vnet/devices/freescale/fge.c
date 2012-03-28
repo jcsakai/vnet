@@ -30,7 +30,8 @@
 
 fge_main_t fge_main;
 
-#if 0
+#define FGE_RX_BUFFER_N_BYTES 512
+
 #define FGE_ALWAYS_POLL 0
 
 #define EVENT_SET_FLAGS 0
@@ -109,8 +110,10 @@ static u8 * format_fge_rx_or_tx_descriptor (u8 * s, va_list * va)
   uword is_rx = rx_or_tx == VLIB_RX;
   u16 t;
 
-  s = format (s, "buffer 0x%Lx, %d bytes this buffer",
-	      d->buffer_address, d->n_bytes_this_buffer);
+  s = format (s, "buffer 0x%Lx, %d bytes this %s",
+	      d->buffer_address,
+	      d->n_bytes_this_buffer_or_packet,
+	      is_rx && (t & (1 << 11)) ? "packet plus CRC/offload" : "buffer");
 
   s = format (s, "\n%U", format_white_space, indent);
 
@@ -171,10 +174,11 @@ typedef enum {
 always_inline void
 fge_rx_next_and_error_from_status_x1 (fge_dma_descriptor_t * d0,
 				      fge_offload_header_t * o0,
-				      u8 * next0, u8 * error0)
+				      u8 * next0, u8 * error0, u32 * flags0)
 {
   u8 n0, e0, is_ip0, is_ip60;
   u16 f0, s0;
+  u32 l0;
 
   e0 = FGE_ERROR_none;
   n0 = FGE_RX_NEXT_ETHERNET_INPUT;
@@ -191,6 +195,14 @@ fge_rx_next_and_error_from_status_x1 (fge_dma_descriptor_t * d0,
 	? FGE_ERROR_ip4_checksum_error
 	: e0);
 
+  l0 = ((f0 & FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_COMPUTED)
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+
+  l0 |= ((f0 & FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_ERROR)
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+
   s0 = d0->status;
 
   /* Classify rx error bits [5:0] as "data error". */
@@ -200,6 +212,7 @@ fge_rx_next_and_error_from_status_x1 (fge_dma_descriptor_t * d0,
 
   *next0 = n0;
   *error0 = e0;
+  *flags0 = l0;
 }
 
 always_inline void
@@ -207,12 +220,13 @@ fge_rx_next_and_error_from_status_x2 (fge_dma_descriptor_t * d0,
 				      fge_dma_descriptor_t * d1,
 				      fge_offload_header_t * o0,
 				      fge_offload_header_t * o1,
-				      u8 * next0, u8 * error0,
-				      u8 * next1, u8 * error1)
+				      u8 * next0, u8 * error0, u32 * flags0,
+				      u8 * next1, u8 * error1, u32 * flags1)
 {
   u8 n0, e0, is_ip0, is_ip60;
   u8 n1, e1, is_ip1, is_ip61;
   u16 f0, s0, f1, s1;
+  u32 l0, l1;
 
   e0 = e1 = FGE_ERROR_none;
   n0 = n1 = FGE_RX_NEXT_ETHERNET_INPUT;
@@ -241,6 +255,20 @@ fge_rx_next_and_error_from_status_x2 (fge_dma_descriptor_t * d0,
 	? FGE_ERROR_ip4_checksum_error
 	: e1);
 
+  l0 = ((f0 & FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_COMPUTED)
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+  l1 = ((f1 & FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_COMPUTED)
+	? IP_BUFFER_L4_CHECKSUM_COMPUTED
+	: 0);
+
+  l0 |= ((f0 & FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_ERROR)
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+  l1 |= ((f1 & FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_ERROR)
+	 ? 0
+	 : IP_BUFFER_L4_CHECKSUM_CORRECT);
+
   s0 = d0->status;
   s1 = d1->status;
 
@@ -251,8 +279,8 @@ fge_rx_next_and_error_from_status_x2 (fge_dma_descriptor_t * d0,
   n0 = e0 != FGE_ERROR_none ? FGE_RX_NEXT_DROP : n0;
   n1 = e1 != FGE_ERROR_none ? FGE_RX_NEXT_DROP : n1;
 
-  *next0 = n0; *error0 = e0;
-  *next1 = n1; *error1 = e1;
+  *next0 = n0; *error0 = e0; *flags0 = l0;
+  *next1 = n1; *error1 = e1; *flags1 = l1;
 }
 
 typedef struct {
@@ -313,7 +341,6 @@ static u8 * format_fge_rx_dma_trace (u8 * s, va_list * va)
   return s;
 }
 
-#if 0
 always_inline void
 fge_rx_trace (fge_main_t * fm,
 	      fge_device_t * fd,
@@ -321,10 +348,9 @@ fge_rx_trace (fge_main_t * fm,
 	      fge_dma_descriptor_t * before_descriptors,
 	      u32 * before_buffers,
 	      fge_dma_descriptor_t * after_descriptors,
-	      uword n_descriptors,
-	      uword is_8254x)
+	      uword n_descriptors)
 {
-  vlib_main_t * vm = fm->vlib_main;
+  vlib_main_t * vm = &vlib_global_main;
   vlib_node_runtime_t * node = dq->rx.node;
   fge_dma_descriptor_t * bd;
   fge_dma_descriptor_t * ad;
@@ -341,6 +367,7 @@ fge_rx_trace (fge_main_t * fm,
     {
       u32 bi0, bi1, flags0, flags1;
       vlib_buffer_t * b0, * b1;
+      fge_offload_header_t * o0, * o1;
       fge_rx_dma_trace_t * t0, * t1;
       u8 next0, error0, next1, error1;
 
@@ -351,10 +378,13 @@ fge_rx_trace (fge_main_t * fm,
       b0 = vlib_get_buffer (vm, bi0);
       b1 = vlib_get_buffer (vm, bi1);
 
-      fge_rx_next_and_error_from_status_x2 (bd[0].status, bd[0].status[2],
-					    bd[1].status, bd[1].status[2],
-					     &next0, &error0, &flags0,
-					     &next1, &error1, &flags1);
+      o0 = (void *) b0->data;
+      o1 = (void *) b1->data;
+
+      fge_rx_next_and_error_from_status_x2 (&bd[0], &bd[1],
+					    o0, o1,
+					    &next0, &error0, &flags0,
+					    &next1, &error1, &flags1);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -392,6 +422,7 @@ fge_rx_trace (fge_main_t * fm,
     {
       u32 bi0, flags0;
       vlib_buffer_t * b0;
+      fge_offload_header_t * o0;
       fge_rx_dma_trace_t * t0;
       u8 next0, error0;
 
@@ -400,13 +431,10 @@ fge_rx_trace (fge_main_t * fm,
 
       b0 = vlib_get_buffer (vm, bi0);
 
-      if (is_8254x)
-	fge_rx_legacy_next_and_error_from_status_x1 (bd[0].rx_legacy.status,
-						     &next0, &error0, &flags0);
-      else
-	fge_rx_next_and_error_from_status_x1 (bd[0].rx_from_hw.status[0],
-					      bd[0].rx_from_hw.status[2],
-					      &next0, &error0, &flags0);
+      o0 = (void *) b0->data;
+
+      fge_rx_next_and_error_from_status_x1 (&bd[0], o0,
+					    &next0, &error0, &flags0);
 
       next_index_sop = is_sop ? next0 : next_index_sop;
       vlib_trace_buffer (vm, node, next_index_sop, b0, /* follow_chain */ 0);
@@ -427,7 +455,6 @@ fge_rx_trace (fge_main_t * fm,
       ad += 1;
     }
 }
-#endif
 
 typedef struct {
   fge_dma_descriptor_t descriptor;
@@ -482,34 +509,23 @@ static u8 * format_fge_tx_dma_trace (u8 * s, va_list * va)
   return s;
 }
 
-typedef struct {
-  vlib_node_runtime_t * node;
-
-  u32 is_start_of_packet;
-
-  /* To be written into descriptor status of first descriptor.
-     Subsequent descriptors will get FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE added in. */
-  u32 descriptor_status;
-} fge_tx_state_t;
-
 static void
 fge_tx_trace (fge_main_t * fm,
 	      fge_device_t * fd,
 	      fge_dma_queue_t * dq,
-	      fge_tx_state_t * tx_state,
 	      fge_dma_descriptor_t * descriptors,
 	      u32 * buffers,
 	      uword n_descriptors)
 {
-  vlib_main_t * vm = fm->vlib_main;
-  vlib_node_runtime_t * node = tx_state->node;
+  vlib_main_t * vm = &vlib_global_main;
+  vlib_node_runtime_t * node = dq->saved_node;
   fge_dma_descriptor_t * d;
   u32 * b, n_left, is_sop;
 
   n_left = n_descriptors;
   b = buffers;
   d = descriptors;
-  is_sop = tx_state->is_start_of_packet;
+  is_sop = dq->is_start_of_packet;
 
   while (n_left >= 2)
     {
@@ -582,17 +598,15 @@ fge_tx_no_wrap (fge_main_t * fm,
 		fge_dma_queue_t * dq,
 		u32 * buffers,
 		u32 start_descriptor_index,
-		u32 n_descriptors,
-		fge_tx_state_t * tx_state)
+		u32 n_descriptors)
 {
-  vlib_main_t * vm = fm->vlib_main;
+  vlib_main_t * vm = &vlib_global_main;
   fge_dma_descriptor_t * d;
   u32 n_left = n_descriptors;
-  u32 n_descriptors_transmitted;
   u32 * to_free = vec_end (fm->tx_buffers_pending_free);
   u32 * to_tx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
-  u32 d_status = tx_state->descriptor_status;
-  u32 is_sop = tx_state->is_start_of_packet;
+  u32 d_status = dq->descriptor_status;
+  u32 is_sop = dq->is_start_of_packet;
 
   ASSERT (start_descriptor_index + n_descriptors <= dq->n_descriptors);
   d = &dq->descriptors[start_descriptor_index];
@@ -609,10 +623,10 @@ fge_tx_no_wrap (fge_main_t * fm,
       vlib_prefetch_buffer_with_index (vm, buffers[3], LOAD);
       CLIB_PREFETCH (d + 2, 32, STORE);
 
-      /* Skip to single loop when we find a descriptor which is already hardware owned (e.g. not
-	 transmitted yet).  This is the ring full case. */
-      if ((d[0].status | d[1].status) & FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE)
-	break;
+      /* Descriptors should be software owned (e.g. TX of buffer from previous
+	 time around ring should be complete now). */
+      ASSERT (! (d[0].status & FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE));
+      ASSERT (! (d[1].status & FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE));
 
       bi0 = buffers[0];
       bi1 = buffers[1];
@@ -641,8 +655,8 @@ fge_tx_no_wrap (fge_main_t * fm,
       d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, bi0) + b0->current_data;
       d[1].buffer_address = vlib_get_buffer_data_physical_address (vm, bi1) + b1->current_data;
 
-      d[0].n_bytes_this_buffer = len0;
-      d[1].n_bytes_this_buffer = len1;
+      d[0].n_bytes_this_buffer_or_packet = len0;
+      d[1].n_bytes_this_buffer_or_packet = len1;
 
       d[0].status = d_status | (is_eop0 << FGE_DMA_DESCRIPTOR_LOG2_IS_END_OF_PACKET);
 
@@ -661,8 +675,7 @@ fge_tx_no_wrap (fge_main_t * fm,
       u32 bi0, fi0, len0;
       u8 is_eop0;
 
-      if (d[0].status & FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE)
-	break;
+      ASSERT (! (d[0].status & FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE));
 
       bi0 = buffers[0];
 
@@ -682,7 +695,7 @@ fge_tx_no_wrap (fge_main_t * fm,
 
       d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, bi0) + b0->current_data;
 
-      d[0].n_bytes_this_buffer = len0;
+      d[0].n_bytes_this_buffer_or_packet = len0;
 
       d[0].status = d_status | (is_eop0 << FGE_DMA_DESCRIPTOR_LOG2_IS_END_OF_PACKET);
 
@@ -693,23 +706,21 @@ fge_tx_no_wrap (fge_main_t * fm,
       is_sop = is_eop0;
     }
 
-  n_descriptors_transmitted = n_descriptors - n_left;
-
-  if (tx_state->node->flags & VLIB_NODE_FLAG_TRACE)
+  if (dq->saved_node->flags & VLIB_NODE_FLAG_TRACE)
     {
       to_tx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
-      fge_tx_trace (fm, fd, dq, tx_state,
+      fge_tx_trace (fm, fd, dq,
 		    &dq->descriptors[start_descriptor_index],
 		    to_tx,
-		    n_descriptors_transmitted);
+		    n_descriptors);
     }
 
   _vec_len (fm->tx_buffers_pending_free) = to_free - fm->tx_buffers_pending_free;
 
-  tx_state->is_start_of_packet = is_sop;
-  tx_state->descriptor_status = d_status;
+  dq->is_start_of_packet = is_sop;
+  dq->descriptor_status = d_status;
 
-  return n_descriptors_transmitted;
+  return n_descriptors;
 }
 
 static uword
@@ -720,68 +731,48 @@ fge_interface_tx (vlib_main_t * vm,
   fge_main_t * fm = &fge_main;
   vnet_interface_output_runtime_t * rd = (void *) node->runtime_data;
   fge_device_t * fd = vec_elt_at_index (fm->devices, rd->dev_instance);
+  fge_regs_t * r = fd->regs;
   fge_dma_queue_t * dq;
-  u32 * from, n_left_tx, n_descriptors_to_tx, n_tail_drop;
+  u32 * from, sw_index, hw_index, n_left_on_ring, n_descriptors_to_tx, n_tail_drop;
   u32 queue_index = 0;		/* fixme parameter */
-  u32 found_hw_owned_descriptor = 0;
-  fge_tx_state_t tx_state;
 
-  tx_state.node = node;
-  tx_state.is_start_of_packet = 1;
-  tx_state.descriptor_status = 0;
+  dq->saved_node = node;
+  dq->is_start_of_packet = 1;
+
+  /* First descriptor we write will not have IS_OWNED_BY_HARDWARE bit set.
+     We'll set it when we're done munging descriptors. */
+  dq->descriptor_status = 0;
   
   from = vlib_frame_vector_args (f);
 
   dq = vec_elt_at_index (fd->dma_queues[VLIB_TX], queue_index);
 
-  n_descriptors_to_tx = f->n_vectors;
+  hw_index = ((r->tx.next_descriptor_address[queue_index][1]
+	       - dq->descriptors_physical_address_low_32bits)
+	      / sizeof (dq->descriptors[0]));
+  sw_index = dq->sw_index;
 
-  /* Process from tail to end of descriptor ring. */
-  if (n_descriptors_to_tx > 0 && dq->tail_index < dq->n_descriptors)
-    {
-      u32 n_tried, n_done;
-      n_tried = clib_min (dq->n_descriptors - dq->tail_index, n_descriptors_to_tx);
-      n_done = fge_tx_no_wrap (fm, fd, dq, from, dq->tail_index, n_tried, &tx_state);
-      found_hw_owned_descriptor = n_done < n_tried;
-      from += n_done;
-      n_descriptors_to_tx -= n_done;
-      dq->tail_index += n_done;
-      ASSERT (dq->tail_index <= dq->n_descriptors);
-      if (dq->tail_index == dq->n_descriptors)
-	dq->tail_index = 0;
-    }
+  /* Compute number of slots that remain on TX ring.
+     Never completely fill up ring so that sw_index == hw_index
+     implies ring is empty (otherwise there would be an ambiguity between
+     ring full and empty). */
+  n_left_on_ring = dq->n_descriptors - 1;
 
-  if (n_descriptors_to_tx > 0 && ! found_hw_owned_descriptor)
-    {
-      u32 n_tried = n_descriptors_to_tx, n_done;
-      n_done = fge_tx_no_wrap (fm, fd, dq, from, 0, n_tried, &tx_state);
-      from += n_done;
-      dq->tail_index += n_done;
-      n_descriptors_to_tx -= n_done;
-      ASSERT (dq->tail_index <= dq->n_descriptors);
-      if (dq->tail_index == dq->n_descriptors)
-	dq->tail_index = 0;
-    }
-
-  /* We should only get full packets. */
-  ASSERT (tx_state.is_start_of_packet);
-
-  /* Give new descriptors to hardware. */
-  CLIB_MEMORY_BARRIER ();
-
-  n_left_tx = dq->n_descriptors - 1;
-  dq->head_index = dr->head_index;
-  n_left_tx -= fge_ring_sub (dq, dq->head_index, dq->tail_index);
+  {
+    word d = sw_index - hw_index;
+    n_left_on_ring -= d < 0 ? -d : d;
+  }
 
   _vec_len (fm->tx_buffers_pending_free) = 0;
 
+  n_descriptors_to_tx = f->n_vectors;
   n_tail_drop = 0;
-  if (PREDICT_FALSE (n_descriptors_to_tx > n_left_tx))
+  if (PREDICT_FALSE (n_descriptors_to_tx > n_left_on_ring))
     {
       i32 i, n_ok, i_eop, i_sop;
 
       i_sop = i_eop = ~0;
-      for (i = n_left_tx - 1; i >= 0; i--)
+      for (i = n_left_on_ring - 1; i >= 0; i--)
 	{
 	  vlib_buffer_t * b = vlib_get_buffer (vm, from[i]);
 	  if (! (b->flags & VLIB_BUFFER_NEXT_PRESENT))
@@ -800,15 +791,15 @@ fge_interface_tx (vlib_main_t * vm,
       {
 	ELOG_TYPE_DECLARE (e) = {
 	  .function = (char *) __FUNCTION__,
-	  .format = "ixge %d, ring full to tx %d head %d tail %d",
+	  .format = "fge %d, ring full to tx %d sw %d hw %d",
 	  .format_args = "i2i2i2i2",
 	};
-	struct { u16 instance, to_tx, head, tail; } * ed;
+	struct { u16 instance, to_tx, sw, hw; } * ed;
 	ed = ELOG_DATA (&vm->elog_main, e);
 	ed->instance = fd->device_index;
 	ed->to_tx = n_descriptors_to_tx;
-	ed->head = dq->head_index;
-	ed->tail = dq->tail_index;
+	ed->sw = sw_index;
+	ed->hw = hw_index;
       }
 
       if (n_ok < n_descriptors_to_tx)
@@ -821,7 +812,54 @@ fge_interface_tx (vlib_main_t * vm,
       n_descriptors_to_tx = n_ok;
     }
 
-  dr->tail_index = dq->tail_index;
+  /* Process from tail to end of descriptor ring. */
+  if (n_descriptors_to_tx > 0 && sw_index < dq->n_descriptors)
+    {
+      u32 n = clib_min (dq->n_descriptors - sw_index, n_descriptors_to_tx);
+      n = fge_tx_no_wrap (fm, fd, dq, from, sw_index, n);
+      from += n;
+      n_descriptors_to_tx -= n;
+      sw_index += n;
+      ASSERT (sw_index <= dq->n_descriptors);
+      if (sw_index == dq->n_descriptors)
+	sw_index = 0;
+    }
+
+  if (n_descriptors_to_tx > 0)
+    {
+      u32 n = clib_min (dq->n_descriptors - sw_index, n_descriptors_to_tx);
+      n = fge_tx_no_wrap (fm, fd, dq, from, 0, n);
+      from += n;
+      sw_index += n;
+      n_descriptors_to_tx -= n;
+      ASSERT (sw_index <= dq->n_descriptors);
+      if (sw_index == dq->n_descriptors)
+	sw_index = 0;
+    }
+
+  /* We should only get full packets. */
+  ASSERT (dq->is_start_of_packet);
+
+  /* Set wrap bit on last descriptor in ring. */
+  {
+    fge_dma_descriptor_t * d = dq->descriptors + dq->n_descriptors - 1;
+    d->status |= FGE_DMA_DESCRIPTOR_IS_LAST_IN_RING;
+  }
+
+  /* Give new descriptors to hardware. */
+  CLIB_MEMORY_BARRIER ();
+
+  /* Set owned by hardware bit on first descriptor.  This should
+     start up the hardware in case it was stalled waiting for a descriptor. */
+  {
+    fge_dma_descriptor_t * d = dq->descriptors + dq->sw_index;
+    d->status |= FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE;
+  }
+
+  dq->sw_index = sw_index;
+
+  /* Clear halt bit for this TX queue. */
+  r->tx.status |= 1 << (31 - queue_index);
 
   /* Free any buffers that are done. */
   {
@@ -836,18 +874,17 @@ fge_interface_tx (vlib_main_t * vm,
   return f->n_vectors;
 }
 
-static_always_inline uword
+static uword
 fge_rx_queue_no_wrap (fge_main_t * fm,
 		      fge_device_t * fd,
 		      fge_dma_queue_t * dq,
 		      u32 start_descriptor_index,
-		      u32 n_descriptors,
-		      uword is_8254x)
+		      u32 n_descriptors)
 {
-  vlib_main_t * vm = fm->vlib_main;
+  vlib_main_t * vm = &vlib_global_main;
   vlib_node_runtime_t * node = dq->rx.node;
   fge_dma_descriptor_t * d;
-  static fge_descriptor_t * d_trace_save;
+  static fge_dma_descriptor_t * d_trace_save;
   static u32 * d_trace_buffers;
   u32 n_descriptors_left = n_descriptors;
   u32 * to_rx = vec_elt_at_index (dq->descriptor_buffer_indices, start_descriptor_index);
@@ -855,7 +892,8 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
   u32 bi_sop = dq->rx.saved_start_of_packet_buffer_index;
   u32 bi_last = dq->rx.saved_last_buffer_index;
   u32 next_index_sop = dq->rx.saved_start_of_packet_next_index;
-  u32 is_sop = dq->rx.is_start_of_packet;
+  u32 d_status = dq->descriptor_status;
+  u32 is_sop = dq->is_start_of_packet;
   u32 next_index, n_left_to_next, * to_next;
   u32 n_packets = 0;
   u32 n_bytes = 0;
@@ -907,37 +945,28 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
       vlib_get_next_frame (vm, node, next_index,
 			   to_next, n_left_to_next);
 
+#if 0
       while (n_descriptors_left >= 4 && n_left_to_next >= 2)
 	{
-	  vlib_buffer_t * b0, * b1;
-	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
-	  u32 bi1, fi1, len1, l3_offset1, s21, s01, flags1;
+	  vlib_buffer_t * b0, * b1, * b2, * b3;
+	  fge_offload_header_t * o0, * o1;
+	  u32 bi0, fi0, len0, l3_offset0, s00, flags0;
+	  u32 bi1, fi1, len1, l3_offset1, s01, flags1;
 	  u8 is_eop0, is_vlan0, error0, next0;
 	  u8 is_eop1, is_vlan1, error1, next1;
 
-	  vlib_prefetch_buffer_with_index (vm, to_rx[2], STORE);
-	  vlib_prefetch_buffer_with_index (vm, to_rx[3], STORE);
+	  b2 = vlib_get_buffer (vm, to_rx[2]);
+	  b3 = vlib_get_buffer (vm, to_rx[2]);
+	  CLIB_PREFETCH (b2, CLIB_CACHE_LINE_BYTES, STORE);
+	  CLIB_PREFETCH (b3, CLIB_CACHE_LINE_BYTES, STORE);
+	  CLIB_PREFETCH (b2->data, CLIB_CACHE_LINE_BYTES, LOAD);
+	  CLIB_PREFETCH (b3->data, CLIB_CACHE_LINE_BYTES, LOAD);
 	  CLIB_PREFETCH (d + 4, CLIB_CACHE_LINE_BYTES, LOAD);
 
-	  if (is_8254x)
-	    {
-	      s00 = d[0].rx_legacy.status;
-	      s01 = d[1].rx_legacy.status;
-
-	      if (! ((s00 | s01) & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE))
-		goto found_hw_owned_descriptor_x2;
-	    }
-	  else
-	    {
-	      s00 = d[0].rx_from_hw.status[0];
-	      s01 = d[1].rx_from_hw.status[0];
-
-	      s20 = d[0].rx_from_hw.status[2];
-	      s21 = d[1].rx_from_hw.status[2];
-
-	      if (! ((s20 | s21) & FGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
-		goto found_hw_owned_descriptor_x2;
-	    }
+	  s00 = d[0].status;
+	  s01 = d[1].status;
+	  if ((s00 | s01) & FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE)
+	    goto found_hw_owned_descriptor_x2;
 
 	  bi0 = to_rx[0];
 	  bi1 = to_rx[1];
@@ -959,39 +988,19 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
 	  b0 = vlib_get_buffer (vm, bi0);
 	  b1 = vlib_get_buffer (vm, bi1);
 
-	  CLIB_PREFETCH (b0->data, CLIB_CACHE_LINE_BYTES, LOAD);
-	  CLIB_PREFETCH (b1->data, CLIB_CACHE_LINE_BYTES, LOAD);
+	  o0 = (void *) b0->data;
+	  o1 = (void *) b1->data;
 
-	  if (is_8254x)
-	    {
-	      is_eop0 = (s00 & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET) != 0;
-	      is_eop1 = (s01 & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET) != 0;
+	  is_eop0 = (s00 & FGE_DMA_DESCRIPTOR_IS_END_OF_PACKET);
+	  is_eop1 = (s01 & FGE_DMA_DESCRIPTOR_IS_END_OF_PACKET);
 
-	      is_vlan0 = (s00 & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN) != 0;
-	      is_vlan1 = (s01 & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN) != 0;
+	  fge_rx_next_and_error_from_status_x2 (&d[0], &d[1],
+						o0, o1,
+						&next0, &error0, &flags0,
+						&next1, &error1, &flags1);
 
-	      fge_rx_legacy_next_and_error_from_status_x2 (s00, s01,
-							   &next0, &error0, &flags0,
-							   &next1, &error1, &flags1);
-
-              len0 = d[0].rx_legacy.n_packet_bytes_this_descriptor;
-              len1 = d[1].rx_legacy.n_packet_bytes_this_descriptor;
-	    }
-	  else
-	    {
-	      is_eop0 = (s20 & FGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-	      is_eop1 = (s21 & FGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-
-	      is_vlan0 = (s20 & FGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
-	      is_vlan1 = (s21 & FGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
-
-	      fge_rx_next_and_error_from_status_x2 (s00, s20, s01, s21,
-						    &next0, &error0, &flags0,
-						    &next1, &error1, &flags1);
-
-              len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
-              len1 = d[1].rx_from_hw.n_packet_bytes_this_descriptor;
-	    }
+	  len0 = d[0].n_bytes_this_buffer_or_packet;
+	  len1 = d[1].n_bytes_this_buffer_or_packet;
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next1 = is_eop0 ? next1 : next0;
@@ -1000,8 +1009,8 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
 	  b0->flags |= flags0 | (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
 	  b1->flags |= flags1 | (!is_eop1 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
 
-	  vnet_buffer (b0)->sw_if_index[VLIB_RX] = fd->vlib_sw_if_index;
-	  vnet_buffer (b1)->sw_if_index[VLIB_RX] = fd->vlib_sw_if_index;
+	  vnet_buffer (b0)->sw_if_index[VLIB_RX] = fd->vnet_sw_if_index;
+	  vnet_buffer (b1)->sw_if_index[VLIB_RX] = fd->vnet_sw_if_index;
 
 	  b0->error = node->errors[error0];
 	  b1->error = node->errors[error1];
@@ -1010,12 +1019,17 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
 	  n_packets += is_eop0 + is_eop1;
 
 	  /* Give new buffers to hardware.  Works also for legacy descriptors. */
-	  d[0].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi0);
-	  d[1].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi1);
-	  d[0].rx_to_hw.head_address = 0; /* must set low bit to zero */
-	  d[1].rx_to_hw.head_address = 0; /* must set low bit to zero */
+	  d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, fi0);
+	  d[1].buffer_address = vlib_get_buffer_data_physical_address (vm, fi1);
+	  /* Buffers must be 64 byte aligned. */
+	  ASSERT ((d[0].buffer_address % 64) == 0);
+	  ASSERT ((d[1].buffer_address % 64) == 0);
+
 	  d += 2;
 	  n_descriptors_left -= 2;
+
+	  /* Always skip offload header. */
+	  l3_offset0 = l3_offset1 = sizeof (fge_offload_header_t);
 
 	  /* Point to either l2 or l3 header depending on next. */
 	  l3_offset0 = (is_sop && next0 == FGE_RX_NEXT_IP4_INPUT
@@ -1088,26 +1102,18 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
 
       /* Bail out of dual loop and proceed with single loop. */
     found_hw_owned_descriptor_x2:
+#endif
 
       while (n_descriptors_left > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * b0;
-	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
+	  fge_offload_header_t * o0;
+	  u32 bi0, fi0, len0, len_eop0, l3_offset0, s00, flags0;
 	  u8 is_eop0, is_vlan0, error0, next0;
 
-	  if (is_8254x)
-	    {
-	      s00 = d[0].rx_legacy.status;
-	      if (! (s00 & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE))
-		goto found_hw_owned_descriptor_x1;
-	    }
-	  else
-	    {
-	      s00 = d[0].rx_from_hw.status[0];
-	      s20 = d[0].rx_from_hw.status[2];
-	      if (! (s20 & FGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
-                goto found_hw_owned_descriptor_x1;
-	    }
+	  s00 = d[0].status;
+	  if (s00 & FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE)
+	    goto found_hw_owned_descriptor_x1;
 
 	  bi0 = to_rx[0];
 	  ASSERT (to_add >= fm->rx_buffers_to_add);
@@ -1122,51 +1128,54 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
-	  if (is_8254x)
-	    {
-	      is_eop0 = (s00 & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_END_OF_PACKET) != 0;
+	  o0 = (void *) b0->data;
 
-	      is_vlan0 = (s00 & FGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_VLAN) != 0;
+	  is_eop0 = (s00 & FGE_DMA_DESCRIPTOR_IS_END_OF_PACKET);
 
-	      fge_rx_legacy_next_and_error_from_status_x1 (s00,
-							   &next0, &error0, &flags0);
-
-              len0 = d[0].rx_legacy.n_packet_bytes_this_descriptor;
-	    }
-	  else
-	    {
-	      is_eop0 = (s20 & FGE_RX_DESCRIPTOR_STATUS2_IS_END_OF_PACKET) != 0;
-
-	      is_vlan0 = (s20 & FGE_RX_DESCRIPTOR_STATUS2_IS_VLAN) != 0;
-
-	      fge_rx_next_and_error_from_status_x1 (s00, s20,
-						    &next0, &error0, &flags0);
-
-              len0 = d[0].rx_from_hw.n_packet_bytes_this_descriptor;
-	    }
+	  fge_rx_next_and_error_from_status_x1 (&d[0],
+						o0,
+						&next0, &error0, &flags0);
 
 	  next0 = is_sop ? next0 : next_index_sop;
 	  next_index_sop = next0;
 
 	  b0->flags |= flags0 | (!is_eop0 << VLIB_BUFFER_LOG2_NEXT_PRESENT);
 
-	  vnet_buffer (b0)->sw_if_index[VLIB_RX] = fd->vlib_sw_if_index;
+	  vnet_buffer (b0)->sw_if_index[VLIB_RX] = fd->vnet_sw_if_index;
 
 	  b0->error = node->errors[error0];
+
+	  len0 = d[0].n_bytes_this_buffer_or_packet;
+
+	  /* Last buffer gets length of packet. */
+	  len_eop0 = (len0 - (sizeof (o0[0]) + sizeof (u32))) % FGE_RX_BUFFER_N_BYTES;
+
+	  len_eop0 = len_eop0 == 0 ? FGE_RX_BUFFER_N_BYTES : len_eop0;
+
+	  len0 = is_eop0 ? len_eop0 : len0;
 
 	  n_bytes += len0;
 	  n_packets += is_eop0;
 
-	  /* Give new buffer to hardware. */
-	  d[0].rx_to_hw.tail_address = vlib_get_buffer_data_physical_address (vm, fi0);
-	  d[0].rx_to_hw.head_address = 0; /* must set low bit to zero */
+	  /* Give new buffers to hardware.  Works also for legacy descriptors. */
+	  d[0].buffer_address = vlib_get_buffer_data_physical_address (vm, fi0);
+	  /* Buffers must be 64 byte aligned. */
+	  ASSERT ((d[0].buffer_address % 64) == 0);
+
+	  d[0].status |= d_status;
+
+	  /* First descriptor is empty but subsequent ones are owned by hardware. */
+	  d_status |= FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE;
+
 	  d += 1;
 	  n_descriptors_left -= 1;
 
 	  /* Point to either l2 or l3 header depending on next. */
-	  l3_offset0 = (is_sop && next0 == FGE_RX_NEXT_IP4_INPUT
+	  l3_offset0 = sizeof (o0[0]);
+	  l3_offset0 += (is_sop && next0 != FGE_RX_NEXT_ETHERNET_INPUT
 			? sizeof (ethernet_header_t) + (is_vlan0 ? sizeof (ethernet_vlan_header_t) : 0)
 			: 0);
+
 	  b0->current_length = len0 - l3_offset0;
 	  b0->current_data = l3_offset0;
 
@@ -1221,8 +1230,7 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
 		      d_trace_save,
 		      d_trace_buffers,
 		      &dq->descriptors[start_descriptor_index],
-		      n,
-		      is_8254x);
+		      n);
 	vlib_set_trace_count (vm, node, n_trace - n);
       }
     if (d_trace_save)
@@ -1240,39 +1248,18 @@ fge_rx_queue_no_wrap (fge_main_t * fm,
         bi_last = ~0;
       }
 
+    dq->is_start_of_packet = is_sop;
+    dq->descriptor_status = d_status;
     dq->rx.n_descriptors_done_this_call = n_done;
     dq->rx.n_descriptors_done_total += n_done;
-    dq->rx.is_start_of_packet = is_sop;
     dq->rx.saved_start_of_packet_buffer_index = bi_sop;
     dq->rx.saved_last_buffer_index = bi_last;
     dq->rx.saved_start_of_packet_next_index = next_index_sop;
     dq->rx.next_index = next_index;
-    dq->rx.n_bytes += n_bytes;
+    dq->rx.n_bytes_total += n_bytes;
 
     return n_packets;
   }
-}
-
-static uword
-fge_8257x_rx_queue_no_wrap (fge_main_t * fm,
-			    fge_device_t * fd,
-			    fge_dma_queue_t * dq,
-			    u32 start_descriptor_index,
-			    u32 n_descriptors)
-{
-  return fge_rx_queue_no_wrap (fm, fd, dq, start_descriptor_index, n_descriptors,
-			       /* is_8254x */ 0);
-}
-
-static uword
-fge_8254x_rx_queue_no_wrap (fge_main_t * fm,
-			    fge_device_t * fd,
-			    fge_dma_queue_t * dq,
-			    u32 start_descriptor_index,
-			    u32 n_descriptors)
-{
-  return fge_rx_queue_no_wrap (fm, fd, dq, start_descriptor_index, n_descriptors,
-			       /* is_8254x */ 1);
 }
 
 static uword
@@ -1282,9 +1269,9 @@ fge_rx_queue (fge_main_t * fm,
 	      u32 queue_index)
 {
   fge_dma_queue_t * dq = vec_elt_at_index (fd->dma_queues[VLIB_RX], queue_index);
-  fge_dma_regs_t * dr = get_dma_regs (fd, VLIB_RX, dq->queue_index);
+  fge_regs_t * r = fd->regs;
   uword n_packets = 0;
-  u32 hw_head_index, sw_head_index;
+  u32 sw_index, hw_index;
 
   /* One time initialization. */
   if (! dq->rx.node)
@@ -1299,120 +1286,71 @@ fge_rx_queue (fge_main_t * fm,
 
   dq->rx.n_descriptors_done_total = 0;
   dq->rx.n_descriptors_done_this_call = 0;
-  dq->rx.n_bytes = 0;
+  dq->rx.n_bytes_total = 0;
 
   /* Fetch head from hardware and compare to where we think we are. */
-  hw_head_index = dr->head_index;
-  sw_head_index = dq->head_index;
-  if (hw_head_index == sw_head_index)
+  hw_index = ((r->rx.next_descriptor_address[queue_index][1]
+	       - dq->descriptors_physical_address_low_32bits)
+	      / sizeof (dq->descriptors[0]));
+  sw_index = dq->sw_index;
+
+  /* No descriptors to process? */
+  if (hw_index == sw_index)
     goto done;
 
-  if (hw_head_index < sw_head_index)
+  /* Try cleaning ring from current sw index to end of ring. */
+  if (hw_index < sw_index)
     {
-      u32 n_tried = dq->n_descriptors - sw_head_index;
-      n_packets += fd->rx_queue_no_wrap (fm, fd, dq, sw_head_index, n_tried);
-      sw_head_index = fge_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
+      u32 n_tried = dq->n_descriptors - sw_index;
+      n_packets += fge_rx_queue_no_wrap (fm, fd, dq, sw_index, n_tried);
+      sw_index += dq->rx.n_descriptors_done_this_call;
+      if (sw_index == dq->n_descriptors)
+	sw_index = 0;
       if (dq->rx.n_descriptors_done_this_call != n_tried)
 	goto done;
     }
-  if (hw_head_index >= sw_head_index)
+
+  /* Clean ring from start of ring to current hw index. */
+  if (hw_index >= sw_index)
     {
-      u32 n_tried = hw_head_index - sw_head_index;
-      n_packets += fd->rx_queue_no_wrap (fm, fd, dq, sw_head_index, n_tried);
-      sw_head_index = fge_ring_add (dq, sw_head_index, dq->rx.n_descriptors_done_this_call);
+      u32 n_tried = hw_index - sw_index;
+      n_packets += fge_rx_queue_no_wrap (fm, fd, dq, sw_index, n_tried);
+      sw_index += dq->rx.n_descriptors_done_this_call;
+      if (sw_index == dq->n_descriptors)
+	sw_index = 0;
     }
 
  done:
-  dq->head_index = sw_head_index;
-  dq->tail_index = fge_ring_add (dq, dq->tail_index, dq->rx.n_descriptors_done_total);
+  /* Set wrap bit on last descriptor in ring. */
+  {
+    fge_dma_descriptor_t * d = dq->descriptors + dq->n_descriptors - 1;
+    d->status |= FGE_DMA_DESCRIPTOR_IS_LAST_IN_RING;
+  }
 
-  /* Give tail back to hardware. */
+  /* Give new descriptors to hardware. */
   CLIB_MEMORY_BARRIER ();
 
-  dr->tail_index = dq->tail_index;
+  /* Set owned by hardware bit on first descriptor.  This should
+     start up the hardware in case it was stalled waiting for a descriptor. */
+  {
+    fge_dma_descriptor_t * d = dq->descriptors + dq->sw_index;
+    d->status |= FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE;
+  }
+
+  dq->sw_index = sw_index;
 
   vlib_increment_combined_counter (vnet_main.interface_main.combined_sw_if_counters
 				   + VNET_INTERFACE_COUNTER_RX,
-				   fd->vlib_sw_if_index,
+				   fd->vnet_sw_if_index,
 				   n_packets,
-				   dq->rx.n_bytes);
+				   dq->rx.n_bytes_total);
 
   return n_packets;
 }
 
 static void fge_interrupt (fge_main_t * fm, fge_device_t * fd, u32 i)
 {
-  vlib_main_t * vm = fm->vlib_main;
-  fge_regs_t * r = fd->regs;
-
-  if (i != 2)
-    {
-        if (0) {
-      ELOG_TYPE_DECLARE (e) = {
-	.function = (char *) __FUNCTION__,
-	.format = "fge %d, %s",
-	.format_args = "i1t1",
-	.n_enum_strings = 26,
-	.enum_strings = {
-	  "tx descriptor written back",
-	  "tx queue empty",
-	  "link status change",
-	  "rx sequence error",
-          "rx descriptor min threshold",
-	  "reserved5",
-	  "rx overrrun",
-	  "rx timer interrupt",
-	  "reserved8",
-	  "mdi access complete",
-	  "rx ordered sets",
-	  "sdp0",
-	  "sdp1",
-	  "sdp2",
-	  "sdp3",
-	  "tx descriptors low",
-	  "rx small packet",
-	  "rx ack",
-	  "reserved18",
-	  "reserved19",
-          "rx queue 0 descriptor fifo parity error",
-          "tx queue 0 descriptor fifo parity error",
-          "pci master fifo parity error",
-          "packet buffer parity error",
-          "rx queue 1 descriptor fifo parity error",
-          "tx queue 1 descriptor fifo parity error",
-	},
-      };
-      struct { u8 instance; u8 index; } * ed;
-      ed = ELOG_DATA (&vm->elog_main, e);
-      ed->instance = fd->device_index;
-      ed->index = i;
-        }
-    }
-  else
-    {
-      ethernet_phy_status (&fd->phy);
-      uword is_up = ethernet_phy_is_link_up (&fd->phy);
-
-      ELOG_TYPE_DECLARE (e) = {
-	.function = (char *) __FUNCTION__,
-	.format = "fge %d, status 0x%x",
-	.format_args = "i4i4",
-      };
-      struct { u32 instance, status; } * ed;
-
-      if (is_up)
-	r->control |= 1 << 6;
-      else
-	r->control &= ~(1 << 6);
-
-      ed = ELOG_DATA (&vm->elog_main, e);
-      ed->instance = fd->device_index;
-      ed->status = r->status;
-
-      vlib_process_signal_event (vm, fge_process_node.index,
-                                 EVENT_SET_FLAGS, 
-                                 ((is_up<<31) | fd->vlib_hw_if_index));
-    }
+  ASSERT (0);
 }
 
 static uword
@@ -1424,7 +1362,8 @@ fge_device_input (fge_main_t * fm,
   u32 i, s;
   uword n_rx_packets = 0;
 
-  s = r->interrupt.status_clear_to_read;
+  s = r->main.interrupt_status_write_1_to_clear;
+  r->main.interrupt_status_write_1_to_clear = s;
   foreach_set_bit (i, s, ({
     if (i == 7)
       n_rx_packets += fge_rx_queue (fm, fd, node, 0);
@@ -1455,7 +1394,7 @@ fge_input (vlib_main_t * vm,
 
 	/* Re-enable interrupts since we're going to stay in interrupt mode. */
 	if (! (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_INTERRUPT_TO_POLLING_MODE))
-	  fd->regs->interrupt.enable_write_1_to_set = ~0;
+	  fd->regs->main.interrupt_enable = ~0;
       }));
 
       /* Clear mask of devices with pending interrupts. */
@@ -1470,7 +1409,7 @@ fge_input (vlib_main_t * vm,
 
 	  /* Re-enable interrupts when switching out of polling mode. */
 	  if (node->flags & VLIB_NODE_FLAG_SWITCH_FROM_POLLING_TO_INTERRUPT_MODE)
-	    fd->regs->interrupt.enable_write_1_to_set = ~0;
+	    fd->regs->main.interrupt_enable = ~0;
 	}
     }
 
@@ -1502,6 +1441,7 @@ static VLIB_REGISTER_NODE (fge_input_node) = {
     [FGE_RX_NEXT_DROP] = "error-drop",
     [FGE_RX_NEXT_ETHERNET_INPUT] = "ethernet-input",
     [FGE_RX_NEXT_IP4_INPUT] = "ip4-input-no-checksum",
+    [FGE_RX_NEXT_IP6_INPUT] = "ip6-input",
   },
 };
 
@@ -1510,64 +1450,16 @@ static u8 * format_fge_device_name (u8 * s, va_list * args)
   u32 i = va_arg (*args, u32);
   fge_main_t * fm = &fge_main;
   fge_device_t * fd = vec_elt_at_index (fm->devices, i);
-  return format (s, "GigabitEthernet%U",
-		 format_os_pci_handle, fd->pci_device.os_handle);
+  return format (s, "GigabitEthernet%d", fd->device_index);
 }
-
-#define FGE_COUNTER_IS_64_BIT (1 << 0)
-#define FGE_COUNTER_NOT_CLEAR_ON_READ (1 << 1)
-
-static u8 fge_counter_flags[] = {
-#define _(a,f) 0,
-#define _64(a,f) FGE_COUNTER_IS_64_BIT,
-  foreach_fge_counter
-#undef _
-#undef _64
-};
 
 static void fge_update_counters (fge_device_t * fd)
 {
-  /* Byte offset for counter registers. */
-  static u32 reg_offsets[] = {
-#define _(a,f) (a) / sizeof (u32),
-#define _64(a,f) _(a,f)
-    foreach_fge_counter
-#undef _
-#undef _64
-  };
-  volatile u32 * r = (volatile u32 *) fd->regs;
+  fge_regs_t * r = fd->regs;
   int i;
 
-  for (i = 0; i < ARRAY_LEN (fd->counters); i++)
-    {
-      u32 o = reg_offsets[i];
-      fd->counters[i] += r[o];
-      if (fge_counter_flags[i] & FGE_COUNTER_NOT_CLEAR_ON_READ)
-	r[o] = 0;
-      if (fge_counter_flags[i] & FGE_COUNTER_IS_64_BIT)
-	fd->counters[i] += (u64) r[o+1] << (u64) 32;
-    }
-}
-
-static u8 * format_fge_device_id (u8 * s, va_list * args)
-{
-  u32 device_id = va_arg (*args, u32);
-  char * t = 0;
-  switch (device_id)
-    {
-#define _(f,n) case n: t = #f; break;
-      foreach_fge_8257x_pci_device_id;
-      foreach_fge_8254x_pci_device_id;
-#undef _
-    default:
-      t = 0;
-      break;
-    }
-  if (t == 0)
-    s = format (s, "unknown 0x%x", device_id);
-  else
-    s = format (s, "%s", t);
-  return s;
+  for (i = 0; i < ARRAY_LEN (r->counters.values); i++)
+    fd->counters[i] += r->counters.values[i];
 }
 
 static u8 * format_fge_device (u8 * s, va_list * args)
@@ -1580,8 +1472,7 @@ static u8 * format_fge_device (u8 * s, va_list * args)
 
   fge_update_counters (fd);
 
-  s = format (s, "Intel %U\n%U%U",
-	      format_fge_device_id, fd->device_id,
+  s = format (s, "Freescale 85xx ethernet\n%U%U",
 	      format_white_space, indent + 2,
 	      format_ethernet_media, &phy->media);
 
@@ -1589,11 +1480,9 @@ static u8 * format_fge_device (u8 * s, va_list * args)
     u32 i;
     u64 v;
     static char * names[] = {
-#define _(a,f) #f,
-#define _64(a,f) _(a,f)
+#define _(f) #f,
       foreach_fge_counter
 #undef _
-#undef _64
     };
 
     for (i = 0; i < ARRAY_LEN (names); i++)
@@ -1632,45 +1521,27 @@ static clib_error_t *
 fge_dma_init (fge_device_t * fd, vlib_rx_or_tx_t rt, u32 queue_index)
 {
   fge_main_t * fm = &fge_main;
-  vlib_main_t * vm = fm->vlib_main;
+  vlib_main_t * vm = &vlib_global_main;
   fge_dma_queue_t * dq;
   clib_error_t * error = 0;
 
   vec_validate (fd->dma_queues[rt], queue_index);
   dq = vec_elt_at_index (fd->dma_queues[rt], queue_index);
 
-  if (! fm->n_descriptors_per_cache_line)
-    fm->n_descriptors_per_cache_line = CLIB_CACHE_LINE_BYTES / sizeof (dq->descriptors[0]);
-
-  /* Chip only supports a few buffer sizes. */
-  switch (fm->n_bytes_in_rx_buffer)
-    {
-    case 512:
-    case 1 << 10:
-    case 2 << 10:
-    case 4 << 10:
-    case 8 << 10:
-    case 16 << 10:
-      break;
-
-    default:
-      fm->n_bytes_in_rx_buffer = 512;
-      break;
-    }
   fm->vlib_buffer_free_list_index
-    = vlib_buffer_get_or_create_free_list (vm, fm->n_bytes_in_rx_buffer, "fge rx");
+    = vlib_buffer_get_or_create_free_list (vm, FGE_RX_BUFFER_N_BYTES, "fge rx");
 
   if (! fm->n_descriptors[rt])
       fm->n_descriptors[rt] = 3 * VLIB_FRAME_SIZE / 2;
 
   dq->queue_index = queue_index;
-  dq->n_descriptors = round_pow2 (fm->n_descriptors[rt], fm->n_descriptors_per_cache_line);
-  dq->head_index = dq->tail_index = 0;
+  dq->n_descriptors = round_pow2 (fm->n_descriptors[rt], 64 / sizeof (dq->descriptors[0]));
+  dq->sw_index = 0;
 
-  /* Descriptors must be 128 byte aligned; hardware limit. */
+  /* Descriptors must be 64 byte aligned; hardware limit. */
   dq->descriptors = vlib_physmem_alloc_aligned (vm, &error,
 						dq->n_descriptors * sizeof (dq->descriptors[0]),
-						128);
+						64);
   if (error)
     return error;
 
@@ -1688,44 +1559,36 @@ fge_dma_init (fge_device_t * fd, vlib_rx_or_tx_t rt, u32 queue_index)
       for (i = 0; i < n_alloc; i++)
 	{
 	  vlib_buffer_t * b = vlib_get_buffer (vm, dq->descriptor_buffer_indices[i]);
-	  dq->descriptors[i].rx_to_hw.tail_address = vlib_physmem_virtual_to_physical (vm, b->data);
-	  dq->descriptors[i].rx_to_hw.head_address = 0;
+	  dq->descriptors[i].buffer_address = vlib_physmem_virtual_to_physical (vm, b->data);
+	  dq->descriptors[i].status = FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE;
 	}
     }
   else
-    {
-      u32 i;
-
-      for (i = 0; i < dq->n_descriptors; i++)
-	dq->descriptors[i].tx = fm->tx_descriptor_template;
-
-      vec_validate (fm->tx_buffers_pending_free, dq->n_descriptors - 1);
-    }
+    vec_validate (fm->tx_buffers_pending_free, dq->n_descriptors - 1);
 
   {
-    fge_dma_regs_t * dr = get_dma_regs (fd, rt, queue_index);
-    uword a;
+    fge_regs_t * r = fd->regs;
+    u64 a;
+    u32 b[2];
 
     a = vlib_physmem_virtual_to_physical (vm, dq->descriptors);
-    dr->descriptor_address[0] = (u64) a;
-    dr->descriptor_address[1] = (u64) a >> (u64) 32;
-    dr->n_descriptor_bytes = dq->n_descriptors * sizeof (dq->descriptors[0]);
-    dq->head_index = dq->tail_index = 0;
+    b[0] = (u64) a >> (u64) 32;
+    b[1] = (u64) a >> (u64) 0;
 
     if (rt == VLIB_RX)
-      /* Give hardware all but last cache line of descriptors. */
-      dq->tail_index = dq->n_descriptors - fm->n_descriptors_per_cache_line;
+      {
+	r->rx.base_descriptor_address[queue_index][0] = b[0];
+	r->rx.base_descriptor_address[queue_index][1] = b[1];
+      }
+    else
+      {
+	r->tx.base_descriptor_address[queue_index][0] = b[0];
+	r->tx.base_descriptor_address[queue_index][1] = b[1];
+      }
+
+    dq->sw_index = 0;
 
     CLIB_MEMORY_BARRIER ();
-
-    dr->control &= ~0x3f << 0;
-    dr->control &= ~0x3f << 16;
-    dr->control |= ((/* prefetch threshold */ 32 << 0)
-                    | (/* writeback threshold */ 16 << 16));
-
-    /* Set head/tail indices and enable DMA. */
-    dr->head_index = dq->head_index;
-    dr->tail_index = dq->tail_index;
   }
 
   return error;
@@ -1734,39 +1597,25 @@ fge_dma_init (fge_device_t * fd, vlib_rx_or_tx_t rt, u32 queue_index)
 static void fge_device_init (fge_main_t * fm)
 {
   vnet_main_t * vnm = &vnet_main;
-  vlib_main_t * vm = fm->vlib_main;
+  vlib_main_t * vm = &vlib_global_main;
   fge_device_t * fd;
     
   /* Reset chip(s). */
   vec_foreach (fd, fm->devices)
     {
       fge_regs_t * r = fd->regs;
-      const u32 reset_bit = (1 << 26);
 
-      /* Make sure TX packet buffer has room for 2 9k frames. */
-      if (0) {
-	u32 pba = r->packet_buffer_allocation;
-	u32 rx_k_bytes = pba & 0xffff;
-	u32 tx_k_bytes = pba >> 16;
-	u32 total_k_bytes = rx_k_bytes + tx_k_bytes;
+      /* Soft reset mac. */
+      r->mac.config[0] |= 1 << 31;
+      r->mac.config[0] &= ~(1 << 31);
 
-	/* Want enough space for 2 9k jumbo frames. */
-	tx_k_bytes = 2 * 9;
-	rx_k_bytes = total_k_bytes - tx_k_bytes;
+      /* Clear counters, enable clear-on-read, enable counters. */
+      r->main.control |= (1 << 14) | (1 << 13) | (1 << 12);
 
-	r->packet_buffer_allocation = (tx_k_bytes << 16) | rx_k_bytes;
-      }
+      /* FIXME other bits in main.control from e.g. eeprom. */
 
-      /* Reset will allocate packet buffer. */
-      r->control |= reset_bit;
-
-      /* No need to suspend.  Timed to take ~1e-6 secs */
-      while (r->control & reset_bit)
-	;
-
-      /* Software loaded. */
-      if (! fd->is_8254x)
-	r->extended_control |= (1 << 28);
+      /* Don't poll TX descriptors. */
+      r->main.dma_control |= 1 << 0;
 
       fd->phy.opaque = fd->device_index;
       fd->phy.read_write = fge_read_write_phy_reg;
@@ -1781,10 +1630,10 @@ static void fge_device_init (fge_main_t * fm)
 	u32 i, addr32[2];
 	clib_error_t * error;
 
-	addr32[0] = r->rx_ethernet_address[0][0];
-	addr32[1] = r->rx_ethernet_address[0][1];
+	addr32[0] = r->mac.ethernet_address_exact_match[0][0];
+	addr32[1] = r->mac.ethernet_address_exact_match[0][1];
 	for (i = 0; i < 6; i++)
-	  addr8[i] = addr32[i / 4] >> ((i % 4) * 8);
+	  addr8[i] = addr32[i / 4] >> ((3 - (i % 4)) * 8);
 
 	error = ethernet_register_interface
 	  (vnm,
@@ -1792,68 +1641,20 @@ static void fge_device_init (fge_main_t * fm)
 	   fd->device_index,
 	   /* ethernet address */ addr8,
 	   /* phy */ &fd->phy,
-	   &fd->vlib_hw_if_index);
+	   &fd->vnet_hw_if_index);
 	if (error)
 	  clib_error_report (error);
       }
 
       {
-	vnet_sw_interface_t * sw = vnet_get_hw_sw_interface (vnm, fd->vlib_hw_if_index);
-	fd->vlib_sw_if_index = sw->sw_if_index;
+	vnet_sw_interface_t * sw = vnet_get_hw_sw_interface (vnm, fd->vnet_hw_if_index);
+	fd->vnet_sw_if_index = sw->sw_if_index;
       }
 
       fge_dma_init (fd, VLIB_RX, /* queue_index */ 0);
       fge_dma_init (fd, VLIB_TX, /* queue_index */ 0);
 
-      {
-	u32 bsize = 0, bsex = 0;
-
-	bsex = fm->n_bytes_in_rx_buffer >= 4 << 10;
-	switch (fm->n_bytes_in_rx_buffer)
-	  {
-	  case 512: bsize = 2; break;
-	  case 1 << 10: bsize = 1; break;
-	  case 2 << 10: bsize = 0; break;
-	  case 4 << 10: bsize = 3; break;
-	  case 8 << 10: bsize = 2; break;
-	  case 16 << 10: bsize = 1; break;
-	  default:
-	    ASSERT (0);
-	    break;
-	  }
-
-	r->rx_control |= (bsize << 16) | (bsex << 25);
-      }
-
-      /* Strip ethernet crc and don't include in descriptor length. */
-      r->rx_control |= (1 << 26);
-
-      /* Accept packets > 1522 bytes. */
-      r->rx_control |= (1 << 5);
-
-      /* Accept all broadcast packets.  Multicasts must be explicitly
-	 added to dst_ethernet_address register array. */
-      r->rx_control |= (1 << 15);
-
-      /* Enable ip/tcp checksums for received packets. */
-      r->rx_checksum_control =
-        (/* checksum start offset */ (sizeof (ethernet_header_t) << 0)
-         | (1 << 8) | (1 << 9));
-
-      /* Pad short packets. */
-      r->tx_control |= 1 << 3;
-
-      if (! fd->is_8254x)
-	{
-	  /* Extended status enable (since we use extended descriptors). */
-	  r->rx_filter_control |= 1 << 15;
-
-	  /* Multiple descriptor read. */
-	  r->tx_control |= 1 << 28;
-	}
-
-      r->interrupt.throttle_rate = 20e-6 / 256e-9;
-      r->interrupt.enable_write_1_to_set = ~0;
+      r->main.interrupt_enable = ~0;
     }
 }
 
@@ -1890,7 +1691,7 @@ fge_process (vlib_main_t * vm,
       case EVENT_SET_FLAGS:
         for (i = 0; i < vec_len (event_data); i++) 
           {
-            u32 is_up = (event_data[i]>>31);
+            u32 is_up = (event_data[i] >> 31);
             u32 hw_if_index = event_data[i] & 0x7fffffff;
             
             vnet_hw_interface_set_flags 
@@ -1930,33 +1731,7 @@ static vlib_node_registration_t fge_process_node = {
   .name = "fge-process",
 };
 
-clib_error_t * fge_init (vlib_main_t * vm)
-{
-  fge_main_t * fm = &fge_main;
-  clib_error_t * error;
-
-  fm->vlib_main = vm;
-  memset (&fm->tx_descriptor_template, 0, sizeof (fm->tx_descriptor_template));
-  memset (&fm->tx_descriptor_template_mask, 0, sizeof (fm->tx_descriptor_template_mask));
-  fm->tx_descriptor_template.status0 =
-    (0*FGE_TX_DESCRIPTOR_STATUS0_IS_ADVANCED
-     | FGE_TX_DESCRIPTOR_STATUS0_INSERT_FCS);
-  fm->tx_descriptor_template_mask.status0 = 0xffff;
-  fm->tx_descriptor_template_mask.status1 = 0x00003fff;
-
-  fm->tx_descriptor_template_mask.status0 &=
-    ~(FGE_TX_DESCRIPTOR_STATUS0_IS_END_OF_PACKET
-      | FGE_TX_DESCRIPTOR_STATUS0_REPORT_STATUS);
-  fm->tx_descriptor_template_mask.status1 &=
-    ~(FGE_TX_DESCRIPTOR_STATUS1_DONE);
-
-  error = vlib_call_init_function (vm, pci_bus_init);
-
-  return error;
-}
-
-VLIB_INIT_FUNCTION (fge_init);
-
+#if 0
 static clib_error_t *
 fge_pci_init (vlib_main_t * vm, pci_device_t * dev)
 {
@@ -2033,6 +1808,7 @@ static PCI_REGISTER_DEVICE (fge_pci_device_registration) = {
     { 0 },
   },
 };
+#endif
 
 static clib_error_t *
 fge_config (vlib_main_t * vm, unformat_input_t * input)
@@ -2041,7 +1817,7 @@ fge_config (vlib_main_t * vm, unformat_input_t * input)
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
-      if (unformat (input, "rx-buffer-size %d", &fm->n_bytes_in_rx_buffer))
+      if (0)
 	;
 
       else
@@ -2055,5 +1831,9 @@ fge_config (vlib_main_t * vm, unformat_input_t * input)
 /* fge { ... } configuration. */
 VLIB_CONFIG_FUNCTION (fge_config, "fge");
 
+static clib_error_t * fge_init (vlib_main_t * vm)
+{
+  return 0;
+}
 
-#endif
+VLIB_INIT_FUNCTION (fge_init);

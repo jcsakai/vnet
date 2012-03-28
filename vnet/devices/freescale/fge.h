@@ -82,9 +82,10 @@ typedef volatile struct {
        [6] tx buffer descriptor snoop enable
        [4] rx graceful stop
        [3] tx graceful stop
-       [2] tx on demain ring 0
+       [2] tx on demand ring 0
        [1] tx wait for response before setting interrupt status bits
-       [0] tx wait/poll ring 0. */
+       [0] tx wait/poll ring 0; 0 => poll every 512 serial clocks;
+             1 => wait for tx.status ring halt bit to be cleared to resume tx.. */
     u32 dma_control;
 
     u32 tbi_phy_address;
@@ -101,7 +102,7 @@ typedef volatile struct {
        [2:1] tx scheduling mode (0 => ring 0 only, 1 => strict priority, 2 => weighted round robin) */
     u32 control;
 
-    /* [31:16] tx halt ring (31 - i)
+    /* [31:16] tx ring halted (31 - i) (read/write)
        [15:0] tx frame done (15 - i). */
     u32 status;
 
@@ -202,7 +203,7 @@ typedef volatile struct {
     u32 rx_buffer_bytes;
     CLIB_PAD_FROM_TO (0x344, 0x380);
 
-    u32 current_descriptor_address[8][2];
+    u32 next_descriptor_address[8][2];
     CLIB_PAD_FROM_TO (0x3c0, 0x400);
 
     u32 base_descriptor_address[8][2];
@@ -234,8 +235,8 @@ typedef volatile struct {
 	 [5] huge frame enable
 	 [4] rx length check enable
 	 [3] magic packet enable
-	 [2] pad and append crc
-	 [1] crc enable
+	 [2] tx pad and append crc
+	 [1] tx crc append
 	 [0] full duplex. */
     u32 config[2];
 
@@ -276,10 +277,9 @@ typedef volatile struct {
     u32 reserved;
     u32 interface_status;
 
-    /* [0] [31:0] address [47:16]
-       [1] [31:16] address [15:0]. */
-    u32 ethernet_address[2];
-
+    /* [i][0] [31:0] address [47:16]
+       [i][1] [31:16] address [15:0].
+       i == 0 is station address. */
     u32 ethernet_address_exact_match[16][2];
     CLIB_PAD_FROM_TO (0x5c0, 0x680);
   } mac;
@@ -403,7 +403,9 @@ typedef struct {
 #define FGE_DMA_DESCRIPTOR_IS_END_OF_PACKET (1 << FGE_DMA_DESCRIPTOR_LOG2_IS_END_OF_PACKET)
 #define FGE_DMA_DESCRIPTOR_IS_START_OF_PACKET (1 << 10)
 
-  u16 n_bytes_this_buffer;
+  /* Number of bytes when IS_END_OF_PACKET is clear;
+     Number of bytes in packet including CRC and offload header if present. */
+  u16 n_bytes_this_buffer_or_packet;
 
   u32 buffer_address;
 } fge_dma_descriptor_t;
@@ -420,7 +422,7 @@ typedef struct {
   /* TX only */
 #define DEVICES_FGE_BUFFER_TX_APPEND_CRC (1 << 10)
 
-/* Starts frame when RX/TX offload enabled. */
+/* Starts frame (e.g. first buffer of multi-buffer packet) when RX/TX offload enabled. */
 typedef struct {
   /* [15] vlan valid
      [14] is ip4/ip6
@@ -437,8 +439,10 @@ typedef struct {
   u16 flags;
 #define FGE_OFFLOAD_HEADER_FLAGS_IS_IP4_OR_IP6 (1 << 14)
 #define FGE_OFFLOAD_HEADER_FLAGS_IS_IP6 (1 << 13)
-#define FGE_OFFLOAD_HEADER_FLAGS_IS_IP4_CHECKSUM_COMPUTED (1 << 10)
+#define FGE_OFFLOAD_HEADER_FLAGS_IS_IP4_CHECKSUM_COMPUTED (1 << 11)
+#define FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_COMPUTED (1 << 10)
 #define FGE_OFFLOAD_HEADER_FLAGS_IS_IP4_CHECKSUM_ERROR (1 << 9)
+#define FGE_OFFLOAD_HEADER_FLAGS_IS_TCP_UDP_CHECKSUM_ERROR (1 << 8)
 
   union {
     struct {
@@ -466,11 +470,13 @@ typedef struct {
   /* Cache aligned descriptors. */
   fge_dma_descriptor_t * descriptors;
 
+  u32 descriptors_physical_address_low_32bits;
+
   /* Number of descriptors in table. */
   u32 n_descriptors;
 
-  /* Software head and tail pointers into descriptor ring. */
-  u32 head_index, tail_index;
+  /* Software and hardware ring indices. */
+  u32 sw_index;
 
   /* Index into dma_queues vector. */
   u32 queue_index;
@@ -478,9 +484,17 @@ typedef struct {
   /* Buffer indices corresponding to each active descriptor. */
   u32 * descriptor_buffer_indices;
 
+  vlib_node_runtime_t * saved_node;
+
+  u32 is_start_of_packet;
+
+  /* To be written into descriptor status of first descriptor.
+     Subsequent descriptors will get FGE_DMA_DESCRIPTOR_IS_OWNED_BY_HARDWARE added in. */
+  u32 descriptor_status;
+
   union {
     struct {
-      u32 n_tx_descriptors_on_ring;
+      /* nothing. */
     } tx;
 
     struct {
@@ -501,7 +515,7 @@ typedef struct {
 
       u32 n_descriptors_done_this_call;
 
-      u32 n_bytes;
+      u32 n_bytes_total;
     } rx;
   };
 } fge_dma_queue_t;
@@ -525,8 +539,6 @@ typedef struct fge_device_t {
 } fge_device_t;
 
 typedef struct fge_main_t {
-  vlib_main_t * vlib_main;
-
   /* Vector of devices. */
   fge_device_t * devices;
 
@@ -535,8 +547,6 @@ typedef struct fge_main_t {
 
   /* RX buffer size. */
   u32 n_bytes_in_rx_buffer;
-
-  u32 n_descriptors_per_cache_line;
 
   u32 vlib_buffer_free_list_index;
 
