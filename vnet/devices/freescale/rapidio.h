@@ -1,5 +1,5 @@
 /*
- * device/freescale/rapidio.h: Freescale rapidio defines
+ * device/freescale/rapidio.h: Freescale 8xxx rapidio defines
  *
  * Copyright (c) 2012 Eliot Dresselhaus
  *
@@ -27,35 +27,6 @@
 #define included_freescale_rapidio_h
 
 #include <clib/types.h>
-
-/* TX buffer descriptors. */
-typedef struct {
-  /* [35:3] address hi bits first.
-     [2] snoop enable. */
-  u32 src_address[2];
-
-  /* [31:16] destination id of target
-     [5:2] extended mailbox
-     [1:0] mailbox. */
-  u32 dst_port;
-
-  /* [31] multicast enable
-     [29] end of message/doorbell interrupt enable
-     [27:26] priority
-     [23:20] rapidio port.
-     [15:0] doorbell info field. */
-  u32 dst_attributes;
-
-  /* Must be of the form 2^i for i >= 3 and i <= 12. */
-  u32 n_transfer_bytes;
-
-  u32 multicast_group;
-
-  /* Bitmap of device IDs of recepients. */
-  u32 multicast_list;
-
-  u32 reserved;
-} qoriq_rapidio_buffer_descriptor_t;
 
 /* (name, ftype, ttype) */
 #define foreach_rapidio_transaction		\
@@ -87,6 +58,59 @@ typedef struct {
   u8 dst_id;
   u8 src_id;
 } rapidio_packet_header_t;
+
+typedef struct {
+  union {
+    u32 address : 29;
+
+    struct {
+      u32 hop_count : 8;
+      u32 config_offset : 21;
+    };
+  };
+
+  u32 word_pointer : 1;
+
+  u32 extended_address_msbs : 2;
+} rapidio_address_t;
+
+typedef struct {
+  rapidio_packet_header_t header;
+
+  u8 ttype : 4;
+  u8 size : 4;
+
+  u8 transaction_id;
+} rapidio_generic_packet_t;
+
+/* TX buffer descriptors. */
+typedef struct {
+  /* [35:3] address hi bits first.
+     [2] snoop enable. */
+  u32 src_buffer_address[2];
+
+  /* [31:16] destination id of target
+     [5:2] extended mailbox
+     [1:0] mailbox. */
+  u32 dst_port;
+
+  /* [31] multicast enable
+     [29] end of message/doorbell interrupt enable
+     [27:26] priority
+     [23:20] rapidio port.
+     [15:0] doorbell info field. */
+  u32 dst_attributes;
+
+  /* Must be of the form 2^i for i >= 3 and i <= 12. */
+  u32 n_transfer_bytes;
+
+  u32 multicast_group;
+
+  /* Bitmap of device IDs of recepients. */
+  u32 multicast_list;
+
+  u32 reserved;
+} freescale_rapidio_buffer_descriptor_t;
 
 typedef volatile struct {
   u32 id;
@@ -140,7 +164,7 @@ typedef volatile struct {
   CLIB_PAD_FROM_TO (0x70, 0x100);
 
   struct {
-    u32 maintenance_block_header;
+    u32 block_header;
     CLIB_PAD_FROM_TO (0x104, 0x120);
 
     /* Units of 168/platform-frequencey. */
@@ -183,10 +207,13 @@ typedef volatile struct {
       /* [31:30] 0 => single lane, 1 => 4 lanes
 	 [29:27] 0 => single lane port, lane 0, 1 => single lane port, lane 2, 2 => 4 lane port
 	 [26:24] force port
-	 [23] port disable
+	 [23] input error state machine forced to normal (port disable)
 	 [22] output port tx enable
 	 [21] input port rx enable
 	 [20] error checking disable
+	 [19] multicast event participant
+	 [3] stop on port failed
+	 [2] drop packet enable when error rate exceeds threshold
 	 [1] port lockout
 	 [0] port type (0 => reserved, 1 => serial port). */
       u32 control;
@@ -197,6 +224,7 @@ typedef volatile struct {
   struct {
     u32 block_header;
     CLIB_PAD_FROM_TO (0x604, 0x608);
+
     u32 error_detect;
     u32 error_enable;
     CLIB_PAD_FROM_TO (0x610, 0x614);
@@ -280,11 +308,11 @@ typedef volatile struct {
 
   /* 2 ports x (9 tx [1-8 plus default], 2 unused, 5 rx [1-4 plus default]) */
   struct {
-    /* lo/hi bits of rapidio translation for ocean address. */
+    /* lo/hi bits of rapidio translation for OCN address. */
     u32 rapidio_address[2];
 
     /* [0:23] upper 24 bits of OCN address (low 12 bits zero). */
-    u32 cpu_address;
+    u32 cpu_address_35_13;
     CLIB_PAD_FROM_TO (0xc, 0x10);
 
     /* [31] enable
@@ -301,8 +329,8 @@ typedef volatile struct {
          0xc/0xd => rapidio 1/2,
          0xf local memory (ddr, local bus, mem mapped regs).
 
-       [19:16] rapidio ttype for reads
-       [15:12] rapidio ttype for writes
+       [19:16] rapidio ttype for reads (segment 0)
+       [15:12] rapidio ttype for writes (segment 0)
        [5:0] log2 window number of bytes - 1 (e.g. 4k => 11). */
     u32 attributes;
 
@@ -314,7 +342,7 @@ typedef volatile struct {
   } address_translation_windows[2][16];
   CLIB_PAD_FROM_TO (0xd1000, 0xd3000);
 
-  /* 2 message units, 2 reserved, 1 doorbell + port_write. */
+  /* 2 message units, 2 reserved, 1 doorbell + port_write = 5 message units. */
   struct {
     struct {
       /* [31:28] log2 number of rx frames before message in queue interrupt
@@ -347,9 +375,11 @@ typedef volatile struct {
 	 [0] tx queue empty, rx message in queue. */
       u32 status_write_1_to_clear;
 
-      /* 32 byte aligned.  36 bit address hi/lo. */
+      /* 32 byte aligned.  36 bit address hi/lo.
+	 Hardware dequeues descriptors here and increments address. */
       u32 descriptor_dequeue_address[2];
 
+      /* Fields defining descriptor (0). */
       struct {
 	/* [35:3] address
 	   [2] snoop enable. */
@@ -371,11 +401,12 @@ typedef volatile struct {
 	u32 n_transfer_bytes;
       } current_descriptor0;
 
+      /* CPU writes descriptors here. */
       u32 descriptor_enqueue_address[2];
 
       u32 retry_error_threshold;
 
-      /* Continuation of current descriptor. */
+      /* Continuation of fields that define current descriptor. */
       struct {
 	u32 multicast_group;
 	u32 multicast_list;
@@ -387,8 +418,9 @@ typedef volatile struct {
     struct {
       /* See tx mode/status above. */
       u32 mode;
-      u32 status;
+      u32 status_write_1_to_clear;
 
+      /* Hardware dequeues descriptors here and increments address. */
       u32 frame_dequeue_address[2];
       u32 frame_enqueue_address[2];
 
@@ -400,13 +432,13 @@ typedef volatile struct {
     struct {
       /* See tx mode/status above. */
       u32 mode;
-      u32 status;
+      u32 status_write_1_to_clear;
 
       /* Only one 64 byte buffer in queue. */
       u32 queue_base_address[2];
     } rx_port_write;
     CLIB_PAD_FROM_TO (0xf0, 0x100);
   } message_units[5];
-} qoriq_rapidio_regs_t;
+} freescale_rapidio_regs_t;
 
 #endif /* included_freescale_rapidio_h */
