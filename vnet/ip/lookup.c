@@ -1188,10 +1188,11 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	      }
 	    else
 	      {
-		u32 i, j, n, f;
+		u32 i, j, n, f, increment;
 		ip4_address_t dst = a.dst_address;
 		f64 t[2];
 		n = count;
+		increment = 1 << (32 - a.dst_address_length);
 		t[0] = vlib_time_now (vm);
 		for (i = 0; i < n; i++)
 		  {
@@ -1205,7 +1206,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 						  &ip4_via_next_hops[j],
 						  sw_if_indices[j],
 						  weights[j]);
-		    dst.as_u32 = clib_host_to_net_u32 (1 + clib_net_to_host_u32 (dst.as_u32));
+		    dst.as_u32 = clib_host_to_net_u32 (increment + clib_net_to_host_u32 (dst.as_u32));
 		  }
 		t[1] = vlib_time_now (vm);
 		if (count > 1)
@@ -1224,10 +1225,11 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 	      }
 	    else if (vec_len (ip4_via_next_hops) > 0)
 	      {
-		u32 i, j, n, f;
+		u32 i, j, n, f, increment;
 		ip4_address_t dst = a.dst_address;
 		f64 t[2];
 		n = count;
+		increment = 1 << (32 - a.dst_address_length);
 		t[0] = vlib_time_now (vm);
 		for (i = 0; i < n; i++)
 		  {
@@ -1241,7 +1243,7 @@ ip_route (vlib_main_t * vm, unformat_input_t * main_input, vlib_cli_command_t * 
 						  &ip4_via_next_hops[j],
 						  sw_if_indices[j],
 						  weights[j]);
-		    dst.as_u32 = clib_host_to_net_u32 (1 + clib_net_to_host_u32 (dst.as_u32));
+		    dst.as_u32 = clib_host_to_net_u32 (increment + clib_net_to_host_u32 (dst.as_u32));
 		  }
 		t[1] = vlib_time_now (vm);
 		if (count > 1)
