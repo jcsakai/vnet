@@ -110,7 +110,19 @@ typedef struct {
   u32 multicast_list;
 
   u32 reserved;
-} freescale_rapidio_buffer_descriptor_t;
+} freescale_rapidio_tx_descriptor_t;
+
+/* Doorbell queue is a ring of this structure. */
+typedef struct {
+  u16 reserved;
+
+  /* Source and destination IDs for this message. */
+  u16 dst_id;
+  u16 src_id;
+
+  /* 16 bits of user data that goes along with doorbell. */
+  u16 user_data;
+} freescale_rapidio_doorbell_descriptor_t;
 
 typedef volatile struct {
   u32 id;
@@ -383,7 +395,7 @@ typedef volatile struct {
       struct {
 	/* [35:3] address
 	   [2] snoop enable. */
-	u32 src_address[2];
+	u32 src_buffer_address[2];
 
 	/* [31:16] destination id of target
 	   [5:2] extended mailbox
