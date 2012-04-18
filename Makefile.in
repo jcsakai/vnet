@@ -114,7 +114,7 @@ am_libvnet_la_OBJECTS = vnet/config.lo vnet/interface.lo \
 	vnet/devices/freescale/rapidio.lo vnet/devices/i2c/i2c.lo \
 	vnet/devices/optics/sfp.lo vnet/devices/xge/xge.lo \
 	vnet/devices/ethernet_phy_bcm.lo vnet/unix/pcap.lo \
-	vnet/unix/tuntap.lo
+	vnet/unix/netlink.lo vnet/unix/tuntap.lo
 libvnet_la_OBJECTS = $(am_libvnet_la_OBJECTS)
 PROGRAMS = $(noinst_PROGRAMS)
 am_vnet_unix_OBJECTS = example/main_stub.$(OBJEXT) \
@@ -371,7 +371,7 @@ libvnet_la_SOURCES = vnet/config.c vnet/interface.c \
 	vnet/devices/freescale/rapidio.c vnet/devices/i2c/i2c.c \
 	vnet/devices/optics/sfp.c vnet/devices/xge/xge.c \
 	vnet/devices/ethernet_phy_bcm.c vnet/unix/pcap.c \
-	vnet/unix/tuntap.c
+	vnet/unix/netlink.c vnet/unix/tuntap.c
 nobase_include_HEADERS = vnet/buffer.h vnet/config.h vnet/interface.h \
 	vnet/interface_funcs.h vnet/l3_types.h vnet/rewrite.h \
 	vnet/vnet.h vnet/ethernet/error.def vnet/ethernet/ethernet.h \
@@ -729,6 +729,8 @@ vnet/unix/$(DEPDIR)/$(am__dirstamp):
 	@: > vnet/unix/$(DEPDIR)/$(am__dirstamp)
 vnet/unix/pcap.lo: vnet/unix/$(am__dirstamp) \
 	vnet/unix/$(DEPDIR)/$(am__dirstamp)
+vnet/unix/netlink.lo: vnet/unix/$(am__dirstamp) \
+	vnet/unix/$(DEPDIR)/$(am__dirstamp)
 vnet/unix/tuntap.lo: vnet/unix/$(am__dirstamp) \
 	vnet/unix/$(DEPDIR)/$(am__dirstamp)
 libvnet.la: $(libvnet_la_OBJECTS) $(libvnet_la_DEPENDENCIES) $(EXTRA_libvnet_la_DEPENDENCIES) 
@@ -916,6 +918,8 @@ mostlyclean-compile:
 	-rm -f vnet/srp/node.lo
 	-rm -f vnet/srp/pg.$(OBJEXT)
 	-rm -f vnet/srp/pg.lo
+	-rm -f vnet/unix/netlink.$(OBJEXT)
+	-rm -f vnet/unix/netlink.lo
 	-rm -f vnet/unix/pcap.$(OBJEXT)
 	-rm -f vnet/unix/pcap.lo
 	-rm -f vnet/unix/tuntap.$(OBJEXT)
@@ -1004,6 +1008,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/srp/$(DEPDIR)/interface.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/srp/$(DEPDIR)/node.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/srp/$(DEPDIR)/pg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/netlink.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/pcap.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@vnet/unix/$(DEPDIR)/tuntap.Plo@am__quote@
 
