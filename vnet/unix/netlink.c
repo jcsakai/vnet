@@ -33,6 +33,14 @@
 #include <vlib/unix/unix.h>
 
 typedef struct {
+  /* Total number of messages added to history. */
+  u32 n_messages;
+
+  /* Circular buffer of messages. */
+  u8 * messages[64];
+} netlink_message_history_side_t;
+
+typedef struct {
   /* Kernel netlink socket. */
   int socket;
 
@@ -47,11 +55,22 @@ typedef struct {
 
   u32 tx_sequence_number;
 
-  /* Receive buffer. */
-  u8 * rx_buffer;
+  /* VLIB node index of netlink-process. */
+  u32 netlink_process_node_index;
+
+  netlink_message_history_side_t history_sides[VLIB_N_RX_TX];
 } netlink_main_t;
 
 static netlink_main_t netlink_main;
+
+always_inline void
+netlink_add_to_message_history (netlink_main_t * nm, vlib_rx_or_tx_t side, u8 * msg)
+{
+  netlink_message_history_side_t * s = &nm->history_sides[side];
+  u32 i = s->n_messages++ % ARRAY_LEN (s->messages);
+  vec_free (s->messages[i]);
+  s->messages[i] = msg;
+}
 
 always_inline void *
 nlmsg_next (struct nlmsghdr * h)
@@ -254,17 +273,23 @@ static u8 * format_netlink_attribute_af (u8 * s, va_list * va)
 {
   struct nlattr * a_sup = va_arg (*va, struct nlattr *);
   struct nlattr * a, * a_sub;
+  uword indent = format_get_indent (s);
+  uword n = 0;
   
   foreach_netlink_sub_attribute (a, a_sup)
     {
-      s = format (s, "%U: ", format_address_family, a->nla_type);
+      if (n++ > 0)
+	s = format (s, "\n%U", format_white_space, indent);
+      s = format (s, "%U", format_address_family, a->nla_type);
       switch (a->nla_type)
 	{
 	case AF_INET:
 	case AF_INET6:
 	  foreach_netlink_sub_attribute (a_sub, a)
 	    {
-	      s = format (s, "%d %U, ", a_sub->nla_type, format_hex_bytes, a_sub + 1, a_sub->nla_len - sizeof (a_sub[0]));
+	      s = format (s, "\n%U%d %U, ",
+			  format_white_space, indent + 2,
+			  a_sub->nla_type, format_hex_bytes, a_sub + 1, a_sub->nla_len - sizeof (a_sub[0]));
 	    }
 	  break;
 
@@ -644,6 +669,56 @@ static u8 * format_netlink_message (u8 * s, va_list * va)
   return s;
 }
 
+static u8 * format_netlink_message_vector (u8 * s, va_list * va)
+{
+  u8 * vector = va_arg (*va, u8 *);
+  int decode = va_arg (*va, int);
+  struct nlmsghdr * h;
+  uword indent = format_get_indent (s);
+  uword n = 0;
+
+  foreach_netlink_message_header (h, vector)
+    {
+      if (n > 0)
+	s = format (s, "\n%U", format_white_space, indent);
+      s = format (s, "%U", format_netlink_message, h, decode);
+      n++;
+    }
+  s = format (s, "\n");
+  return s;
+}
+
+static u8 * format_netlink_message_history_side (u8 * s, va_list * va)
+{
+  netlink_message_history_side_t * d = va_arg (*va, netlink_message_history_side_t *);
+  int decode = va_arg (*va, int);
+  uword indent = format_get_indent (s);
+  uword i, i_min, i_max;
+
+  if (d->n_messages == 0)
+    return s;
+
+  if (d->n_messages <= ARRAY_LEN (d->messages))
+    {
+      i_min = 0;
+      i_max = d->n_messages - 1;
+    }
+  else
+    {
+      i_min = d->n_messages - ARRAY_LEN (d->messages);
+      i_max = d->n_messages;
+    }
+
+  for (i = i_min; i <= i_max; i++)
+    {
+      if (i > i_min)
+	s = format (s, "\n%U", format_white_space, indent);
+      s = format (s, "%U", format_netlink_message_vector, d->messages[i % ARRAY_LEN (d->messages)], decode);
+    }
+
+  return s;
+}
+
 static clib_error_t *
 unix_read_from_file_to_vector (int fd, u8 ** vector, u32 read_size)
 {
@@ -675,21 +750,19 @@ unix_read_from_file_to_vector (int fd, u8 ** vector, u32 read_size)
 /* Gets called when file descriptor is read ready from epoll. */
 static clib_error_t * netlink_read_ready (unix_file_t * uf)
 {
+  vlib_main_t * vm = &vlib_global_main;
   netlink_main_t * nm = &netlink_main;
   clib_error_t * error;
+  u8 * rx_buffer = 0;
+  error = unix_read_from_file_to_vector (nm->socket, &rx_buffer, 4096);
 
-  error = unix_read_from_file_to_vector (nm->socket, &nm->rx_buffer, 4096);
-
-  if (vec_len (nm->rx_buffer) > 0)
+  if (! error)
     {
-      struct nlmsghdr * h;
-
-      foreach_netlink_message_header (h, nm->rx_buffer)
-	{
-	  clib_warning ("%U", format_netlink_message, h, /* decode */ 1);
-	}
-      _vec_len (nm->rx_buffer) = 0;
+      /* Process level will free allocated buffer. */
+      vlib_process_signal_event_pointer (vm, nm->netlink_process_node_index, 0, rx_buffer);
     }
+  else
+    vec_free (rx_buffer);
 
   return error;
 }
@@ -724,6 +797,82 @@ static clib_error_t * netlink_write_ready (unix_file_t * uf)
 
   return error;
 }
+
+static void netlink_rx_message (netlink_main_t * nm, struct nlmsghdr * h)
+{
+}
+
+static void netlink_rx_buffer (netlink_main_t * nm, u8 * rx_vector)
+{
+  struct nlmsghdr * h;
+
+  foreach_netlink_message_header (h, rx_vector)
+    netlink_rx_message (nm, h);
+
+  /* rx_vector will be freed when history wraps. */
+  netlink_add_to_message_history (nm, VLIB_RX, rx_vector);
+}
+
+static uword
+netlink_process (vlib_main_t * vm,
+		 vlib_node_runtime_t * rt,
+		 vlib_frame_t * f)
+{
+  netlink_main_t * nm = &netlink_main;
+  uword event_type;
+  void * event_data;
+    
+  while (1)
+    {
+      vlib_process_wait_for_event (vm);
+
+      event_data = vlib_process_get_event_data (vm, &event_type);
+      switch (event_type)
+	{
+	case 0:
+	  {
+	    u8 ** rx_buffers = event_data;
+	    uword i;
+
+	    for (i = 0; i < vec_len (rx_buffers); i++)
+	      netlink_rx_buffer (nm, rx_buffers[i]);
+	  }
+        break;
+        
+      default:
+	ASSERT (0);
+      }
+
+      vlib_process_put_event_data (vm, event_data);
+    }
+	    
+  return 0;
+}
+
+static vlib_node_registration_t netlink_process_node = {
+  .function = netlink_process,
+  .type = VLIB_NODE_TYPE_PROCESS,
+  .name = "netlink-process",
+};
+
+static clib_error_t *
+show_netlink_history (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  netlink_main_t * nm = &netlink_main;
+  
+  vlib_cli_output (vm, "Sent messages:\n\n%U",
+		   format_netlink_message_history_side, &nm->history_sides[VLIB_TX], /* decode */ 1);
+  vlib_cli_output (vm, "Received messages:\n\n%U",
+		   format_netlink_message_history_side, &nm->history_sides[VLIB_RX], /* decode */ 1);
+
+  return /* no error */ 0;
+}
+
+static VLIB_CLI_COMMAND (netlink_show_history_command) = {
+  .path = "show netlink history",
+  .short_help = "Show recent netlink messages received/sent.",
+  .function = show_netlink_history,
+};
 
 static clib_error_t *
 netlink_init (vlib_main_t * vm)
@@ -796,6 +945,9 @@ netlink_init (vlib_main_t * vm)
   netlink_tx_gen_request (nm, RTM_GETROUTE, AF_INET);
   netlink_tx_gen_request (nm, RTM_GETADDR, AF_INET6);
   netlink_tx_gen_request (nm, RTM_GETROUTE, AF_INET6);
+
+  vlib_register_node (vm, &netlink_process_node);
+  nm->netlink_process_node_index = netlink_process_node.index;
 
  done:
   if (error)
