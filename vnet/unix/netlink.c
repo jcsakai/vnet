@@ -826,8 +826,8 @@ static clib_error_t * netlink_write_ready (unix_file_t * uf)
 
 static void netlink_rx_error_message (void * opaque, struct nlmsghdr * h)
 {
-  /* FIXME */
-  ASSERT (0);
+  /* FIXME add to error history and continue. */
+  clib_error ("%U", format_netlink_message, h, /* decode */ 1);
 }
 
 static void netlink_rx_ignore_message (void * opaque, struct nlmsghdr * h)
@@ -852,9 +852,7 @@ static void netlink_rx_message (netlink_main_t * nm, struct nlmsghdr * h)
     if (h->nlmsg_type < vec_len (nm->rx_handler_by_message_type) && x->handler)
       x->handler (x->opaque, h);
     else
-      {
       clib_error ("unhandled message: %U", format_netlink_message, h, /* decode */ 0);
-      fflush(stdout);}
   }
 }
 
