@@ -251,6 +251,7 @@ libvnet_la_SOURCES +=				\
   vnet/unix/tuntap.c
 
 nobase_include_HEADERS +=			\
+  vnet/unix/netlink.h				\
   vnet/unix/pcap.h				\
   vnet/unix/tuntap.h
 

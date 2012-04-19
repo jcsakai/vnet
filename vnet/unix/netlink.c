@@ -25,85 +25,17 @@
 
 #include <sys/ioctl.h>
 #include <sys/socket.h>
-#include <linux/netlink.h>
-#include <linux/rtnetlink.h>
 
-#include <vnet/vnet.h>
-#include <vnet/ip/ip.h>
-#include <vnet/ethernet/ethernet.h>
+#include <vnet/unix/netlink.h>
 #include <vlib/unix/unix.h>
-
-typedef struct {
-  /* Total number of messages added to history. */
-  u32 n_messages;
-
-  /* Circular buffer of messages. */
-  u8 * messages[64];
-} netlink_message_history_side_t;
-
-typedef struct {
-  /* Kernel netlink socket. */
-  int socket;
-
-  /* VLIB unix file index corresponding to socket. */
-  u32 unix_file_index_for_socket;
-
-  /* Current message being created. */
-  u8 * tx_buffer;
-
-  /* Fifo of transmit buffers one for each message to be sent. */
-  u8 ** tx_fifo;
-
-  u32 tx_sequence_number;
-
-  /* VLIB node index of netlink-process. */
-  u32 netlink_process_node_index;
-
-  netlink_message_history_side_t history_sides[VLIB_N_RX_TX];
-} netlink_main_t;
-
-netlink_main_t netlink_main;
-
-always_inline void
-netlink_add_to_message_history (netlink_main_t * nm, vlib_rx_or_tx_t side, u8 * msg)
-{
-  netlink_message_history_side_t * s = &nm->history_sides[side];
-  u32 i = s->n_messages++ % ARRAY_LEN (s->messages);
-  vec_free (s->messages[i]);
-  s->messages[i] = msg;
-}
-
-always_inline void *
-nlmsg_next (struct nlmsghdr * h)
-{
-  ASSERT (h->nlmsg_len > 0);
-  return (void *) h + NLMSG_ALIGN (h->nlmsg_len);
-}
-
-always_inline void *
-nlmsg_contents (struct nlmsghdr * h)
-{ return (void *) h + NLMSG_ALIGN (sizeof (h[0])); }
-
-always_inline struct nlattr *
-nlattr_next (struct nlattr * a)
-{
-  ASSERT (a->nla_len > 0);
-  return (void *) a + NLMSG_ALIGN (a->nla_len);
-}
-
-#define foreach_netlink_message_header(h,v)				\
-  for ((h) = (void *) (v); (void *) (h) < (void *) vec_end (v); (h) = nlmsg_next (h))
-
-#define foreach_netlink_message_attribute(a,h,p)				\
-  for ((a) = (void *) ((p) + 1); (void *) (a) < (void *) h + NLMSG_ALIGN ((h)->nlmsg_len); (a) = nlattr_next (a))
-
-#define foreach_netlink_sub_attribute(a,a_sup)				\
-  for ((a) = (void *) ((a_sup) + 1); (void *) (a) < (void *) a_sup + NLMSG_ALIGN ((a_sup)->nla_len); (a) = nlattr_next (a))
+#include <vnet/ip/ip.h>		/* for format_ip[46]_address */
+#include <vnet/ethernet/ethernet.h> /* for format_ethernet_address */
 
 /* This adds a both a nlmsghdr and a request header (e.g. ifinfomsg, ifaddrmsg, rtmsg, ...)
    to the end of the tx buffer. */
-static void * netlink_tx_add_request_with_flags (netlink_main_t * nm, int type, int n_bytes, u32 flags)
+void * netlink_tx_add_request_with_flags (u32 type, u32 n_bytes, u32 flags)
 {
+  netlink_main_t * nm = &netlink_main;
   u8 * r;
   struct nlmsghdr * h;
 
@@ -126,8 +58,9 @@ static void netlink_tx (netlink_main_t * nm)
   unix_file_set_data_available_to_write (nm->unix_file_index_for_socket, /* is_available */ 1);
 }
 
-static void * netlink_tx_add_attr (netlink_main_t * nm, int attr_type, int attr_len)
+void * netlink_tx_add_attr (u32 attr_type, u32 attr_len)
 {
+  netlink_main_t * nm = &netlink_main;
   struct nlmsghdr * h;
   struct nlattr * a;
   u32 l;
@@ -142,10 +75,10 @@ static void * netlink_tx_add_attr (netlink_main_t * nm, int attr_type, int attr_
   return (void *) (a + 1);
 }
 
-static void netlink_tx_gen_request (netlink_main_t * nm, int type, int family)
+static void netlink_tx_gen_request (netlink_main_t * nm, u32 type, u32 family)
 {
   struct rtgenmsg * g;
-  g = netlink_tx_add_request_with_flags (nm, type, sizeof (g[0]), NLM_F_DUMP);
+  g = netlink_tx_add_request_with_flags (type, sizeof (g[0]), NLM_F_DUMP);
   g->rtgen_family = family;
   netlink_tx (nm);
 }
@@ -604,9 +537,18 @@ static u8 * format_netlink_message_flags (u8 * s, va_list * va)
   u32 is_get = va_arg (*va, u32);
 
   if (flags == 0)
-    s = format (s, "none");
+    return format (s, "none");
 
-  else if (is_get)
+  if (flags &  NLM_F_REQUEST)
+    s = format (s, "request ");
+  if (flags &  NLM_F_MULTI)
+    s = format (s, "multi ");
+  if (flags &  NLM_F_ACK)
+    s = format (s, "ack ");
+  if (flags &  NLM_F_ECHO)
+    s = format (s, "echo ");
+
+  if (is_get)
     {
       if (flags & NLM_F_ROOT)
 	s = format (s, "root ");
@@ -650,13 +592,10 @@ static u8 * format_netlink_message (u8 * s, va_list * va)
 
   is_get = netlink_message_is_get (h);
 
-  s = format (s, "%U: len %d seq %d pid %d",
+  s = format (s, "%U: len %d, sequence %d, pid %d, flags %U",
 	      format_netlink_message_type, h->nlmsg_type,
 	      h->nlmsg_len,
-	      h->nlmsg_seq, h->nlmsg_seq);
-
-  s = format (s, "\n%Uflags: %U",
-	      format_white_space, indent + 2,
+	      h->nlmsg_seq, h->nlmsg_seq,
 	      format_netlink_message_flags, h->nlmsg_flags, is_get);
 
   /* For gets there is not much to decode. */
@@ -885,8 +824,38 @@ static clib_error_t * netlink_write_ready (unix_file_t * uf)
   return error;
 }
 
+static void netlink_rx_error_message (void * opaque, struct nlmsghdr * h)
+{
+  /* FIXME */
+  ASSERT (0);
+}
+
+static void netlink_rx_ignore_message (void * opaque, struct nlmsghdr * h)
+{ }
+
 static void netlink_rx_message (netlink_main_t * nm, struct nlmsghdr * h)
 {
+  /* Reigster handlers for standard messages. */
+  if (NLMSG_DONE >= vec_len (nm->rx_handler_by_message_type)
+      || ! nm->rx_handler_by_message_type[NLMSG_DONE].handler)
+    {
+      netlink_register_rx_handler (NLMSG_DONE, netlink_rx_ignore_message, /* opaque */ 0);
+      netlink_register_rx_handler (NLMSG_NOOP, netlink_rx_ignore_message, /* opaque */ 0);
+      netlink_register_rx_handler (NLMSG_OVERRUN, netlink_rx_ignore_message, /* opaque */ 0);
+      netlink_register_rx_handler (NLMSG_ERROR, netlink_rx_error_message, /* opaque */ 0);
+    }
+
+  {
+    netlink_rx_message_handler_and_opaque_t * x;
+
+    x = &nm->rx_handler_by_message_type[h->nlmsg_type];
+    if (h->nlmsg_type < vec_len (nm->rx_handler_by_message_type) && x->handler)
+      x->handler (x->opaque, h);
+    else
+      {
+      clib_error ("unhandled message: %U", format_netlink_message, h, /* decode */ 0);
+      fflush(stdout);}
+  }
 }
 
 static void netlink_rx_buffer (netlink_main_t * nm, u8 * rx_vector)
@@ -1026,7 +995,7 @@ netlink_init (vlib_main_t * vm)
     nm->unix_file_index_for_socket = unix_file_add (&unix_main, &template);
   }
 
-  /* Query kernel database. */
+  /* Query kernel databases we care about. */
   netlink_tx_gen_request (nm, RTM_GETLINK, AF_PACKET);
   netlink_tx_gen_request (nm, RTM_GETADDR, AF_INET);
   netlink_tx_gen_request (nm, RTM_GETROUTE, AF_INET);
