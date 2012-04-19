@@ -30,6 +30,7 @@
 
 #include <vnet/vnet.h>
 #include <vnet/ip/ip.h>
+#include <vnet/ethernet/ethernet.h>
 #include <vlib/unix/unix.h>
 
 typedef struct {
@@ -61,7 +62,7 @@ typedef struct {
   netlink_message_history_side_t history_sides[VLIB_N_RX_TX];
 } netlink_main_t;
 
-static netlink_main_t netlink_main;
+netlink_main_t netlink_main;
 
 always_inline void
 netlink_add_to_message_history (netlink_main_t * nm, vlib_rx_or_tx_t side, u8 * msg)
@@ -149,51 +150,52 @@ static void netlink_tx_gen_request (netlink_main_t * nm, int type, int family)
   netlink_tx (nm);
 }
 
+/* _ (SYMBOL, IS-GET) */
 #define foreach_netlink_message_type		\
-  _ (NLMSG_NOOP)				\
-  _ (NLMSG_ERROR)				\
-  _ (NLMSG_DONE)				\
-  _ (NLMSG_OVERRUN)				\
-  _ (RTM_NEWLINK)				\
-  _ (RTM_DELLINK)				\
-  _ (RTM_GETLINK)				\
-  _ (RTM_SETLINK)				\
-  _ (RTM_NEWADDR)				\
-  _ (RTM_DELADDR)				\
-  _ (RTM_GETADDR)				\
-  _ (RTM_NEWROUTE)				\
-  _ (RTM_DELROUTE)				\
-  _ (RTM_GETROUTE)				\
-  _ (RTM_NEWNEIGH)				\
-  _ (RTM_DELNEIGH)				\
-  _ (RTM_GETNEIGH)				\
-  _ (RTM_NEWRULE)				\
-  _ (RTM_DELRULE)				\
-  _ (RTM_GETRULE)				\
-  _ (RTM_NEWQDISC)				\
-  _ (RTM_DELQDISC)				\
-  _ (RTM_GETQDISC)				\
-  _ (RTM_NEWTCLASS)				\
-  _ (RTM_DELTCLASS)				\
-  _ (RTM_GETTCLASS)				\
-  _ (RTM_NEWTFILTER)				\
-  _ (RTM_DELTFILTER)				\
-  _ (RTM_GETTFILTER)				\
-  _ (RTM_NEWACTION)				\
-  _ (RTM_DELACTION)				\
-  _ (RTM_GETACTION)				\
-  _ (RTM_NEWPREFIX)				\
-  _ (RTM_GETMULTICAST)				\
-  _ (RTM_GETANYCAST)				\
-  _ (RTM_NEWNEIGHTBL)				\
-  _ (RTM_GETNEIGHTBL)				\
-  _ (RTM_SETNEIGHTBL)				\
-  _ (RTM_NEWNDUSEROPT)				\
-  _ (RTM_NEWADDRLABEL)				\
-  _ (RTM_DELADDRLABEL)				\
-  _ (RTM_GETADDRLABEL)				\
-  _ (RTM_GETDCB)				\
-  _ (RTM_SETDCB)
+  _ (NLMSG_NOOP, 0)				\
+  _ (NLMSG_ERROR, 0)				\
+  _ (NLMSG_DONE, 0)				\
+  _ (NLMSG_OVERRUN, 0)				\
+  _ (RTM_NEWLINK, 0)				\
+  _ (RTM_DELLINK, 0)				\
+  _ (RTM_GETLINK, 1)				\
+  _ (RTM_SETLINK, 0)				\
+  _ (RTM_NEWADDR, 0)				\
+  _ (RTM_DELADDR, 0)				\
+  _ (RTM_GETADDR, 1)				\
+  _ (RTM_NEWROUTE, 0)				\
+  _ (RTM_DELROUTE, 0)				\
+  _ (RTM_GETROUTE, 1)				\
+  _ (RTM_NEWNEIGH, 0)				\
+  _ (RTM_DELNEIGH, 0)				\
+  _ (RTM_GETNEIGH, 1)				\
+  _ (RTM_NEWRULE, 0)				\
+  _ (RTM_DELRULE, 0)				\
+  _ (RTM_GETRULE, 1)				\
+  _ (RTM_NEWQDISC, 0)				\
+  _ (RTM_DELQDISC, 0)				\
+  _ (RTM_GETQDISC, 1)				\
+  _ (RTM_NEWTCLASS, 0)				\
+  _ (RTM_DELTCLASS, 0)				\
+  _ (RTM_GETTCLASS, 1)				\
+  _ (RTM_NEWTFILTER, 0)				\
+  _ (RTM_DELTFILTER, 0)				\
+  _ (RTM_GETTFILTER, 1)				\
+  _ (RTM_NEWACTION, 0)				\
+  _ (RTM_DELACTION, 0)				\
+  _ (RTM_GETACTION, 1)				\
+  _ (RTM_NEWPREFIX, 0)				\
+  _ (RTM_GETMULTICAST, 1)			\
+  _ (RTM_GETANYCAST, 1)				\
+  _ (RTM_NEWNEIGHTBL, 0)			\
+  _ (RTM_GETNEIGHTBL, 1)			\
+  _ (RTM_SETNEIGHTBL, 0)			\
+  _ (RTM_NEWNDUSEROPT, 0)			\
+  _ (RTM_NEWADDRLABEL, 0)			\
+  _ (RTM_DELADDRLABEL, 0)			\
+  _ (RTM_GETADDRLABEL, 1)			\
+  _ (RTM_GETDCB, 0)				\
+  _ (RTM_SETDCB, 1)
 
 static u8 * format_netlink_message_type (u8 * s, va_list * va)
 {
@@ -202,7 +204,7 @@ static u8 * format_netlink_message_type (u8 * s, va_list * va)
 
   switch (x)
     {
-#define _(a) case a: t = #a; break;
+#define _(a,b) case a: t = #a; break;
       foreach_netlink_message_type
 #undef _
     default:
@@ -315,6 +317,19 @@ static u8 * format_netlink_attribute_family_address (u8 * s, va_list * va)
   return s;
 }
 
+static u8 * format_netlink_attribute_link_address (u8 * s, va_list * va)
+{
+  struct nlattr * a = va_arg (*va, struct nlattr *);
+  u8 * addr = (void *) (a + 1);
+  u32 addr_len = a->nla_len - sizeof (a[0]);
+  switch (addr_len)
+    {
+    case 6: s = format (s, "%U", format_ethernet_address, addr); break;
+    default: s = format (s, "%U", format_hex_bytes, addr, addr_len); break;
+    }
+  return s;
+}
+
 typedef struct {
   char * name;
   format_function_t * format;
@@ -338,8 +353,8 @@ static u8 * format_netlink_attribute (u8 * s, va_list * va)
 
 #define foreach_netlink_ifinfo_attribute	\
   _ (unspec, x)					\
-  _ (address, x)				\
-  _ (broadcast, x)				\
+  _ (address, link_address)			\
+  _ (broadcast, link_address)			\
   _ (name, s)					\
   _ (mtu, d)					\
   _ (link, x)					\
@@ -358,7 +373,7 @@ static u8 * format_netlink_attribute (u8 * s, va_list * va)
   _ (linkinfo, x)				\
   _ (net, x)					\
   _ (ifalias, x)				\
-  _ (num, x)					\
+  _ (num, d)					\
   _ (vfinfo, x)					\
   _ (stats64, x)				\
   _ (vf, x)					\
@@ -572,15 +587,87 @@ static netlink_attribute_type_info_t route_attribute_info[] = {
 #undef _
 };
 
+#define NLM_F_ROOT	0x100	/* specify tree	root	*/
+#define NLM_F_MATCH	0x200	/* return all matching	*/
+#define NLM_F_ATOMIC	0x400	/* atomic GET		*/
+#define NLM_F_DUMP	(NLM_F_ROOT|NLM_F_MATCH)
+
+/* Modifiers to NEW request */
+#define NLM_F_REPLACE	0x100	/* Override existing		*/
+#define NLM_F_EXCL	0x200	/* Do not touch, if it exists	*/
+#define NLM_F_CREATE	0x400	/* Create, if it does not exist	*/
+#define NLM_F_APPEND	0x800	/* Add to end of list		*/
+
+static u8 * format_netlink_message_flags (u8 * s, va_list * va)
+{
+  u32 flags = va_arg (*va, u32);
+  u32 is_get = va_arg (*va, u32);
+
+  if (flags == 0)
+    s = format (s, "none");
+
+  else if (is_get)
+    {
+      if (flags & NLM_F_ROOT)
+	s = format (s, "root ");
+      if (flags & NLM_F_MATCH)
+	s = format (s, "all-matching ");
+      if (flags & NLM_F_ATOMIC)
+	s = format (s, "atomic ");
+    }
+
+  else
+    {
+      if (flags & NLM_F_REPLACE)
+	s = format (s, "replace ");
+      if (flags & NLM_F_EXCL)
+	s = format (s, "exclusive ");
+      if (flags & NLM_F_CREATE)
+	s = format (s, "create-if-non-existing ");
+      if (flags & NLM_F_APPEND)
+	s = format (s, "append-to-end-of-list ");
+    }
+
+  return s;
+}
+
+static int netlink_message_is_get (struct nlmsghdr * h)
+{
+  static char t[] = {
+#define _(a,is_get) [a] = is_get,
+    foreach_netlink_message_type
+#undef _
+  };
+  return h->nlmsg_type < ARRAY_LEN (t) ? t[h->nlmsg_type] : 0;
+}
+
 static u8 * format_netlink_message (u8 * s, va_list * va)
 {
   struct nlmsghdr * h = va_arg (*va, struct nlmsghdr *);
   int decode = va_arg (*va, int);
+  int is_get;
   uword indent = format_get_indent (s);
 
-  s = format (s, "%U: len %d flags 0x%x seq %d pid %d",
+  is_get = netlink_message_is_get (h);
+
+  s = format (s, "%U: len %d seq %d pid %d",
 	      format_netlink_message_type, h->nlmsg_type,
-	      h->nlmsg_len, h->nlmsg_flags, h->nlmsg_seq, h->nlmsg_seq);
+	      h->nlmsg_len,
+	      h->nlmsg_seq, h->nlmsg_seq);
+
+  s = format (s, "\n%Uflags: %U",
+	      format_white_space, indent + 2,
+	      format_netlink_message_flags, h->nlmsg_flags, is_get);
+
+  /* For gets there is not much to decode. */
+  if (is_get)
+    {
+      struct rtgenmsg * g = (void *) (h + 1);
+      s = format (s, "\n%Ufamily %U",
+		  format_white_space, indent + 2,
+		  format_address_family, g->rtgen_family);
+      return s;
+    }
 
   if (! decode)
     return s;
@@ -789,7 +876,7 @@ static clib_error_t * netlink_write_ready (unix_file_t * uf)
   if (n_write > 0)
     {
       clib_fifo_advance_head (nm->tx_fifo, 1);
-      vec_free (b);
+      netlink_add_to_message_history (nm, VLIB_TX, b);
     }
 
   unix_file_set_data_available_to_write (nm->unix_file_index_for_socket,
@@ -860,7 +947,7 @@ show_netlink_history (vlib_main_t * vm, unformat_input_t * input, vlib_cli_comma
 {
   netlink_main_t * nm = &netlink_main;
   
-  vlib_cli_output (vm, "Sent messages:\n\n%U",
+  vlib_cli_output (vm, "Sent messages:\n\n%U\n",
 		   format_netlink_message_history_side, &nm->history_sides[VLIB_TX], /* decode */ 1);
   vlib_cli_output (vm, "Received messages:\n\n%U",
 		   format_netlink_message_history_side, &nm->history_sides[VLIB_RX], /* decode */ 1);
