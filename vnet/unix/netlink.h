@@ -26,6 +26,7 @@
 #ifndef included_vnet_unix_netlink_h
 #define included_vnet_unix_netlink_h
 
+#include <sys/socket.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 
@@ -39,12 +40,26 @@ typedef struct {
   u8 * messages[64];
 } netlink_message_history_side_t;
 
-typedef void (netlink_rx_message_handler_t) (void * opaque, struct nlmsghdr * msg);
+typedef void (netlink_rx_message_handler_t) (struct nlmsghdr * msg, uword opaque);
 
 typedef struct {
   netlink_rx_message_handler_t * handler;
-  void * opaque;
+  uword opaque;
 } netlink_rx_message_handler_and_opaque_t;
+
+typedef struct {
+  /* Unix interface name (e.g. eth0) as a vector. */
+  u8 * unix_name;
+
+  /* Unix (linux kernel) interface index for this interface. */
+  u32 unix_if_index;
+
+  /* Saved copy of current IFF_* flags. */
+  u32 current_unix_flags;
+
+  /* VNET hardware/software interface index for this interface. */
+  u32 vnet_hw_if_index, vnet_sw_if_index;
+} netlink_interface_t;
 
 typedef struct {
   /* Kernel netlink socket. */
@@ -62,15 +77,39 @@ typedef struct {
   /* Fifo of transmit buffers one for each message to be sent. */
   u8 ** tx_fifo;
 
+  /* Sequence number for messages sent to kernel. */
   u32 tx_sequence_number;
 
   /* VLIB node index of netlink-process. */
   u32 netlink_process_node_index;
 
+  /* History buffer of recent messages both sent and received. */
   netlink_message_history_side_t history_sides[VLIB_N_RX_TX];
+
+  /* AF_PACKET socket for sending/receiving packets from unix interfaces. */
+  int packet_socket;
+
+  /* Pre-allocated vector of iovecs. */
+  struct iovec * iovecs;
+
+  /* Indexed by VNET hw interface device instance. */
+  netlink_interface_t * interface_pool;
+
+  /* Mapping table from unix (linux) if index to device instance. */
+  u32 * device_instance_by_unix_if_index;
+
+  /* Hash table mapping unix name (e.g. eth0) to device instance. */
+  uword * device_instance_by_unix_name;
 } netlink_main_t;
 
 netlink_main_t netlink_main;
+
+always_inline netlink_interface_t *
+netlink_interface_by_unix_index (netlink_main_t * nm, u32 unix_if_index)
+{
+  u32 i = vec_elt (nm->device_instance_by_unix_if_index, unix_if_index);
+  return pool_elt_at_index (nm->interface_pool, i);
+}
 
 always_inline void
 netlink_add_to_message_history (netlink_main_t * nm, vlib_rx_or_tx_t side, u8 * msg)
@@ -116,7 +155,7 @@ netlink_tx_add_request (u32 type, u32 n_bytes)
 { return netlink_tx_add_request_with_flags (type, n_bytes, /* flags */ 0); }
 
 always_inline void
-netlink_register_rx_handler (u32 type, netlink_rx_message_handler_t * handler, void * opaque)
+netlink_register_rx_handler (u32 type, netlink_rx_message_handler_t * handler, uword opaque)
 {
   netlink_main_t * nm = &netlink_main;
   vec_validate (nm->rx_handler_by_message_type, type);

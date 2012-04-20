@@ -24,7 +24,6 @@
  */
 
 #include <sys/ioctl.h>
-#include <sys/socket.h>
 
 #include <vnet/unix/netlink.h>
 #include <vlib/unix/unix.h>
@@ -824,13 +823,13 @@ static clib_error_t * netlink_write_ready (unix_file_t * uf)
   return error;
 }
 
-static void netlink_rx_error_message (void * opaque, struct nlmsghdr * h)
+static void netlink_rx_error_message (struct nlmsghdr * h, uword opaque)
 {
   /* FIXME add to error history and continue. */
   clib_error ("%U", format_netlink_message, h, /* decode */ 1);
 }
 
-static void netlink_rx_ignore_message (void * opaque, struct nlmsghdr * h)
+static void netlink_rx_ignore_message (struct nlmsghdr * h, uword opaque)
 { }
 
 static void netlink_rx_message (netlink_main_t * nm, struct nlmsghdr * h)
@@ -850,9 +849,9 @@ static void netlink_rx_message (netlink_main_t * nm, struct nlmsghdr * h)
 
     x = &nm->rx_handler_by_message_type[h->nlmsg_type];
     if (h->nlmsg_type < vec_len (nm->rx_handler_by_message_type) && x->handler)
-      x->handler (x->opaque, h);
+      x->handler (h, x->opaque);
     else
-      clib_error ("unhandled message: %U", format_netlink_message, h, /* decode */ 0);
+      clib_warning ("unhandled message: %U", format_netlink_message, h, /* decode */ 0);
   }
 }
 
@@ -1002,6 +1001,9 @@ netlink_init (vlib_main_t * vm)
 
   vlib_register_node (vm, &netlink_process_node);
   nm->netlink_process_node_index = netlink_process_node.index;
+
+  if ((error = vlib_call_init_function (vm, netlink_msg_init)))
+    return error;
 
  done:
   if (error)

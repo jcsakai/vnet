@@ -248,6 +248,7 @@ libvnet_la_SOURCES+=				\
 libvnet_la_SOURCES +=				\
   vnet/unix/pcap.c				\
   vnet/unix/netlink.c				\
+  vnet/unix/netlink_interface.c			\
   vnet/unix/tuntap.c
 
 nobase_include_HEADERS +=			\
