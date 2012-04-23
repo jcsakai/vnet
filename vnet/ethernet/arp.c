@@ -287,7 +287,7 @@ arp_set_ip4_over_ethernet (vnet_main_t * vm,
 	 sizeof (adj.rewrite_data));
 
       args.table_index_or_table_id = fib_index;
-      args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD | IP4_ROUTE_FLAG_NEIGHBOR;
+      args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_ADD;
       args.dst_address = a->ip4;
       args.dst_address_length = 32;
       args.adj_index = ~0;
@@ -672,9 +672,12 @@ arp_unset_ip4_over_ethernet (vnet_main_t * vm,
                              u32 sw_if_index,
                              ethernet_arp_ip4_over_ethernet_address_t * a)
 {
-  ethernet_arp_ip4_entry_t * e;
+  ethernet_arp_ip4_entry_t * e, e_copy;
   ethernet_arp_ip4_key_t k;
-  uword * p;
+  ip4_main_t * im = &ip4_main;
+  ip_adjacency_t adj;
+  ip4_add_del_route_args_t args;
+  uword * p, fib_index;
   
   k.sw_if_index = sw_if_index;
   k.ip4_address = a->ip4;
@@ -685,8 +688,47 @@ arp_unset_ip4_over_ethernet (vnet_main_t * vm,
       return;
     }
   e = pool_elt_at_index (am->ip4_entry_pool, p[0]);
+  e_copy = e[0];
   mhash_unset (&am->ip4_entry_by_key, &e->key, 0);
   pool_put (am->ip4_entry_pool, e);
+
+  fib_index = im->fib_index_by_sw_if_index[sw_if_index];
+
+  adj.lookup_next_index = IP_LOOKUP_NEXT_REWRITE;
+
+  vnet_rewrite_for_sw_interface
+    (vm,
+     VNET_L3_PACKET_TYPE_IP4,
+     sw_if_index,
+     ip4_rewrite_node.index,
+     e_copy.ethernet_address,		/* destination address */
+     &adj.rewrite_header,
+     sizeof (adj.rewrite_data));
+
+  args.table_index_or_table_id = fib_index;
+  args.flags = IP4_ROUTE_FLAG_FIB_INDEX | IP4_ROUTE_FLAG_DEL;
+  args.dst_address = a->ip4;
+  args.dst_address_length = 32;
+  args.adj_index = ~0;
+  args.add_adj = &adj;
+  args.n_add_adj = 1;
+
+  ip4_add_del_route (im, &args);
+  ip4_maybe_remap_adjacencies (im, fib_index, args.flags);
+}
+
+void
+ip4_add_del_ethernet_neighbor (ethernet_arp_ip4_over_ethernet_address_t * a,
+			       u32 sw_if_index,
+			       u32 is_del)
+{
+  vnet_main_t * vm = &vnet_main;
+  ethernet_arp_main_t * am = &ethernet_arp_main;
+			       
+  if (is_del)
+    arp_unset_ip4_over_ethernet (vm, am, sw_if_index, a);
+  else
+    arp_set_ip4_over_ethernet (vm, am, sw_if_index, a);
 }
 
 static void 
@@ -712,10 +754,11 @@ increment_ip4_and_mac_address (ethernet_arp_ip4_over_ethernet_address_t *a)
     }
 }
 
+#if CLIB_DEBUG > 0
 static clib_error_t *
 ip_arp_add_del_command_fn (vlib_main_t * vm,
-		 unformat_input_t * input,
-		 vlib_cli_command_t * cmd)
+			   unformat_input_t * input,
+			   vlib_cli_command_t * cmd)
 {
   vnet_main_t * vnm = &vnet_main;
   ethernet_arp_main_t * am = &ethernet_arp_main;
@@ -768,3 +811,4 @@ static VLIB_CLI_COMMAND (ip_arp_add_del_command) = {
     .short_help = "set ip arp",
     .function = ip_arp_add_del_command_fn,
 };
+#endif	/* CLIB_DEBUG > 0 */
