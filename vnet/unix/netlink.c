@@ -519,16 +519,49 @@ static netlink_attribute_type_info_t route_attribute_info[] = {
 #undef _
 };
 
-#define NLM_F_ROOT	0x100	/* specify tree	root	*/
-#define NLM_F_MATCH	0x200	/* return all matching	*/
-#define NLM_F_ATOMIC	0x400	/* atomic GET		*/
-#define NLM_F_DUMP	(NLM_F_ROOT|NLM_F_MATCH)
+#define foreach_netlink_neighbor_state		\
+  _ (none, 0x00)				\
+  _ (incomplete, 0x01)				\
+  _ (reachable, 0x02)				\
+  _ (stale, 0x04)				\
+  _ (delay, 0x08)				\
+  _ (probe, 0x10)				\
+  _ (failed, 0x20)				\
+  _ (noarp, 0x40)				\
+  _ (permanent, 0x80)
 
-/* Modifiers to NEW request */
-#define NLM_F_REPLACE	0x100	/* Override existing		*/
-#define NLM_F_EXCL	0x200	/* Do not touch, if it exists	*/
-#define NLM_F_CREATE	0x400	/* Create, if it does not exist	*/
-#define NLM_F_APPEND	0x800	/* Add to end of list		*/
+static u8 * format_netlink_neighbor_state (u8 * s, va_list * va)
+{
+  u32 x = va_arg (*va, u32);
+  char * t;
+  switch (x)
+    {
+#define _(f,n) case n: t = #f; break;
+      foreach_netlink_neighbor_state
+#undef _
+    default:
+      t = 0;
+      break;
+    }
+  if (t)
+    s = format (s, "%s", t);
+  else
+    s = format (s, "unknown 0x%x", x);
+  return s;
+}
+
+#define foreach_netlink_neighbor_attribute	\
+  _ (unspec, x)					\
+  _ (l3_address, family_address)		\
+  _ (l2_address, link_address)			\
+  _ (cacheinfo, x)				\
+  _ (probes, x)
+
+static netlink_attribute_type_info_t neighbor_attribute_info[] = {
+#define _(a,b) { .name = #a, .format = format_netlink_attribute_##b, },
+  foreach_netlink_neighbor_attribute
+#undef _
+};
 
 static u8 * format_netlink_message_flags (u8 * s, va_list * va)
 {
@@ -582,7 +615,7 @@ static int netlink_message_is_get (struct nlmsghdr * h)
   return h->nlmsg_type < ARRAY_LEN (t) ? t[h->nlmsg_type] : 0;
 }
 
-static u8 * format_netlink_message (u8 * s, va_list * va)
+u8 * format_netlink_message (u8 * s, va_list * va)
 {
   struct nlmsghdr * h = va_arg (*va, struct nlmsghdr *);
   int decode = va_arg (*va, int);
@@ -677,6 +710,28 @@ static u8 * format_netlink_message (u8 * s, va_list * va)
       }
       break;
 
+    case RTM_NEWNEIGH: case RTM_DELNEIGH:
+    case RTM_GETNEIGH:
+      {
+	struct ndmsg * n = nlmsg_contents (h);
+	struct nlattr * a;
+	s = format (s, "\n%Ufamily %U, index %d, type %U, state %U, flags 0x%x",
+		    format_white_space, indent + 2,
+		    format_address_family, n->ndm_family,
+		    n->ndm_ifindex,
+		    format_netlink_route_type, n->ndm_type,
+		    format_netlink_neighbor_state, n->ndm_state,
+		    n->ndm_flags);
+
+	foreach_netlink_message_attribute (a, h, n)
+	  {
+	    s = format (s, "\n%U%U",
+			format_white_space, indent + 2,
+			format_netlink_attribute, a, neighbor_attribute_info, ARRAY_LEN (neighbor_attribute_info));
+	  }
+      }
+      break;
+
     case NLMSG_ERROR:
       {
 	struct nlmsgerr * e = nlmsg_contents (h);
@@ -736,9 +791,13 @@ static u8 * format_netlink_message_history_side (u8 * s, va_list * va)
 
   for (i = i_min; i <= i_max; i++)
     {
+      netlink_message_history_entry_t * e;
       if (i > i_min)
 	s = format (s, "\n%U", format_white_space, indent);
-      s = format (s, "%U", format_netlink_message_vector, d->messages[i % ARRAY_LEN (d->messages)], decode);
+      e = d->messages + (i % ARRAY_LEN (d->messages));
+      s = format (s, "%U: %U",
+		  format_time_interval, "h:m:s:u", e->time,
+		  format_netlink_message_vector, e->message, decode);
     }
 
   return s;
@@ -814,7 +873,7 @@ static clib_error_t * netlink_write_ready (unix_file_t * uf)
   if (n_write > 0)
     {
       clib_fifo_advance_head (nm->tx_fifo, 1);
-      netlink_add_to_message_history (nm, VLIB_TX, b);
+      netlink_add_to_message_history (&vlib_global_main, nm, VLIB_TX, b);
     }
 
   unix_file_set_data_available_to_write (nm->unix_file_index_for_socket,
@@ -863,7 +922,7 @@ static void netlink_rx_buffer (netlink_main_t * nm, u8 * rx_vector)
     netlink_rx_message (nm, h);
 
   /* rx_vector will be freed when history wraps. */
-  netlink_add_to_message_history (nm, VLIB_RX, rx_vector);
+  netlink_add_to_message_history (&vlib_global_main, nm, VLIB_RX, rx_vector);
 }
 
 static uword
@@ -994,15 +1053,19 @@ netlink_init (vlib_main_t * vm)
 
   /* Query kernel databases we care about. */
   netlink_tx_gen_request (nm, RTM_GETLINK, AF_PACKET);
+
   netlink_tx_gen_request (nm, RTM_GETADDR, AF_INET);
+  netlink_tx_gen_request (nm, RTM_GETNEIGH, AF_INET);
   netlink_tx_gen_request (nm, RTM_GETROUTE, AF_INET);
+
   netlink_tx_gen_request (nm, RTM_GETADDR, AF_INET6);
+  netlink_tx_gen_request (nm, RTM_GETNEIGH, AF_INET6);
   netlink_tx_gen_request (nm, RTM_GETROUTE, AF_INET6);
 
   vlib_register_node (vm, &netlink_process_node);
   nm->netlink_process_node_index = netlink_process_node.index;
 
-  if ((error = vlib_call_init_function (vm, netlink_msg_init)))
+  if ((error = vlib_call_init_function (vm, netlink_interface_init)))
     return error;
 
  done:

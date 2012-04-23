@@ -38,6 +38,7 @@ netlink_interface_tx (vlib_main_t * vm,
 		      vlib_node_runtime_t * node,
 		      vlib_frame_t * f)
 {
+  vnet_main_t * vnm = &vnet_main;
   netlink_main_t * nm = &netlink_main;
   vnet_interface_output_runtime_t * rd = (void *) node->runtime_data;
   netlink_interface_t * ni = pool_elt_at_index (nm->interface_pool, rd->dev_instance);
@@ -47,6 +48,19 @@ netlink_interface_tx (vlib_main_t * vm,
 
   from = vlib_frame_vector_args (f);
   n_left_from = f->n_vectors;
+
+  if (nm->packet_socket == -1)
+    {
+      vnet_hw_interface_t * hi = vnet_get_hw_interface (vnm, ni->vnet_hw_if_index);
+      return vlib_error_drop_buffers (vm, node,
+				      from,
+				      /* buffer stride */ 1,
+				      n_left_from,
+				      VNET_INTERFACE_OUTPUT_NEXT_DROP,
+				      hi->output_node_index,
+				      VNET_INTERFACE_OUTPUT_ERROR_INTERFACE_DOWN);
+    }
+
   memset (&sa, 0, sizeof (sa));  
   sa.sll_family = AF_PACKET;
   sa.sll_ifindex = ni->unix_if_index;
@@ -273,14 +287,155 @@ static void netlink_rx_add_del_addr (struct nlmsghdr * h, uword is_del)
 
 static void netlink_rx_add_del_route (struct nlmsghdr * h, uword is_del)
 {
+  netlink_main_t * nm = &netlink_main;
+  netlink_interface_t * ni;
+  struct rtmsg * r = nlmsg_contents (h);
+  struct nlattr * a;
+  void * dst_address = 0;
+  void * next_hop = 0;
+  u32 * tx_if_index = 0;
+  u8 zero[16] = {0};
+
+  /* Ignore all except routes that are static or originating from routing-protocols. */
+  switch (r->rtm_protocol)
+    {
+    case RTPROT_KERNEL:
+    case RTPROT_REDIRECT:
+    case RTPROT_UNSPEC:
+      return;
+    }
+
+  if (r->rtm_type != RTN_UNICAST)
+    return;
+
+  foreach_netlink_message_attribute (a, h, r)
+    {
+      void * c = a + 1;
+      switch (a->nla_type)
+	{
+	case RTA_DST:
+	  dst_address = c;
+	  break;
+
+	case RTA_GATEWAY:
+	  next_hop = c;
+	  break;
+
+	case RTA_OIF:
+	  tx_if_index = c;
+	  break;
+	}
+    }
+
+  if (r->rtm_dst_len == 0)
+    dst_address = zero;
+
+  if (! next_hop)
+    return;
+
+  ASSERT (dst_address != 0);
+  ASSERT (next_hop != 0);
+  ASSERT (tx_if_index != 0);
+
+  ni = netlink_interface_by_unix_index (nm, tx_if_index[0]);
+  if (ni->vnet_hw_if_index == ~0)
+    return;
+
+  switch (r->rtm_family)
+    {
+    case AF_INET:
+      ip4_add_del_route_next_hop (&ip4_main,
+				  is_del ? IP4_ROUTE_FLAG_DEL : 0,
+				  dst_address,
+				  r->rtm_dst_len,
+				  next_hop,
+				  ni->vnet_sw_if_index,
+				  /* weight */ 1);
+      break;
+
+    case AF_INET6:
+      ip6_add_del_route_next_hop (&ip6_main,
+				  is_del ? IP6_ROUTE_FLAG_DEL : 0,
+				  dst_address,
+				  r->rtm_dst_len,
+				  next_hop,
+				  ni->vnet_sw_if_index,
+				  /* weight */ 1);
+      break;
+
+    default:
+      ASSERT (0);
+    }
 }
 
 static void netlink_rx_add_del_neighbor (struct nlmsghdr * h, uword is_del)
 {
+  netlink_main_t * nm = &netlink_main;
+  netlink_interface_t * ni;
+  struct ndmsg * n = nlmsg_contents (h);
+  struct nlattr * a;
+  void * dst_address_l3 = 0;
+  void * dst_address_l2 = 0;
+  u8 zero[16] = {0};
+
+  if (n->ndm_type != RTN_UNICAST)
+    return;
+
+  is_del |= n->ndm_state == NUD_FAILED;
+
+  switch (n->ndm_state)
+    {
+    case NUD_NOARP:
+    case NUD_NONE:
+      return;
+    }
+
+  foreach_netlink_message_attribute (a, h, n)
+    {
+      void * c = a + 1;
+      switch (a->nla_type)
+	{
+	case NDA_DST:
+	  dst_address_l3 = c;
+	  break;
+	case NDA_LLADDR:
+	  dst_address_l2 = c;
+	  break;
+	}
+    }
+
+  ni = netlink_interface_by_unix_index (nm, n->ndm_ifindex);
+  if (ni->vnet_hw_if_index == ~0)
+    return;
+
+  ASSERT (dst_address_l3 != 0);
+  if (! dst_address_l2)
+    dst_address_l2 = zero;
+
+  switch (n->ndm_family)
+    {
+    case AF_INET:
+      {
+	ethernet_arp_ip4_over_ethernet_address_t a;
+	memcpy (&a.ip4.as_u8, dst_address_l3, sizeof (a.ip4.as_u8));
+	memcpy (&a.ethernet, dst_address_l2, sizeof (a.ethernet));
+	ip4_add_del_ethernet_neighbor (&a, ni->vnet_sw_if_index, is_del);
+	break;
+      }
+
+    case AF_INET6:
+      {
+	ASSERT (0);
+	break;
+      }
+
+    default:
+      ASSERT (0);
+    }
 }
 
 static clib_error_t *
-netlink_msg_init (vlib_main_t * vm)
+netlink_interface_init (vlib_main_t * vm)
 {
   netlink_main_t * nm = &netlink_main;
 
@@ -296,9 +451,19 @@ netlink_msg_init (vlib_main_t * vm)
   netlink_register_rx_handler (RTM_NEWNEIGH, netlink_rx_add_del_neighbor, /* is_del */ 0);
   netlink_register_rx_handler (RTM_DELNEIGH, netlink_rx_add_del_neighbor, /* is_del */ 1);
 
-  nm->packet_socket = socket (AF_PACKET, SOCK_RAW, htons (ETH_P_ALL));
+  if (geteuid()) 
+    {
+      clib_warning ("netlink interfaces disabled: must be superuser");
+      nm->packet_socket = -1;
+    }
+  else
+    {
+      nm->packet_socket = socket (AF_PACKET, SOCK_RAW, htons (ETH_P_ALL));
+      if (nm->packet_socket < 0)
+	return clib_error_return_unix (0, "socket AF_PACKET");
+    }
 
   return /* no error */ 0;
 }
 
-VLIB_INIT_FUNCTION (netlink_msg_init);
+VLIB_INIT_FUNCTION (netlink_interface_init);

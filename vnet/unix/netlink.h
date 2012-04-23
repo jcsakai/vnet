@@ -33,11 +33,19 @@
 #include <vnet/vnet.h>
 
 typedef struct {
+  /* Time stamp of message. */
+  f64 time;
+
+  /* Copy of message as received/sent to/from kernel. */
+  u8 * message;
+} netlink_message_history_entry_t;
+
+typedef struct {
   /* Total number of messages added to history. */
   u32 n_messages;
 
   /* Circular buffer of messages. */
-  u8 * messages[64];
+  netlink_message_history_entry_t messages[64];
 } netlink_message_history_side_t;
 
 typedef void (netlink_rx_message_handler_t) (struct nlmsghdr * msg, uword opaque);
@@ -112,12 +120,15 @@ netlink_interface_by_unix_index (netlink_main_t * nm, u32 unix_if_index)
 }
 
 always_inline void
-netlink_add_to_message_history (netlink_main_t * nm, vlib_rx_or_tx_t side, u8 * msg)
+netlink_add_to_message_history (vlib_main_t * vm, netlink_main_t * nm, vlib_rx_or_tx_t side, u8 * msg)
 {
   netlink_message_history_side_t * s = &nm->history_sides[side];
+  netlink_message_history_entry_t * e;
   u32 i = s->n_messages++ % ARRAY_LEN (s->messages);
-  vec_free (s->messages[i]);
-  s->messages[i] = msg;
+  e = s->messages + i;
+  vec_free (e->message);
+  e->message = msg;
+  e->time = vlib_time_now (vm);
 }
 
 always_inline void *
@@ -149,6 +160,8 @@ nlattr_next (struct nlattr * a)
 
 void * netlink_tx_add_request_with_flags (u32 type, u32 n_bytes, u32 flags);
 void * netlink_tx_add_attr (u32 attr_type, u32 attr_len);
+
+format_function_t format_netlink_message;
 
 always_inline void *
 netlink_tx_add_request (u32 type, u32 n_bytes)
