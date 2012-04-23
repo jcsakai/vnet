@@ -346,6 +346,49 @@ ip4_fib_mtrie_add_del_route (ip4_fib_t * fib,
     }
 }
 
+always_inline uword
+maybe_remap_leaf (ip_lookup_main_t * lm, ip4_fib_mtrie_leaf_t * p)
+{
+  ip4_fib_mtrie_leaf_t l = p[0];
+  uword was_remapped_to_empty_leaf = 0;
+  if (ip4_fib_mtrie_leaf_is_terminal (l))
+    {
+      u32 adj_index = ip4_fib_mtrie_leaf_get_adj_index (l);
+      u32 m = vec_elt (lm->adjacency_remap_table, adj_index);
+      if (m)
+	{
+	  was_remapped_to_empty_leaf = m == ~0;
+	  if (was_remapped_to_empty_leaf)
+	    p[0] = (was_remapped_to_empty_leaf
+		    ? IP4_FIB_MTRIE_LEAF_EMPTY
+		    : ip4_fib_mtrie_leaf_set_adj_index (m - 1));
+	}
+    }
+  return was_remapped_to_empty_leaf;
+}
+
+static void maybe_remap_ply (ip_lookup_main_t * lm, ip4_fib_mtrie_ply_t * ply)
+{
+  u32 n_remapped_to_empty = 0;
+  u32 i;
+  for (i = 0; i < ARRAY_LEN (ply->leaves); i++)
+    n_remapped_to_empty += maybe_remap_leaf (lm, &ply->leaves[i]);
+  if (n_remapped_to_empty > 0)
+    {
+      ASSERT (n_remapped_to_empty <= ply->n_non_empty_leafs);
+      ply->n_non_empty_leafs -= n_remapped_to_empty;
+      if (ply->n_non_empty_leafs == 0)
+	abort ();
+    }
+}
+
+void ip4_mtrie_maybe_remap_adjacencies (ip_lookup_main_t * lm, ip4_fib_mtrie_t * m)
+{
+  ip4_fib_mtrie_ply_t * ply;
+  pool_foreach (ply, m->ply_pool, maybe_remap_ply (lm, ply));
+  maybe_remap_leaf (lm, &m->default_leaf);
+}
+
 /* Returns number of bytes of memory used by mtrie. */
 static uword mtrie_memory_usage (ip4_fib_mtrie_t * m, ip4_fib_mtrie_ply_t * p)
 {
