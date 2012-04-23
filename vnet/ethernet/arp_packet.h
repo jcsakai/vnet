@@ -26,6 +26,8 @@
 #ifndef included_ethernet_arp_packet_h
 #define included_ethernet_arp_packet_h
 
+#include <vnet/ip/ip4_packet.h>	/* for ip4_address_t */
+
 #define foreach_ethernet_arp_hardware_type	\
   _ (0, reserved)				\
   _ (1, ethernet)				\

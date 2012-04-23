@@ -28,6 +28,7 @@
 
 #include <vnet/vnet.h>
 #include <vnet/ethernet/packet.h>
+#include <vnet/ethernet/arp_packet.h>
 #include <vnet/ethernet/phy.h>
 #include <vnet/pg/pg.h>
 
@@ -174,6 +175,11 @@ void
 ethernet_register_input_type (vlib_main_t * vm,
 			      ethernet_type_t type,
 			      u32 node_index);
+
+void
+ip4_add_del_ethernet_neighbor (ethernet_arp_ip4_over_ethernet_address_t * a,
+			       u32 sw_if_index,
+			       u32 is_del);
 
 /* Formats ethernet address X:X:X:X:X:X */
 format_function_t format_ethernet_address;
