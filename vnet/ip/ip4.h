@@ -236,8 +236,6 @@ int ip4_address_compare (ip4_address_t * a1, ip4_address_t * a2);
 #define IP4_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
 /* Not last add/del in group.  Facilities batching requests into packets. */
 #define IP4_ROUTE_FLAG_NOT_LAST_IN_GROUP (1 << 4)
-/* Dynamic route created via ARP reply. */
-#define IP4_ROUTE_FLAG_NEIGHBOR (1 << 5)
 
 typedef struct {
   /* IP4_ROUTE_FLAG_* */
