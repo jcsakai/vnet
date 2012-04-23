@@ -122,6 +122,8 @@ void ip4_fib_mtrie_add_del_route (struct ip4_fib_t * f,
 /* Returns adjacency index. */
 u32 ip4_mtrie_lookup_address (ip4_fib_mtrie_t * m, ip4_address_t dst);
 
+void ip4_mtrie_maybe_remap_adjacencies (ip_lookup_main_t * lm, ip4_fib_mtrie_t * m);
+
 format_function_t format_ip4_fib_mtrie;
 
 /* Lookup step.  Processes 1 byte of 4 byte ip4 address. */
