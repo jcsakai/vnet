@@ -259,8 +259,6 @@ int ip6_address_compare (ip6_address_t * a1, ip6_address_t * a2);
 #define IP6_ROUTE_FLAG_KEEP_OLD_ADJACENCY (1 << 2)
 #define IP6_ROUTE_FLAG_NO_REDISTRIBUTE (1 << 3)
 #define IP6_ROUTE_FLAG_NOT_LAST_IN_GROUP (1 << 4)
-/* Dynamic route created via neighbor discovery. */
-#define IP6_ROUTE_FLAG_NEIGHBOR (1 << 5)
 
 typedef struct {
   /* IP6_ROUTE_FLAG_* */

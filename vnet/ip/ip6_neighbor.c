@@ -140,7 +140,7 @@ set_ethernet_neighbor (vlib_main_t * vm,
 	 sizeof (adj.rewrite_data));
 
       args.table_index_or_table_id = im->fib_index_by_sw_if_index[sw_if_index];
-      args.flags = IP6_ROUTE_FLAG_FIB_INDEX | IP6_ROUTE_FLAG_ADD | IP6_ROUTE_FLAG_NEIGHBOR;
+      args.flags = IP6_ROUTE_FLAG_FIB_INDEX | IP6_ROUTE_FLAG_ADD;
       args.dst_address = a[0];
       args.dst_address_length = 128;
       args.adj_index = ~0;
