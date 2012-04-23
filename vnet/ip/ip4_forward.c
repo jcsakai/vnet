@@ -649,9 +649,6 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 	    /* Record destination address from hash key. */
 	    a.data_u32 = p->key;
 
-	    /* Reset mapping table. */
-	    lm->adjacency_remap_table[adj_index] = 0;
-
 	    /* New adjacency points to nothing: so delete prefix. */
 	    if (m == ~0)
 	      vec_add1 (to_delete, a);
@@ -687,6 +684,12 @@ void ip4_maybe_remap_adjacencies (ip4_main_t * im,
 			    fib->new_hash_values);
 	}
     }
+
+  /* Also remap adjacencies in mtrie. */
+  ip4_mtrie_maybe_remap_adjacencies (lm, &fib->mtrie);
+
+  /* Reset mapping table. */
+  vec_zero (lm->adjacency_remap_table);
 
   /* All remaps have been performed. */
   lm->n_adjacency_remaps = 0;
