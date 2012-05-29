@@ -1991,7 +1991,7 @@ static void ige_device_init (ige_main_t * xm)
 	    break;
 	  }
 
-	r->rx_control |= (bsize << 16) | (bsex << 25);
+	r->rx_control = (bsize << 16) | (bsex << 25);
       }
 
       /* Strip ethernet crc and don't include in descriptor length. */
