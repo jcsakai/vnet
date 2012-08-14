@@ -7,7 +7,6 @@
   _ (INVALID_CODE_FOR_TYPE, "invalid code for type")			\
   _ (INVALID_HOP_LIMIT_FOR_TYPE, "hop_limit != 255")			\
   _ (LENGTH_TOO_SMALL_FOR_TYPE, "payload length too small for type")	\
-  _ (OPTIONS_WITH_ODD_LENGTH, "total option length not multiple of 8 bytes") \
   _ (OPTION_WITH_ZERO_LENGTH, "option has zero length")			\
   _ (ECHO_REPLIES_SENT, "echo replies sent")				\
   _ (NEIGHBOR_SOLICITATION_SOURCE_NOT_ON_LINK, "neighbor solicitations from source not on link") \

@@ -322,6 +322,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	      ip0->dst_address = ip0->src_address;
 	      ip0->src_address = h0->target_address;
+	      ip0->hop_limit = 255;
 	      h0->icmp.type = ICMP6_neighbor_advertisement;
 
 	      sw_if0 = vnet_get_sup_sw_interface (vnm, sw_if_index0);
@@ -337,6 +338,8 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 		(ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_SOLICITED
 		 | ICMP6_NEIGHBOR_ADVERTISEMENT_FLAG_OVERRIDE);
 
+	      /* Get adjacency from source address lookup (always done for local packets). */
+	      vnet_buffer (p0)->ip.adj_index[VLIB_TX] = vnet_buffer (p0)->ip.adj_index[VLIB_RX];
 	      vnet_buffer (p0)->sw_if_index[VLIB_RX] = vnet_main.local_interface_sw_if_index;
 
 	      h0->icmp.checksum = 0;
@@ -384,7 +387,7 @@ static VLIB_REGISTER_NODE (ip6_icmp_neighbor_solicitation_node) = {
   .n_next_nodes = ICMP6_NEIGHBOR_SOLICITATION_N_NEXT,
   .next_nodes = {
     [ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP] = "error-drop",
-    [ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY] = CLIB_DEBUG > 0 ? "ip6-input" : "ip6-lookup",
+    [ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY] = "ip6-rewrite-local",
   },
 };
 

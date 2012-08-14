@@ -95,10 +95,13 @@ typedef struct {
   u64 head_address;
 } ixge_rx_to_hw_descriptor_t;
 
-typedef struct {
-  u32 status[3];
-  u16 n_packet_bytes_this_descriptor;
-  u16 vlan_tag;
+typedef union {
+  struct {
+    u32 status[3];
+    u16 n_packet_bytes_this_descriptor;
+    u16 vlan_tag;
+  };
+  u32x4 as_u32x4;
 } ixge_rx_from_hw_descriptor_t;
 
 #define IXGE_RX_DESCRIPTOR_STATUS0_IS_LAYER2 (1 << (4 + 11))

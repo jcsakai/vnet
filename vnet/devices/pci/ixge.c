@@ -1305,7 +1305,10 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  (vm, xm->rx_buffers_to_add + l, n_to_alloc,
 	   xm->vlib_buffer_free_list_index);
 	_vec_len (xm->rx_buffers_to_add) += n_allocated;
-	ASSERT (vec_len (xm->rx_buffers_to_add) >= n_descriptors_left);
+
+        /* Handle transient allocation failure */
+	if (l + n_allocated < n_descriptors_left)
+	  n_descriptors_left = n_descriptors = l + n_allocated;
       }
 
     /* Add buffers from end of vector going backwards. */
@@ -1320,6 +1323,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
       while (n_descriptors_left >= 4 && n_left_to_next >= 2)
 	{
 	  vlib_buffer_t * b0, * b1;
+	  ixge_rx_from_hw_descriptor_t d0, d1;
 	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
 	  u32 bi1, fi1, len1, l3_offset1, s21, s01, flags1;
 	  u8 is_eop0, error0, next0;
@@ -1329,13 +1333,16 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  vlib_prefetch_buffer_with_index (vm, to_rx[3], STORE);
 	  CLIB_PREFETCH (d + 4, CLIB_CACHE_LINE_BYTES, LOAD);
 
-	  s00 = d[0].rx_from_hw.status[0];
-	  s01 = d[1].rx_from_hw.status[0];
+	  d0.as_u32x4 = d[0].rx_from_hw.as_u32x4;
+	  d1.as_u32x4 = d[1].rx_from_hw.as_u32x4;
 
-	  s20 = d[0].rx_from_hw.status[2];
-	  s21 = d[1].rx_from_hw.status[2];
+	  s00 = d0.status[0];
+	  s01 = d1.status[0];
 
-	  if (! ((s20 | s21) & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+	  s20 = d0.status[2];
+	  s21 = d1.status[2];
+
+	  if (! ((s20 & s21) & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
 	    goto found_hw_owned_descriptor_x2;
 
 	  bi0 = to_rx[0];
@@ -1469,11 +1476,15 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
       while (n_descriptors_left > 0 && n_left_to_next > 0)
 	{
 	  vlib_buffer_t * b0;
+	  ixge_rx_from_hw_descriptor_t d0;
 	  u32 bi0, fi0, len0, l3_offset0, s20, s00, flags0;
 	  u8 is_eop0, error0, next0;
 
-	  s00 = d[0].rx_from_hw.status[0];
-	  s20 = d[0].rx_from_hw.status[2];
+	  d0.as_u32x4 = d[0].rx_from_hw.as_u32x4;
+
+	  s00 = d0.status[0];
+	  s20 = d0.status[2];
+
 	  if (! (s20 & IXGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
 	    goto found_hw_owned_descriptor_x1;
 

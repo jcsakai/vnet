@@ -183,8 +183,6 @@ ip6_icmp_input (vlib_main_t * vm,
 	  len0 = clib_net_to_host_u16 (ip0->payload_length);
 	  error0 = len0 < im->min_valid_length_by_type[type0] ? ICMP6_ERROR_LENGTH_TOO_SMALL_FOR_TYPE : error0;
 
-	  error0 = len0 % 8 ? ICMP6_ERROR_OPTIONS_WITH_ODD_LENGTH : error0;
-
 	  b0->error = node->errors[error0];
 
 	  next0 = error0 != ICMP6_ERROR_NONE ? ICMP_INPUT_NEXT_DROP : next0;

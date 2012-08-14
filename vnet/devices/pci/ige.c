@@ -1064,7 +1064,10 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	  (vm, xm->rx_buffers_to_add + l, n_to_alloc,
 	   xm->vlib_buffer_free_list_index);
 	_vec_len (xm->rx_buffers_to_add) += n_allocated;
-	ASSERT (vec_len (xm->rx_buffers_to_add) >= n_descriptors_left);
+
+        /* Handle transient allocation failure */
+	if (l + n_allocated < n_descriptors_left)
+	  n_descriptors_left = n_descriptors = l + n_allocated;
       }
 
     /* Add buffers from end of vector going backwards. */
@@ -1093,7 +1096,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	      s00 = d[0].rx_legacy.status;
 	      s01 = d[1].rx_legacy.status;
 
-	      if (! ((s00 | s01) & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE))
+	      if (! ((s00 & s01) & IGE_LEGACY_RX_DESCRIPTOR_STATUS_IS_OWNED_BY_SOFTWARE))
 		goto found_hw_owned_descriptor_x2;
 	    }
 	  else
@@ -1104,7 +1107,7 @@ ige_rx_queue_no_wrap (ige_main_t * xm,
 	      s20 = d[0].rx_from_hw.status[2];
 	      s21 = d[1].rx_from_hw.status[2];
 
-	      if (! ((s20 | s21) & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
+	      if (! ((s20 & s21) & IGE_RX_DESCRIPTOR_STATUS2_IS_OWNED_BY_SOFTWARE))
 		goto found_hw_owned_descriptor_x2;
 	    }
 
