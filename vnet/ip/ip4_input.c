@@ -170,9 +170,9 @@ ip4_input_inline (vlib_main_t * vm,
 	  error0 = ip4_get_fragment_offset (ip0) == 1 ? IP4_ERROR_FRAGMENT_OFFSET_ONE : error0;
 	  error1 = ip4_get_fragment_offset (ip1) == 1 ? IP4_ERROR_FRAGMENT_OFFSET_ONE : error1;
 
-	  /* TTL <= 1? Drop it. */
-	  error0 = ip0->ttl <= 1 ? IP4_ERROR_TIME_EXPIRED : error0;
-	  error1 = ip1->ttl <= 1 ? IP4_ERROR_TIME_EXPIRED : error1;
+	  /* TTL == 0? Drop it. */
+	  error0 = ip0->ttl == 0 ? IP4_ERROR_TIME_EXPIRED : error0;
+	  error1 = ip1->ttl == 0 ? IP4_ERROR_TIME_EXPIRED : error1;
 
 	  /* Verify lengths. */
 	  ip_len0 = clib_net_to_host_u16 (ip0->length);
@@ -260,8 +260,8 @@ ip4_input_inline (vlib_main_t * vm,
 	  /* Drop fragmentation offset 1 packets. */
 	  error0 = ip4_get_fragment_offset (ip0) == 1 ? IP4_ERROR_FRAGMENT_OFFSET_ONE : error0;
 
-	  /* TTL <= 1? Drop it. */
-	  error0 = ip0->ttl <= 1 ? IP4_ERROR_TIME_EXPIRED : error0;
+	  /* TTL == 0? Drop it. */
+	  error0 = ip0->ttl == 0 ? IP4_ERROR_TIME_EXPIRED : error0;
 
 	  /* Verify lengths. */
 	  ip_len0 = clib_net_to_host_u16 (ip0->length);
