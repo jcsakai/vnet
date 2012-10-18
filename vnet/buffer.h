@@ -36,6 +36,7 @@
 #define IP_BUFFER_L4_CHECKSUM_CORRECT  (1 << LOG2_IP_BUFFER_L4_CHECKSUM_CORRECT)
 
 typedef struct {
+  /* RX/TX software interface for this packet. */
   u32 sw_if_index[VLIB_N_RX_TX];
 
   union {
