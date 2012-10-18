@@ -1436,41 +1436,68 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 		}
 	    }
 
-	  if (PREDICT_TRUE (next0 == next_index && next1 == next_index))
-	    {
-	      bi_sop = is_sop ? bi0 : bi_sop;
-	      to_next[0] = bi_sop;
-	      to_next += is_eop0;
-	      n_left_to_next -= is_eop0;
+	  /* Speculatively enqueue to cached next. */
+	  {
+	    u8 saved_is_sop = is_sop;
 
-	      bi_sop = is_eop0 ? bi1 : bi_sop;
-	      to_next[0] = bi_sop;
-	      to_next += is_eop1;
-	      n_left_to_next -= is_eop1;
+	    bi_sop = saved_is_sop ? bi0 : bi_sop;
+	    to_next[0] = bi_sop;
+	    to_next += is_eop0;
+	    n_left_to_next -= is_eop0;
 
-	      is_sop = is_eop1;
-	    }
-	  else
-	    {
-	      bi_sop = is_sop ? bi0 : bi_sop;
-	      if (next0 != next_index && is_eop0)
-		vlib_set_next_frame_buffer (vm, node, next0, bi_sop);
-	      bi_sop = is_eop0 ? bi1 : bi_sop;
-	      if (next1 != next_index && is_eop1)
-		vlib_set_next_frame_buffer (vm, node, next1, bi_sop);
-	      is_sop = is_eop1;
+	    bi_sop = is_eop0 ? bi1 : bi_sop;
+	    to_next[0] = bi_sop;
+	    to_next += is_eop1;
+	    n_left_to_next -= is_eop1;
 
-	      if (next0 == next1)
-		{
-		  vlib_put_next_frame (vm, node, next_index, n_left_to_next);
-		  next_index = next0;
-		  vlib_get_next_frame (vm, node, next_index,
-				       to_next, n_left_to_next);
-		}
-	    }
+	    is_sop = is_eop1;
+
+	    if (PREDICT_FALSE (! (next0 == next_index && next1 == next_index)))
+	      {
+		/* Undo speculation. */
+		to_next -= is_eop0 + is_eop1;
+		n_left_to_next += is_eop0 + is_eop1;
+
+		/* Re-do both descriptors being careful about where we enqueue. */
+		bi_sop = saved_is_sop ? bi0 : bi_sop;
+		if (is_eop0)
+		  {
+		    if (next0 != next_index)
+		      vlib_set_next_frame_buffer (vm, node, next0, bi_sop);
+		    else
+		      {
+			to_next[0] = bi_sop;
+			to_next += 1;
+			n_left_to_next -= 1;
+		      }
+		  }
+
+		bi_sop = is_eop0 ? bi1 : bi_sop;
+		if (is_eop1)
+		  {
+		    if (next1 != next_index)
+		      vlib_set_next_frame_buffer (vm, node, next1, bi_sop);
+		    else
+		      {
+			to_next[0] = bi_sop;
+			to_next += 1;
+			n_left_to_next -= 1;
+		      }
+		  }
+
+		/* Switch cached next index when next for both packets is the same. */
+		if (is_eop0 && is_eop1 && next0 == next1)
+		  {
+		    vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+		    next_index = next0;
+		    vlib_get_next_frame (vm, node, next_index,
+					 to_next, n_left_to_next);
+		  }
+	      }
+	  }
 	}
 
-      /* Bail out of dual loop and proceed with single loop. */
+    /* Bail out of dual loop and proceed with single loop. */
     found_hw_owned_descriptor_x2:
 
       while (n_descriptors_left > 0 && n_left_to_next > 0)
