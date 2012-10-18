@@ -149,9 +149,9 @@ ip6_input (vlib_main_t * vm,
 	  error0 = (clib_net_to_host_u32 (ip0->ip_version_traffic_class_and_flow_label) >> 28) != 6 ? IP6_ERROR_VERSION : error0;
 	  error1 = (clib_net_to_host_u32 (ip1->ip_version_traffic_class_and_flow_label) >> 28) != 6 ? IP6_ERROR_VERSION : error1;
 
-	  /* hop limit <= 1? Drop it. */
-	  error0 = ip0->hop_limit <= 1 ? IP6_ERROR_TIME_EXPIRED : error0;
-	  error1 = ip1->hop_limit <= 1 ? IP6_ERROR_TIME_EXPIRED : error1;
+	  /* hop limit == 0? Drop it. */
+	  error0 = ip0->hop_limit == 0 ? IP6_ERROR_TIME_EXPIRED : error0;
+	  error1 = ip1->hop_limit == 0 ? IP6_ERROR_TIME_EXPIRED : error1;
 
 	  /* L2 length must be at least minimal IP header. */
 	  error0 = p0->current_length < sizeof (ip0[0]) ? IP6_ERROR_TOO_SHORT : error0;
@@ -202,8 +202,8 @@ ip6_input (vlib_main_t * vm,
 	  /* Version != 6?  Drop it. */
 	  error0 = (clib_net_to_host_u32 (ip0->ip_version_traffic_class_and_flow_label) >> 28) != 6 ? IP6_ERROR_VERSION : error0;
 
-	  /* hop limit <= 1? Drop it. */
-	  error0 = ip0->hop_limit <= 1 ? IP6_ERROR_TIME_EXPIRED : error0;
+	  /* hop limit == 0? Drop it. */
+	  error0 = ip0->hop_limit == 0 ? IP6_ERROR_TIME_EXPIRED : error0;
 
 	  /* L2 length must be at least minimal IP header. */
 	  error0 = p0->current_length < sizeof (ip0[0]) ? IP6_ERROR_TOO_SHORT : error0;
