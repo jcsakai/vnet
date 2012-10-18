@@ -719,38 +719,6 @@ void ip6_delete_matching_routes (ip6_main_t * im,
   ip6_maybe_remap_adjacencies (im, table_index_or_table_id, flags);
 }
 
-/* Compute flow hash.  We'll use it to select which Sponge to use for this
-   flow.  And other things. */
-always_inline u32
-ip6_compute_flow_hash (ip6_header_t * ip, u32 flow_hash_seed)
-{
-    tcp_header_t * tcp = (void *) (ip + 1);
-    u32 a, b, c;
-    uword is_tcp_udp = (ip->protocol == IP_PROTOCOL_TCP
-			|| ip->protocol == IP_PROTOCOL_UDP);
-
-    a = is_tcp_udp ? tcp->ports.src_and_dst : 0;
-    a ^= ip->protocol ^ flow_hash_seed;
-    b = ip->src_address.as_u32[0];
-    c = ip->src_address.as_u32[1];
-
-    hash_v3_mix32 (a, b, c);
-
-    a ^= ip->src_address.as_u32[2];
-    b ^= ip->src_address.as_u32[3];
-    c ^= ip->dst_address.as_u32[0];
-
-    hash_v3_mix32 (a, b, c);
-
-    a ^= ip->dst_address.as_u32[1];
-    b ^= ip->dst_address.as_u32[2];
-    c ^= ip->dst_address.as_u32[3];
-
-    hash_v3_finalize32 (a, b, c);
-
-    return c;
-}
-
 static uword
 ip6_lookup (vlib_main_t * vm,
 	    vlib_node_runtime_t * node,
