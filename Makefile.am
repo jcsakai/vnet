@@ -10,6 +10,7 @@ nobase_include_HEADERS =
 # Generic stuff
 ########################################
 libvnet_la_SOURCES +=					\
+  vnet/buffer.c						\
   vnet/config.c						\
   vnet/interface.c					\
   vnet/interface_cli.c					\
@@ -128,6 +129,19 @@ nobase_include_HEADERS +=			\
  vnet/docsis/docsis.h
 
 ########################################
+# Layer 2 protocol: Gridnet
+########################################
+libvnet_la_SOURCES +=				\
+ vnet/gnet/format.c				\
+ vnet/gnet/interface.c				\
+ vnet/gnet/node.c				\
+ vnet/gnet/pg.c
+
+nobase_include_HEADERS +=			\
+ vnet/gnet/packet.h				\
+ vnet/gnet/gnet.h
+
+########################################
 # Layer 3 protocols go here
 ########################################
 
@@ -192,6 +206,17 @@ libvnet_la_SOURCES +=				\
 
 nobase_include_HEADERS +=			\
  vnet/osi/osi.h
+
+########################################
+# Layer 3 protocol: MPLS
+########################################
+libvnet_la_SOURCES +=				\
+  vnet/mpls/mpls.c				\
+  vnet/mpls/node.c
+
+nobase_include_HEADERS +=			\
+  vnet/mpls/mpls.h				\
+  vnet/mpls/packet.h
 
 ########################################
 # Packet generator
