@@ -41,18 +41,11 @@ static u8 * format_gnet_input_trace (u8 * s, va_list * va)
   return s;
 }
 
-typedef enum {
-  GNET_INPUT_NEXT_ETHERNET_INPUT,
-  GNET_INPUT_NEXT_CONTROL,
-  GNET_INPUT_NEXT_ERROR,
-  GNET_INPUT_N_NEXT,
-} gnet_input_next_t;
-
 always_inline uword
 gnet_input_inline (vlib_main_t * vm,
 		   vlib_node_runtime_t * node,
 		   vlib_frame_t * from_frame,
-		   gnet_interface_role_t my_role)
+		   gnet_interface_role_t role)
 {
   vnet_main_t * vnm = &vnet_main;
   gnet_main_t * gm = &gnet_main;
@@ -161,7 +154,7 @@ gnet_input_inline (vlib_main_t * vm,
 	{
 	  u32 bi0, sw_if_index0;
 	  vlib_buffer_t * b0;
-	  u32 next0, fh0, x0_next0, x1_next0;
+	  u32 next0, fh0, ew_next0, ns_next0;
 	  u8 g0_x0, g0_x1, g0_router_x0, g0_router_x1;
 	  u8 r0, dst_this_rack0, both_valid0, is_local_control0;
 	  gnet_header_t * g0;
@@ -191,25 +184,46 @@ gnet_input_inline (vlib_main_t * vm,
 	  g0_x0 = gnet_address_get (&g0->dst_address, 0);
 	  g0_x1 = gnet_address_get (&g0->dst_address, 1);
 
-	  r0 = fh0 % ARRAY_LEN (gi0->router_x0);
-	  g0_router_x0 = gi0->router_x0[r0];
-	  g0_router_x1 = gi0->router_x1[r0];
-
 	  dst_this_rack0 = gnet_address_get_23 (&g0->dst_address) == gi0->address_23;
 
-	  g0_x0 = dst_this_rack0 ? g0_x0 : g0_router_x0;
-	  g0_x1 = dst_this_rack0 ? g0_x1 : g0_router_x1;
+	  if (role == GNET_INTERFACE_ROLE_x2x3_interconnect)
+	    {
+	      u32 ew0_next0, ew2_next0;
+	      u32 ns1_next0, ns3_next0;
+	      u8 g0_x2, g0_x3;
 
-	  x0_next0 = gi0->next_index_by_dst_x0[g0_x0];
-	  x1_next0 = gi0->next_index_by_dst_x1[g0_x1];
+	      g0_x2 = gnet_address_get (&g0->dst_address, 2);
+	      g0_x3 = gnet_address_get (&g0->dst_address, 3);
 
-	  both_valid0 = (x0_next0 >= GNET_INPUT_N_NEXT) && (x1_next0 >= GNET_INPUT_N_NEXT);
+	      ew0_next0 = gi0->input_next_by_dst[0][g0_x0];
+	      ns1_next0 = gi0->input_next_by_dst[1][g0_x1];
 
-	  next0 = x0_next0 >= GNET_INPUT_N_NEXT ? x0_next0 : x1_next0;
+	      ew2_next0 = gi0->input_next_by_dst[2][g0_x2];
+	      ns3_next0 = gi0->input_next_by_dst[3][g0_x3];
+
+	      ew_next0 = dst_this_rack0 ? ew0_next0 : ew2_next0;
+	      ns_next0 = dst_this_rack0 ? ns1_next0 : ns3_next0;
+	    }
+	  else
+	    {
+	      r0 = fh0 % ARRAY_LEN (gi0->router_x0);
+	      g0_router_x0 = gi0->router_x0[r0];
+	      g0_router_x1 = gi0->router_x1[r0];
+
+
+	      g0_x0 = dst_this_rack0 ? g0_x0 : g0_router_x0;
+	      g0_x1 = dst_this_rack0 ? g0_x1 : g0_router_x1;
+	      ew_next0 = gi0->input_next_by_dst[0][g0_x0];
+	      ns_next0 = gi0->input_next_by_dst[1][g0_x1];
+	    }
+
+	  both_valid0 = (ew_next0 >= GNET_INPUT_N_NEXT) && (ns_next0 >= GNET_INPUT_N_NEXT);
+
+	  next0 = ew_next0 >= GNET_INPUT_N_NEXT ? ew_next0 : ns_next0;
 
 	  /* If both directions are valid use flow hash to choose direction. */
 	  next0 = (both_valid0 && (fh0 & (1 << g0->flow_hash_bit))
-		   ? x1_next0
+		   ? ns_next0
 		   : next0);
 
 	  is_local_control0 = g0->is_control && gnet_address_is_equal (&g0->dst_address, &gi0->address);
@@ -235,7 +249,13 @@ static uword
 gnet_input (vlib_main_t * vm,
 	    vlib_node_runtime_t * node,
 	    vlib_frame_t * from_frame)
-{ return gnet_input_inline (vm, node, from_frame, GNET_INTERFACE_ROLE_node); }
+{ return gnet_input_inline (vm, node, from_frame, GNET_INTERFACE_ROLE_x0x1_interconnect); }
+
+static uword
+gnet_x2x3_interconnect_input (vlib_main_t * vm,
+			      vlib_node_runtime_t * node,
+			      vlib_frame_t * from_frame)
+{ return gnet_input_inline (vm, node, from_frame, GNET_INTERFACE_ROLE_x2x3_interconnect); }
 
 static char * gnet_error_strings[] = {
 #define _(f,s) s,
@@ -243,7 +263,7 @@ static char * gnet_error_strings[] = {
 #undef _
 };
 
-static VLIB_REGISTER_NODE (gnet_input_node) = {
+VLIB_REGISTER_NODE (gnet_input_node) = {
   .function = gnet_input,
   .name = "gnet-input",
   /* Takes a vector of packets. */
@@ -251,6 +271,26 @@ static VLIB_REGISTER_NODE (gnet_input_node) = {
 
   .n_errors = GNET_N_ERROR,
   .error_strings = gnet_error_strings,
+
+  .n_next_nodes = GNET_INPUT_N_NEXT,
+  .next_nodes = {
+    [GNET_INPUT_NEXT_ERROR] = "error-drop",
+    [GNET_INPUT_NEXT_ETHERNET_INPUT] = "ethernet-input",
+    [GNET_INPUT_NEXT_CONTROL] = "gnet-control-input",
+  },
+
+  .format_buffer = format_gnet_header_with_length,
+  .format_trace = format_gnet_input_trace,
+  .unformat_buffer = unformat_gnet_header,
+};
+
+static VLIB_REGISTER_NODE (gnet_x2x3_interconnect_input_node) = {
+  .function = gnet_x2x3_interconnect_input,
+  .name = "gnet-x2x3-interconnect-input",
+  .sibling_of = "gnet-input",
+
+  /* Takes a vector of packets. */
+  .vector_size = sizeof (u32),
 
   .n_next_nodes = GNET_INPUT_N_NEXT,
   .next_nodes = {

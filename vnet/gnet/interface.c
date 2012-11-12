@@ -27,7 +27,10 @@
 #include <vnet/pg/pg.h>
 #include <vnet/gnet/gnet.h>
 
-static void gnet_register_interface_helper (gnet_address_t * my_address, u32 * hw_if_indices_by_direction, u32 redistribute);
+static void gnet_register_interface_helper (gnet_interface_role_t role,
+					    gnet_address_t * if_address,
+					    u32 * hw_if_indices_by_direction,
+					    u32 redistribute);
 
 void serialize_gnet_address (serialize_main_t * m, va_list * va)
 {
@@ -55,46 +58,72 @@ void serialize_gnet_main (serialize_main_t * m, va_list * va)
 
   serialize_integer (m, pool_elts (gm->interface_pool), sizeof (u32));
   pool_foreach (gi, gm->interface_pool, ({
+    serialize_likely_small_unsigned_integer (m, gi->role);
     serialize (m, serialize_gnet_address, &gi->address);
     for (d = 0; d < ARRAY_LEN (gi->directions); d++)
-      serialize_integer (m, gi->directions[d].hw_if_index, sizeof (u32));
+      {
+	serialize_integer (m, gi->directions[d].hw_if_index, sizeof (u32));
+	if (gi->role == GNET_INTERFACE_ROLE_x2x3_interconnect)
+	  serialize_integer (m, gi->directions_23[d].hw_if_index, sizeof (u32));
+      }
   }));
 }
 
 void unserialize_gnet_main (serialize_main_t * m, va_list * va)
 {
-  u32 i, d, n_ifs, hw_if_indices[GNET_N_DIRECTION];
-  gnet_address_t my_address;
+  u32 i, d, n_ifs, hw_if_indices[2*GNET_N_DIRECTION];
+  gnet_address_t if_address;
+  gnet_interface_role_t role;
 
   unserialize_integer (m, &n_ifs, sizeof (u32));
   for (i = 0; i < n_ifs; i++)
     {
-      unserialize (m, unserialize_gnet_address, &my_address);
+      role = unserialize_likely_small_unsigned_integer (m);
+      unserialize (m, unserialize_gnet_address, &if_address);
       for (d = 0; d < GNET_N_DIRECTION; d++)
-	unserialize_integer (m, &hw_if_indices[d], sizeof (u32));
-      gnet_register_interface_helper (&my_address, hw_if_indices, /* redistribute */ 0);
+	{
+	  unserialize_integer (m, &hw_if_indices[d], sizeof (u32));
+	  if (role == GNET_INTERFACE_ROLE_x2x3_interconnect)
+	    unserialize_integer (m, &hw_if_indices[GNET_N_DIRECTION + d], sizeof (u32));
+	}
+      gnet_register_interface_helper (role, &if_address, hw_if_indices, /* redistribute */ 0);
     }
 }
 
 static void serialize_gnet_register_interface_msg (serialize_main_t * m, va_list * va)
 {
+  gnet_interface_role_t role = va_arg (*va, gnet_interface_role_t);
+  gnet_address_t * if_address = va_arg (*va, gnet_address_t *);
   u32 * hw_if_indices = va_arg (*va, u32 *);
   u32 d;
+
+  serialize_likely_small_unsigned_integer (m, role);
+  serialize (m, serialize_gnet_address, if_address);
   for (d = 0; d < GNET_N_DIRECTION; d++)
-    serialize_integer (m, hw_if_indices[d], sizeof (hw_if_indices[d]));
+    {
+      serialize_integer (m, hw_if_indices[d], sizeof (hw_if_indices[d]));
+      if (role == GNET_INTERFACE_ROLE_x2x3_interconnect)
+	serialize_integer (m, hw_if_indices[GNET_N_DIRECTION + d], sizeof (hw_if_indices[d]));
+    }
 }
 
 static void unserialize_gnet_register_interface_msg (serialize_main_t * m, va_list * va)
 {
   CLIB_UNUSED (mc_main_t * mcm) = va_arg (*va, mc_main_t *);
-  u32 d, hw_if_indices[GNET_N_DIRECTION];
+  u32 d, hw_if_indices[2*GNET_N_DIRECTION];
   gnet_main_t * gm = &gnet_main;
-  gnet_address_t my_address;
+  gnet_address_t if_address;
+  gnet_interface_role_t role;
   uword * p;
 
-  unserialize (m, unserialize_gnet_address, &my_address);
+  role = unserialize_likely_small_unsigned_integer (m);
+  unserialize (m, unserialize_gnet_address, &if_address);
   for (d = 0; d < GNET_N_DIRECTION; d++)
-    unserialize_integer (m, &hw_if_indices[d], sizeof (hw_if_indices[d]));
+    {
+      unserialize_integer (m, &hw_if_indices[d], sizeof (hw_if_indices[d]));
+      if (role == GNET_INTERFACE_ROLE_x2x3_interconnect)
+	unserialize_integer (m, &hw_if_indices[GNET_N_DIRECTION + d], sizeof (hw_if_indices[d]));
+    }
 
   p = hash_get (gm->gnet_register_interface_waiting_process_pool_index_by_hw_if_index,
 		hw_if_indices[0]);
@@ -107,7 +136,7 @@ static void unserialize_gnet_register_interface_msg (serialize_main_t * m, va_li
 		  hw_if_indices[0]);
     }
   else
-    gnet_register_interface_helper (&my_address, hw_if_indices, /* redistribute */ 0);
+    gnet_register_interface_helper (role, &if_address, hw_if_indices, /* redistribute */ 0);
 }
 
 static MC_SERIALIZE_MSG (gnet_register_interface_msg) = {
@@ -117,7 +146,8 @@ static MC_SERIALIZE_MSG (gnet_register_interface_msg) = {
 };
 
 static void
-gnet_register_interface_helper (gnet_address_t * my_address,
+gnet_register_interface_helper (gnet_interface_role_t role,
+				gnet_address_t * if_address,
 				u32 * hw_if_indices_by_direction,
 				u32 redistribute)
 {
@@ -126,12 +156,12 @@ gnet_register_interface_helper (gnet_address_t * my_address,
   vlib_main_t * vm = gm->vlib_main;
   gnet_interface_t * gi;
   vnet_hw_interface_t * hws[GNET_N_DIRECTION];
-  uword d, * p;
+  uword x, d, * p;
 
   if (vm->mc_main && redistribute)
     {
       vlib_one_time_waiting_process_t * wp;
-      mc_serialize (vm->mc_main, &gnet_register_interface_msg, hw_if_indices_by_direction);
+      mc_serialize (vm->mc_main, &gnet_register_interface_msg, role, if_address, hw_if_indices_by_direction);
       pool_get (gm->gnet_register_interface_waiting_process_pool, wp);
       hash_set (gm->gnet_register_interface_waiting_process_pool_index_by_hw_if_index,
 		hw_if_indices_by_direction[0],
@@ -151,7 +181,11 @@ gnet_register_interface_helper (gnet_address_t * my_address,
       memset (gi, 0, sizeof (gi[0]));
     }
 
-  gi->address = my_address[0];
+  gi->address = if_address[0];
+  gi->address_23 = gnet_address_get_23 (if_address);
+  gi->address_0 = gnet_address_get (if_address, 0);
+  gi->address_1 = gnet_address_get (if_address, 1);
+  gi->role = role;
 
   for (d = 0; d < GNET_N_DIRECTION; d++)
     {
@@ -160,13 +194,73 @@ gnet_register_interface_helper (gnet_address_t * my_address,
       id->direction = d;
       id->hw_if_index = hw_if_indices_by_direction[d];
       id->sw_if_index = hws[d]->sw_if_index;
+      id->input_next_index = vlib_node_add_next (vm, gnet_input_node.index, hws[d]->output_node_index);
       hash_set (gm->interface_index_by_hw_if_index, hw_if_indices_by_direction[d], gi - gm->interface_pool);
+
+      if (role == GNET_INTERFACE_ROLE_x2x3_interconnect)
+	{
+	  /* FIXME */
+	}
+    }
+
+  for (x = 0; x < GNET_ADDRESS_N_PER_DIMENSION; x++)
+    {
+      gi->input_next_by_dst[0][x] = x < gm->grid_size[0] ? GNET_INPUT_NEXT_ETHERNET_INPUT : GNET_INPUT_NEXT_ERROR;
+      gi->input_next_by_dst[1][x] = x < gm->grid_size[1] ? GNET_INPUT_NEXT_ETHERNET_INPUT : GNET_INPUT_NEXT_ERROR;
+
+      if (0 && x < gm->grid_size[0])
+	{
+	  int n_hops = (int) x - (int) gi->address_0;
+	  int pos_d, neg_d;
+	  if (n_hops > 0)
+	    {
+	      pos_d = GNET_DIRECTION_e;
+	      neg_d = GNET_DIRECTION_w;
+	    }
+	  if (n_hops < 0)
+	    {
+	      n_hops = -n_hops;
+	      pos_d = GNET_DIRECTION_w;
+	      neg_d = GNET_DIRECTION_e;
+	    }
+
+	  if (n_hops != 0)
+	    gi->input_next_by_dst[0][x] =
+	      (n_hops >= gm->grid_size[0]/2
+	       ? gi->directions[pos_d].input_next_index
+	       : gi->directions[neg_d].input_next_index);
+	}
+
+      if (0 && x < gm->grid_size[1])
+	{
+	  int n_hops = (int) x - (int) gi->address_1;
+	  int pos_d, neg_d;
+	  if (n_hops > 0)
+	    {
+	      pos_d = GNET_DIRECTION_n;
+	      neg_d = GNET_DIRECTION_s;
+	    }
+	  if (n_hops < 0)
+	    {
+	      n_hops = -n_hops;
+	      pos_d = GNET_DIRECTION_s;
+	      neg_d = GNET_DIRECTION_n;
+	    }
+
+	  if (n_hops != 0)
+	    gi->input_next_by_dst[1][x] =
+	      (n_hops >= gm->grid_size[1]/2
+	       ? gi->directions[pos_d].input_next_index
+	       : gi->directions[neg_d].input_next_index);
+	}
     }
 }
 
-void gnet_register_interface (gnet_address_t * my_address, u32 * hw_if_indices_by_direction)
+void gnet_register_interface (gnet_interface_role_t role,
+			      gnet_address_t * if_address,
+			      u32 * hw_if_indices_by_direction)
 {
-  gnet_register_interface_helper (my_address, hw_if_indices_by_direction, /* redistribute */ 1);
+  gnet_register_interface_helper (role, if_address, hw_if_indices_by_direction, /* redistribute */ 1);
 }
 
 static uword

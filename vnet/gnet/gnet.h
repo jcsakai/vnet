@@ -43,11 +43,12 @@ typedef enum {
   GNET_N_DIRECTION,
 } gnet_direction_t;
 
-/* Node in x0/x1 plane.  Interconnect between x0/x1 and x2/x3 planes.
+/* Interconnect for x0/x1 plane (4 neighbors).
+   Interconnect between x0/x1 and x2/x3 planes (4 x0/x1 neighbors plus 4 x2/x3 neighbors).
    Gateway to/from external network. */
 #define foreach_gnet_interface_role		\
-  _ (node)					\
-  _ (interconnect)				\
+  _ (x0x1_interconnect)				\
+  _ (x2x3_interconnect)				\
   _ (gateway)
 
 typedef enum {
@@ -65,7 +66,7 @@ typedef struct {
   u16 pad;
 
   /* Next node index for gnet-input to output to this interface direction. */
-  u32 gnet_input_next_index;
+  u32 input_next_index;
 
   /* Hardware interface for this ring/side. */
   u32 hw_if_index;
@@ -80,18 +81,20 @@ typedef struct gnet_interface_t {
   /* Address for this interface. */
   gnet_address_t address;
 
-  /* Address coordinates 0 thru 4 for quick access when forwarding packets. */
-  i8 address_01_as_i8[2];
+  /* 6 bit x0/x1 coordinates of our address. */
+  u8 address_0, address_1;
 
   /* 12 bit coordinates 2 & 3 concatenated. */
   u16 address_23;
 
-  /* Distance vector (x0,x1) from our address to one of up to 64 routers
-     which connect to x2 +- 1 and x3 +- 1 planes. */
+  /* Coordinates (x0,x1) of up to 64 routers
+     which connect to x2 +- 1 and x3 +- 1 planes.  Flow hash of
+     packets is used to select router. */
   u8 router_x0[64], router_x1[64];
 
-  u32 next_index_by_dst_x0[GNET_ADDRESS_N_PER_DIMENSION];
-  u32 next_index_by_dst_x1[GNET_ADDRESS_N_PER_DIMENSION];
+  /* gnet-input node next index for packets destined for given x0 or x1 coordinates.
+     This gives the next hop along the shortest path to destination. */
+  u32 input_next_by_dst[4][GNET_ADDRESS_N_PER_DIMENSION];
 
   gnet_interface_role_t role;
 
@@ -170,9 +173,18 @@ gnet_pack_address (gnet_address_t * a, u8 * u)
 }
 
 /* Registers 4 hardware interfaces as being GNET capable. */
-void gnet_register_interface (gnet_address_t * if_address, u32 * hw_if_indices);
+void gnet_register_interface (gnet_interface_role_t role, gnet_address_t * if_address, u32 * hw_if_indices);
 
 gnet_main_t gnet_main;
+
+typedef enum {
+  GNET_INPUT_NEXT_ETHERNET_INPUT,
+  GNET_INPUT_NEXT_CONTROL,
+  GNET_INPUT_NEXT_ERROR,
+  GNET_INPUT_N_NEXT,
+} gnet_input_next_t;
+
+vlib_node_registration_t gnet_input_node;
 
 always_inline gnet_interface_t *
 gnet_get_interface_from_vnet_hw_interface (u32 hw_if_index)
