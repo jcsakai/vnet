@@ -54,15 +54,15 @@ u8 * format_gnet_header_with_length (u8 * s, va_list * args)
 
   s = format (s, "\n%U%U -> %U",
 	      format_white_space, indent,
-	      format_ethernet_type, clib_net_to_host_u16 (h->as_ethernet.type),
-	      format_gnet_address, &h->as_gnet.dst_address);
+	      format_ethernet_type, clib_net_to_host_u16 (h->type),
+	      format_gnet_address, &h->dst_address);
 
   if (max_header_bytes != 0 && header_bytes < max_header_bytes)
     {
       ethernet_type_info_t * ti;
       vlib_node_t * node;
 
-      ti = ethernet_get_type_info (em, h->as_ethernet.type);
+      ti = ethernet_get_type_info (em, h->type);
       node = ti ? vlib_get_node (em->vlib_main, ti->node_index) : 0;
       if (node && node->format_buffer)
 	s = format (s, "\n%U%U",
@@ -111,20 +111,39 @@ unformat_gnet_header (unformat_input_t * input, va_list * args)
   memset (h, 0, sizeof (h[0]));
 
   if (! unformat (input, "%U: -> %U",
-		  unformat_ethernet_type_net_byte_order, &h->as_ethernet.type,
-		  unformat_gnet_address, &h->as_gnet.dst_address))
+		  unformat_ethernet_type_net_byte_order, &h->type,
+		  unformat_gnet_address, &h->dst_address))
     return 0;
 
   /* Should always be set to coexist with ethernet packets. */
-  h->as_gnet.flags = GNET_PACKET_HEADER_FLAG_is_local_admin;
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "control"))
-	h->as_gnet.flags |= GNET_PACKET_HEADER_FLAG_is_control;
+	h->is_control = 1;
       
       else
 	return 0;
     }
 
   return 1;
+}
+
+static u8 * format_gnet_interface (u8 * s, va_list * args)
+{
+  gnet_interface_t * gi = va_arg (*args, gnet_interface_t *);
+
+  s = format (s, "address %U",
+	      format_gnet_address, gi->address);
+
+  return s;
+}
+
+u8 * format_gnet_device (u8 * s, va_list * args)
+{
+  u32 hw_if_index = va_arg (*args, u32);
+  vnet_main_t * vnm = &vnet_main;
+  gnet_main_t * gm = &gnet_main;
+  vnet_hw_interface_t * hi = vnet_get_hw_interface (vnm, hw_if_index);
+  gnet_interface_t * gi = pool_elt_at_index (gm->interface_pool, hi->hw_instance);
+  return format (s, "%U", format_gnet_interface, gi);
 }

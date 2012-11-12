@@ -30,55 +30,84 @@
 
 /* Gnet addresses are of the form (x0,x1,x2,x3) 4D torus.
    Each X has 6 bits.  So we support racks up to 64 x 64 nodes.
-   And 64 x 64 racks.  16M nodes total. */
-typedef struct { u8 as_u8[3]; } gnet_address_t;
+   And 64 x 64 racks.  16M nodes total.
+   as_u8[0] = [5:0] x0 [7:6] x3 bits [5:4]
+   as_u8[1] = [5:0] x1 [7:6] x3 bits [3:2]
+   as_u8[2] = [5:0] x2 [7:6] x3 bits [1:0]. */
+typedef union {
+  struct { u8 as_u8[3]; };
+
+  /* To save a cycle comparing. */
+  struct { u8 cmp_u8; u16 cmp_u16; };
+} gnet_address_t;
+
+#define GNET_ADDRESS_N_DIMENSION 4
+#define GNET_ADDRESS_N_BITS_PER_DIMENSION 6
+#define GNET_ADDRESS_N_PER_DIMENSION (1 << GNET_ADDRESS_N_BITS_PER_DIMENSION)
+
+always_inline uword
+gnet_address_is_equal (gnet_address_t * a, gnet_address_t * b)
+{ return a->cmp_u8 == b->cmp_u8 && a->cmp_u16 == b->cmp_u16; }
+
+always_inline u32
+gnet_address_get (gnet_address_t * a, u32 i)
+{
+  ASSERT (i < GNET_ADDRESS_N_DIMENSION);
+  if (i < 3)
+    return a->as_u8[i] & 0x3f;
+  return ((a->as_u8[0] & 0xc0) >> 2) | ((a->as_u8[1] & 0xc0) >> 4) | (a->as_u8[1] >> 6);
+}
+
+/* 2 & 3 coordinates as 12bit number. */
+always_inline u32
+gnet_address_get_23 (gnet_address_t * a)
+{
+  return a->as_u8[2] | ((a->as_u8[1] & 0xc0) << 2) | ((a->as_u8[0] & 0xc0) << 4);
+}
+
+always_inline void
+gnet_address_set (gnet_address_t * a, u32 x0, u32 x1, u32 x2, u32 x3)
+{
+  ASSERT (x0 < GNET_ADDRESS_N_PER_DIMENSION);
+  ASSERT (x1 < GNET_ADDRESS_N_PER_DIMENSION);
+  ASSERT (x2 < GNET_ADDRESS_N_PER_DIMENSION);
+  ASSERT (x3 < GNET_ADDRESS_N_PER_DIMENSION);
+  a->as_u8[0] = (x0 & 0x3f) | ((x3 & (3 << 4)) << 2);
+  a->as_u8[1] = (x1 & 0x3f) | ((x3 & (3 << 2)) << 4);
+  a->as_u8[2] = (x2 & 0x3f) | ((x3 & (3 << 0)) << 6);
+}
 
 /* Gnet packets look very very much like ethernet since they are send
    over networks with ethernet controllers. */
-typedef CLIB_PACKED (union {
-  struct {
-    /* Coincides with first 2 bytes of dst ethernet.
-       [3] is_broadcast; set for broadcast (as opposed to unicast or multicast) packets; zero otherwise.
-       [2] is_control; set for control packets; zero for data packets.
-       [1] is locally administered (set to 1)
-       [0] i/g bit: individual (unicast) versus group (broadcast/multicast). */
-    u8 flags;
-#define foreach_gnet_packet_header_flag		\
-    _ (is_group)				\
-    _ (is_local_admin)				\
-    _ (is_control)				\
-    _ (is_broadcast)
+typedef CLIB_PACKED (struct {
+#if CLIB_ARCH_IS_BIG_ENDIAN
+  u8 flow_hash_bit : 5;
+  u8 is_broadcast : 1;
+  u8 is_control : 1;
+  u8 is_group : 1;
+#endif
+#if CLIB_ARCH_IS_LITTLE_ENDIAN
+  u8 is_group : 1;
+  u8 is_control : 1;
+  u8 is_broadcast : 1;
+  u8 flow_hash_bit : 5;
+#endif
 
-    /* (x0,x1,x2,x3) coordinates of destination. 6 bits each. */
-    gnet_address_t dst_address;
+  /* (x0,x1,x2,x3) coordinates of destination. 6 bits each. */
+  gnet_address_t dst_address;
 
-    /* [11:0] destination linux network namespace.
-       [31:12] multicast group (only valid if is_broadcast == 0 and i/g == group).
-       [31:12] rewrite index for packets destined to gateways
-         (gnet header will be re-written with real ethernet header by gateway). */
-    u32 dst_namespace_and_multicast_group_or_rewrite_index;
+  /* [11:0] destination linux network namespace.
+     [31:12] multicast group (only valid if is_broadcast == 0 and i/g == group).
+     [31:12] rewrite index for packets destined to gateways
+     (gnet header will be re-written with real ethernet header by gateway). */
+  u32 dst_namespace_and_multicast_group_or_rewrite_index;
 
-    /* Flow hash for this packet.  Used to load balance across multiple equal cost grid paths.
-       As N bits of flow hash are used for forwarding packets it is rotated N bits
-         flow_hash = (flow_hash >> N) | (flow_hash << (24 - N)).
-       Top 8 bits are fixed (not rotated). */
-    u32 flow_hash;
+  /* Flow hash for this packet.  Used to load balance across multiple equal cost grid paths. */
+  u32 flow_hash;
 
-    /* Packet type (same as type in Ethernet header). */
-    u16 type;
-  } as_gnet;
-
-  ethernet_header_t as_ethernet;
+  /* Packet type (same as type in Ethernet header). */
+  u16 type;
 }) gnet_header_t;
-
-typedef enum {
-#define _(f) GNET_PACKET_HEADER_FLAG_BIT_##f,
-  foreach_gnet_packet_header_flag
-#undef _
-#define _(f) GNET_PACKET_HEADER_FLAG_##f = 1 << GNET_PACKET_HEADER_FLAG_BIT_##f,
-  foreach_gnet_packet_header_flag
-#undef _
-} gnet_header_flag_t;
 
 #define foreach_gnet_control_packet_type	\
   _ (invalid)					\
@@ -90,13 +119,14 @@ typedef enum {
 #define _(f) GNET_CONTROL_PACKET_TYPE_##f,
   foreach_gnet_control_packet_type
 #undef _
+  GNET_N_CONTROL_PACKET_TYPE,
 } gnet_control_packet_type_t;
 
-typedef struct {
-  gnet_control_packet_type_t opcode : 8;
+typedef CLIB_PACKED (struct {
+  gnet_control_packet_type_t type : 8;
 
   /* Source of this control packet. */
-  gnet_address_t src_address[3];
+  gnet_address_t src_address;
 
   /* Register address to read/write or that just changed. */
   u32 reg_address;
@@ -104,7 +134,7 @@ typedef struct {
   /* Data returned for read operation; data to be written for write operation.
      Mask of changed bits and new value for update operation. */
   u32 data[2];
-} gnet_control_header_t;
+}) gnet_control_header_t;
 
 /* Registers for gnet hardware (router, gateway, switch). */
 typedef volatile struct {

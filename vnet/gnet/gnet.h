@@ -33,9 +33,8 @@
 
 extern vnet_hw_interface_class_t gnet_hw_interface_class;
 
-/* Each node has 4 neighbors.  Up/down is +/- x[13]; right/left is +/- x[02]. */
-#define foreach_gnet_direction \
-  _ (up) _ (right) _ (down) _ (left) 
+/* Each node has 4 neighbors.  n/s is +/- x[13]; e/w is +/- x[02]. */
+#define foreach_gnet_direction _ (n) _ (e) _ (s) _ (w) 
 
 typedef enum {
 #define _(f) GNET_DIRECTION_##f,
@@ -44,8 +43,29 @@ typedef enum {
   GNET_N_DIRECTION,
 } gnet_direction_t;
 
+/* Node in x0/x1 plane.  Interconnect between x0/x1 and x2/x3 planes.
+   Gateway to/from external network. */
+#define foreach_gnet_interface_role		\
+  _ (node)					\
+  _ (interconnect)				\
+  _ (gateway)
+
+typedef enum {
+#define _(f) GNET_INTERFACE_ROLE_##f,
+  foreach_gnet_interface_role
+#undef _
+  GNET_N_INTERFACE_ROLE,
+} gnet_interface_role_t;
+
 typedef struct {
-  gnet_direction_t direction;
+  u8 link_is_up;
+
+  gnet_direction_t direction : 8;
+
+  u16 pad;
+
+  /* Next node index for gnet-input to output to this interface direction. */
+  u32 gnet_input_next_index;
 
   /* Hardware interface for this ring/side. */
   u32 hw_if_index;
@@ -58,9 +78,27 @@ struct gnet_interface_t;
 
 typedef struct gnet_interface_t {
   /* Address for this interface. */
-  gnet_address_t my_address;
+  gnet_address_t address;
+
+  /* Address coordinates 0 thru 4 for quick access when forwarding packets. */
+  i8 address_01_as_i8[2];
+
+  /* 12 bit coordinates 2 & 3 concatenated. */
+  u16 address_23;
+
+  /* Distance vector (x0,x1) from our address to one of up to 64 routers
+     which connect to x2 +- 1 and x3 +- 1 planes. */
+  u8 router_x0[64], router_x1[64];
+
+  u32 next_index_by_dst_x0[GNET_ADDRESS_N_PER_DIMENSION];
+  u32 next_index_by_dst_x1[GNET_ADDRESS_N_PER_DIMENSION];
+
+  gnet_interface_role_t role;
 
   gnet_interface_direction_t directions[GNET_N_DIRECTION];
+
+  /* For interconnect (router) role. */
+  gnet_interface_direction_t directions_23[GNET_N_DIRECTION];
 } gnet_interface_t;
 
 typedef struct {
@@ -119,28 +157,16 @@ gnet_index_to_address (gnet_main_t * m, gnet_address_t * a, u32 index)
 always_inline void
 gnet_unpack_address (gnet_address_t * a, u8 * u)
 {
-  u32 x = (a->as_u8[0] << 16) | (a->as_u8[1] << 8) | a->as_u8[2];
-  u[0] = (x >> (0*6)) & 0x3f;
-  u[1] = (x >> (1*6)) & 0x3f;
-  u[2] = (x >> (2*6)) & 0x3f;
-  u[3] = (x >> (3*6)) & 0x3f;
+  u[0] = gnet_address_get (a, 0);
+  u[1] = gnet_address_get (a, 1);
+  u[2] = gnet_address_get (a, 2);
+  u[3] = gnet_address_get (a, 3);
 }
 
 always_inline void
 gnet_pack_address (gnet_address_t * a, u8 * u)
 {
-  u32 x = 0;
-  ASSERT (u[0] < (1 << 6));
-  ASSERT (u[1] < (1 << 6));
-  ASSERT (u[2] < (1 << 6));
-  ASSERT (u[3] < (1 << 6));
-  x |= (u[0] << (0*6));
-  x |= (u[1] << (1*6));
-  x |= (u[2] << (2*6));
-  x |= (u[3] << (3*6));
-  a->as_u8[0] = x >> (8 * 2);
-  a->as_u8[1] = x >> (8 * 1);
-  a->as_u8[2] = x >> (8 * 0);
+  gnet_address_set (a, u[0], u[1], u[2], u[3]);
 }
 
 /* Registers 4 hardware interfaces as being GNET capable. */
@@ -178,6 +204,7 @@ gnet_setup_node (vlib_main_t * vm, u32 node_index)
 
 #define foreach_gnet_error					\
   _ (NONE, "no error")						\
+  _ (INVALID_ADDRESS, "address out of range")			\
   _ (CONTROL_PACKETS_PROCESSED, "control packets processed")	\
   _ (UNKNOWN_CONTROL, "unknown control packet")
 

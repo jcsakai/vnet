@@ -55,7 +55,7 @@ void serialize_gnet_main (serialize_main_t * m, va_list * va)
 
   serialize_integer (m, pool_elts (gm->interface_pool), sizeof (u32));
   pool_foreach (gi, gm->interface_pool, ({
-    serialize (m, serialize_gnet_address, &gi->my_address);
+    serialize (m, serialize_gnet_address, &gi->address);
     for (d = 0; d < ARRAY_LEN (gi->directions); d++)
       serialize_integer (m, gi->directions[d].hw_if_index, sizeof (u32));
   }));
@@ -151,7 +151,7 @@ gnet_register_interface_helper (gnet_address_t * my_address,
       memset (gi, 0, sizeof (gi[0]));
     }
 
-  gi->my_address = my_address[0];
+  gi->address = my_address[0];
 
   for (d = 0; d < GNET_N_DIRECTION; d++)
     {
