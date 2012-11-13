@@ -226,11 +226,11 @@ gnet_input_inline (vlib_main_t * vm,
 		   ? ns_next0
 		   : next0);
 
+	  g0->flow_hash_bit += both_valid0;
+
 	  is_local_control0 = g0->is_control && gnet_address_is_equal (&g0->dst_address, &gi0->address);
 
 	  next0 = is_local_control0 ? GNET_INPUT_NEXT_CONTROL : next0;
-
-	  g0->flow_hash_bit += both_valid0;
 
 	  b0->error = node->errors[GNET_ERROR_INVALID_ADDRESS];
 
