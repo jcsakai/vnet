@@ -77,6 +77,12 @@ typedef struct {
 
 struct gnet_interface_t;
 
+typedef struct {
+  gnet_interface_role_t role : 8;
+
+  gnet_address_t address;
+} gnet_node_t;
+
 typedef struct gnet_interface_t {
   /* Address for this interface. */
   gnet_address_t address;
@@ -119,30 +125,29 @@ typedef struct {
   /* Grid is 4D torus with size n[0] x n[1] x n[2] x n[3]. */
   u8 grid_size[4];
 
-  /* n0*n1, n1*n2*n3 */
-  u16 grid_size_01;
-  u32 grid_size_012;
+  /* 1, n0, n0*n1, n0*n1*n2, n0*n1*n2*n3 */
+  u32 grid_size_multipliers[5];
 
-  /* Table of all possible addresses by index. */
-  gnet_address_t * address_by_index;
+  /* Vector of all nodes on grid. */
+  gnet_node_t * nodes_by_aindex;
 } gnet_main_t;
 
 always_inline u32
-gnet_address_to_index (gnet_main_t * m, gnet_address_t * a)
+gnet_address_to_aindex (gnet_main_t * m, gnet_address_t * a)
 {
   u32 x = (a->as_u8[0] << 16) | (a->as_u8[1] << 8) | a->as_u8[2];
   u32 x0 = (x >> (0*6)) & 0x3f;
   u32 x1 = (x >> (1*6)) & 0x3f;
   u32 x2 = (x >> (2*6)) & 0x3f;
   u32 x3 = (x >> (3*6)) & 0x3f;
-  return x0 + x1*m->grid_size[0] + x2*m->grid_size_01 + x3*m->grid_size_012;
+  return x0 + x1*m->grid_size_multipliers[1] + x2*m->grid_size_multipliers[2] + x3*m->grid_size_multipliers[3];
 }
 
 /* Yes this is slow but we tabulate the result. */
 always_inline void
-gnet_index_to_address (gnet_main_t * m, gnet_address_t * a, u32 index)
+gnet_aindex_to_address (gnet_main_t * m, gnet_address_t * a, u32 ai)
 {
-  u32 y = index;
+  u32 y = ai;
   u32 x = 0;
 
   x |= (y % m->grid_size[0]) << (6*0); y /= m->grid_size[0];
@@ -176,6 +181,55 @@ gnet_pack_address (gnet_address_t * a, u8 * u)
 void gnet_register_interface (gnet_interface_role_t role, gnet_address_t * if_address, u32 * hw_if_indices);
 
 gnet_main_t gnet_main;
+
+always_inline u32
+gnet_neighbor_aindex_in_plane (u32 ai, gnet_direction_t direction, int is_x0x1)
+{
+  gnet_main_t * gm = &gnet_main;
+  gnet_node_t * gn = vec_elt_at_index (gm->nodes_by_aindex, ai);
+  int d = is_x0x1 ? 0 : 2;
+
+  switch (direction)
+    {
+    case GNET_DIRECTION_e:
+      ai += gm->grid_size_multipliers[d + 0];
+      if (gnet_address_get (&gn->address, d + 0) == gm->grid_size[d + 0] - 1)
+	ai -= gm->grid_size_multipliers[d + 1];
+      break;
+
+    case GNET_DIRECTION_w:
+      ai -= gm->grid_size_multipliers[d + 0];
+      if (gnet_address_get (&gn->address, d + 0) == 0)
+	ai += gm->grid_size_multipliers[d + 1];
+      break;
+
+    case GNET_DIRECTION_n:
+      ai += gm->grid_size_multipliers[d + 1];
+      if (gnet_address_get (&gn->address, d + 1) == gm->grid_size[d + 1] - 1)
+	ai -= gm->grid_size_multipliers[d + 2];
+      break;
+
+    case GNET_DIRECTION_s:
+      ai -= gm->grid_size_multipliers[d + 1];
+      if (gnet_address_get (&gn->address, d + 1) == 0)
+	ai += gm->grid_size_multipliers[d + 2];
+      break;
+
+    default:
+      ASSERT (0);
+      break;
+    }
+
+  return ai;
+}
+
+always_inline u32
+gnet_neighbor_aindex_in_x0x1_plane (u32 ai, gnet_direction_t direction)
+{ return gnet_neighbor_aindex_in_plane (ai, direction, /* is_x0x1 */ 1); }
+
+always_inline u32
+gnet_neighbor_aindex_in_x2x3_plane (u32 ai, gnet_direction_t direction)
+{ return gnet_neighbor_aindex_in_plane (ai, direction, /* is_x0x1 */ 0); }
 
 typedef enum {
   GNET_INPUT_NEXT_ETHERNET_INPUT,
