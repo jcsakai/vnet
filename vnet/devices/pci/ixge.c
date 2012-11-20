@@ -1439,6 +1439,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 	  /* Speculatively enqueue to cached next. */
 	  {
 	    u8 saved_is_sop = is_sop;
+	    u32 bi_sop_save = bi_sop;
 
 	    bi_sop = saved_is_sop ? bi0 : bi_sop;
 	    to_next[0] = bi_sop;
@@ -1459,7 +1460,7 @@ ixge_rx_queue_no_wrap (ixge_main_t * xm,
 		n_left_to_next += is_eop0 + is_eop1;
 
 		/* Re-do both descriptors being careful about where we enqueue. */
-		bi_sop = saved_is_sop ? bi0 : bi_sop;
+		bi_sop = saved_is_sop ? bi0 : bi_sop_save;
 		if (is_eop0)
 		  {
 		    if (next0 != next_index)
