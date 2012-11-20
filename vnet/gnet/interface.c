@@ -155,7 +155,6 @@ gnet_register_interface_helper (gnet_interface_role_t role,
   gnet_main_t * gm = &gnet_main;
   vlib_main_t * vm = gm->vlib_main;
   gnet_interface_t * gi;
-  vnet_hw_interface_t * hws[GNET_N_DIRECTION];
   uword x, d, * p;
 
   if (vm->mc_main && redistribute)
@@ -189,12 +188,13 @@ gnet_register_interface_helper (gnet_interface_role_t role,
 
   for (d = 0; d < GNET_N_DIRECTION; d++)
     {
+      vnet_hw_interface_t * hw = vnet_get_hw_interface (vnm, hw_if_indices_by_direction[d]);
       gnet_interface_direction_t * id = gi->directions + d;
-      hws[d] = vnet_get_hw_interface (vnm, hw_if_indices_by_direction[d]);
       id->direction = d;
       id->hw_if_index = hw_if_indices_by_direction[d];
-      id->sw_if_index = hws[d]->sw_if_index;
-      id->input_next_index = vlib_node_add_next (vm, gnet_input_node.index, hws[d]->output_node_index);
+      id->sw_if_index = hw->sw_if_index;
+      id->input_next_index = vlib_node_add_next (vm, gnet_input_node.index, hw->output_node_index);
+
       hash_set (gm->interface_index_by_hw_if_index, hw_if_indices_by_direction[d], gi - gm->interface_pool);
 
       if (role == GNET_INTERFACE_ROLE_x2x3_interconnect)
