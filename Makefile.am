@@ -184,6 +184,7 @@ nobase_include_HEADERS +=			\
  vnet/ip/ip.h					\
  vnet/ip/ip4.h					\
  vnet/ip/ip4_error.h				\
+ vnet/ip/ip4_mtrie.h				\
  vnet/ip/ip4_packet.h				\
  vnet/ip/ip6.h					\
  vnet/ip/ip6_error.h				\

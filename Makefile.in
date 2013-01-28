@@ -397,12 +397,12 @@ nobase_include_HEADERS = vnet/buffer.h vnet/config.h vnet/interface.h \
 	vnet/gnet/packet.h vnet/gnet/gnet.h vnet/ip/format.h \
 	vnet/ip/icmp46_packet.h vnet/ip/icmp6.h vnet/ip/igmp_packet.h \
 	vnet/ip/ip.h vnet/ip/ip4.h vnet/ip/ip4_error.h \
-	vnet/ip/ip4_packet.h vnet/ip/ip6.h vnet/ip/ip6_error.h \
-	vnet/ip/ip6_packet.h vnet/ip/lookup.h vnet/ip/ip_packet.h \
-	vnet/ip/ports.def vnet/ip/protocols.def vnet/ip/tcp.h \
-	vnet/ip/tcp_packet.h vnet/ip/udp_packet.h vnet/osi/osi.h \
-	vnet/mpls/mpls.h vnet/mpls/packet.h vnet/pg/pg.h \
-	vnet/pg/edit.h vnet/devices/i2c/i2c.h \
+	vnet/ip/ip4_mtrie.h vnet/ip/ip4_packet.h vnet/ip/ip6.h \
+	vnet/ip/ip6_error.h vnet/ip/ip6_packet.h vnet/ip/lookup.h \
+	vnet/ip/ip_packet.h vnet/ip/ports.def vnet/ip/protocols.def \
+	vnet/ip/tcp.h vnet/ip/tcp_packet.h vnet/ip/udp_packet.h \
+	vnet/osi/osi.h vnet/mpls/mpls.h vnet/mpls/packet.h \
+	vnet/pg/pg.h vnet/pg/edit.h vnet/devices/i2c/i2c.h \
 	vnet/devices/optics/sfp.h vnet/devices/xge/xge.h \
 	vnet/unix/netlink.h vnet/unix/pcap.h vnet/unix/tuntap.h
 lib_LTLIBRARIES = libvnet.la
