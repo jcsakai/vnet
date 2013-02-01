@@ -28,6 +28,13 @@
 #include <vnet/gnet/gnet.h>
 #include <vnet/ethernet/ethernet.h>
 
+uword
+unformat_pg_gnet_header (unformat_input_t * input, va_list * args)
+{
+  ASSERT (0);
+  return 0;
+}
+
 #if 0
 typedef struct {
   pg_edit_t ttl;
