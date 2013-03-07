@@ -41,7 +41,7 @@ ip4_fib_lookup_with_table (ip4_main_t * im, u32 fib_index,
   uword * p, * hash, key;
   i32 i, i_min, dst_address, ai;
 
-  i_min = disable_default_route ? 0 : 1;
+  i_min = disable_default_route ? 1 : 0;
   dst_address = clib_mem_unaligned (&dst->data_u32, u32);
   for (i = ARRAY_LEN (fib->adj_index_by_dst_address) - 1; i >= i_min; i--)
     {
@@ -854,6 +854,10 @@ ip4_lookup_inline (vlib_main_t * vm,
 	    }
 	  else
 	    {
+	      /* Handle default route. */
+	      leaf0 = (leaf0 == IP4_FIB_MTRIE_LEAF_EMPTY ? mtrie0->default_leaf : leaf0);
+	      leaf1 = (leaf1 == IP4_FIB_MTRIE_LEAF_EMPTY ? mtrie1->default_leaf : leaf1);
+
 	      adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
 	      adj_index1 = ip4_fib_mtrie_leaf_get_adj_index (leaf1);
 	    }
@@ -988,7 +992,11 @@ ip4_lookup_inline (vlib_main_t * vm,
 	  if (lookup_for_responses_to_locally_received_packets)
 	    adj_index0 = vnet_buffer (p0)->ip.adj_index[VLIB_RX];
 	  else
-	    adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+	    {
+	      /* Handle default route. */
+	      leaf0 = (leaf0 == IP4_FIB_MTRIE_LEAF_EMPTY ? mtrie0->default_leaf : leaf0);
+	      adj_index0 = ip4_fib_mtrie_leaf_get_adj_index (leaf0);
+	    }
 
 	  ASSERT (adj_index0 == ip4_fib_lookup_with_table (im, fib_index0,
 							   &ip0->dst_address,
